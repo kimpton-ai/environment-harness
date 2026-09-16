@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+node_modules/
+.local/
+*.sqlite*
+.environment-harness/
+
+.env
+.env.*
+researcher-token

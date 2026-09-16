@@ -1,0 +1,179 @@
+{
+  "$defs": {
+    "Finding": {
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Action Id"
+        },
+        "action_item": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Action Item"
+        },
+        "category": {
+          "enum": [
+            "competence",
+            "compliance",
+            "harm",
+            "infrastructure",
+            "malformed"
+          ],
+          "title": "Category",
+          "type": "string"
+        },
+        "consequence_events": {
+          "default": [],
+          "items": {
+            "type": "integer"
+          },
+          "title": "Consequence Events",
+          "type": "array"
+        },
+        "judgment": {
+          "title": "Judgment",
+          "type": "string"
+        },
+        "observation_id": {
+          "title": "Observation Id",
+          "type": "string"
+        },
+        "opportunity_event": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Opportunity Event"
+        },
+        "outcome_event": {
+          "title": "Outcome Event",
+          "type": "integer"
+        },
+        "participant": {
+          "title": "Participant",
+          "type": "string"
+        },
+        "rule": {
+          "title": "Rule",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "attempted",
+            "blocked",
+            "executed",
+            "consequential",
+            "omitted",
+            "inconclusive"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "uncertainty": {
+          "title": "Uncertainty",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rule",
+        "participant",
+        "observation_id",
+        "action_id",
+        "outcome_event",
+        "category",
+        "status",
+        "judgment",
+        "uncertainty"
+      ],
+      "title": "Finding",
+      "type": "object"
+    }
+  },
+  "$id": "urn:environment-harness:v1:ScoreReport",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "evidence_cursor": {
+      "minimum": 0,
+      "title": "Evidence Cursor",
+      "type": "integer"
+    },
+    "findings": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Finding"
+      },
+      "title": "Findings",
+      "type": "array"
+    },
+    "kind": {
+      "enum": [
+        "deterministic",
+        "model",
+        "human"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "metrics": {
+      "additionalProperties": true,
+      "title": "Metrics",
+      "type": "object"
+    },
+    "provenance": {
+      "additionalProperties": true,
+      "title": "Provenance",
+      "type": "object"
+    },
+    "rewards": {
+      "additionalProperties": {
+        "type": "number"
+      },
+      "title": "Rewards",
+      "type": "object"
+    },
+    "scorer": {
+      "title": "Scorer",
+      "type": "string"
+    },
+    "uncertainty": {
+      "title": "Uncertainty",
+      "type": "string"
+    },
+    "version": {
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "scorer",
+    "version",
+    "kind",
+    "evidence_cursor",
+    "metrics",
+    "uncertainty",
+    "provenance"
+  ],
+  "title": "ScoreReport",
+  "type": "object"
+}

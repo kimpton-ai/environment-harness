@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "environment-harness"
+version = "0.1.0"
+description = "Durable sessions and evidence for independently implemented AI environments"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = ["pydantic==2.12.5", "jsonschema==4.26.0"]
+
+[project.urls]
+Repository = "https://github.com/pollice-verso/environment-harness"
+Documentation = "https://github.com/pollice-verso/environment-harness#readme"
+Issues = "https://github.com/pollice-verso/environment-harness/issues"
+
+[project.optional-dependencies]
+server = ["fastapi==0.135.1", "uvicorn==0.41.0"]
+postgres = ["psycopg[binary]==3.3.3"]
+modal = ["modal==1.5.4"]
+pettingzoo = ["pettingzoo==1.25.0", "pygame==2.6.1"]
+signatures = ["cryptography==46.0.5"]
+mcp = ["mcp==1.27.1"]
+verifiers = ["verifiers==0.1.14"]
+
+[project.scripts]
+environment-harness = "environment_harness.cli:main"
+
+[dependency-groups]
+dev = ["pytest==9.0.2", "httpx==0.28.1", "ruff==0.15.6", "build==1.4.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/environment_harness"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "contracts", "tests", "docs", "scripts", "examples", "Makefile", "packages/typescript", "README.md", "CONTRIBUTING.md", "SECURITY.md", "CHANGELOG.md", "LICENSE", "pyproject.toml", "uv.lock"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

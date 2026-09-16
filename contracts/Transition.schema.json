@@ -1,0 +1,121 @@
+{
+  "$defs": {
+    "EventInput": {
+      "additionalProperties": false,
+      "properties": {
+        "audience": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Audience",
+          "type": "array"
+        },
+        "event_time": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Event Time"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "payload": {
+          "additionalProperties": true,
+          "title": "Payload",
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind",
+        "payload"
+      ],
+      "title": "EventInput",
+      "type": "object"
+    }
+  },
+  "$id": "urn:environment-harness:v1:Transition",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "events": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/EventInput"
+      },
+      "title": "Events",
+      "type": "array"
+    },
+    "next_actor": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Next Actor"
+    },
+    "outcomes": {
+      "additionalProperties": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Outcomes",
+      "type": "object"
+    },
+    "pending_outcomes": {
+      "default": false,
+      "title": "Pending Outcomes",
+      "type": "boolean"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reason"
+    },
+    "rewards": {
+      "additionalProperties": {
+        "type": "number"
+      },
+      "title": "Rewards",
+      "type": "object"
+    },
+    "state": {
+      "additionalProperties": true,
+      "title": "State",
+      "type": "object"
+    },
+    "terminated": {
+      "default": false,
+      "title": "Terminated",
+      "type": "boolean"
+    },
+    "truncated": {
+      "default": false,
+      "title": "Truncated",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "state"
+  ],
+  "title": "Transition",
+  "type": "object"
+}

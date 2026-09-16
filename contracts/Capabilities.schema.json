@@ -1,0 +1,59 @@
+{
+  "$id": "urn:environment-harness:v1:Capabilities",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "agent_checkpoint": {
+      "default": false,
+      "title": "Agent Checkpoint",
+      "type": "boolean"
+    },
+    "branch": {
+      "default": false,
+      "title": "Branch",
+      "type": "boolean"
+    },
+    "checkpoint": {
+      "default": false,
+      "title": "Checkpoint",
+      "type": "boolean"
+    },
+    "external_writes": {
+      "default": false,
+      "title": "External Writes",
+      "type": "boolean"
+    },
+    "live_reads": {
+      "default": false,
+      "title": "Live Reads",
+      "type": "boolean"
+    },
+    "logprobs": {
+      "default": false,
+      "title": "Logprobs",
+      "type": "boolean"
+    },
+    "rendered_requests": {
+      "default": false,
+      "title": "Rendered Requests",
+      "type": "boolean"
+    },
+    "replay": {
+      "default": true,
+      "title": "Replay",
+      "type": "boolean"
+    },
+    "resume": {
+      "default": false,
+      "title": "Resume",
+      "type": "boolean"
+    },
+    "token_ids": {
+      "default": false,
+      "title": "Token Ids",
+      "type": "boolean"
+    }
+  },
+  "title": "Capabilities",
+  "type": "object"
+}

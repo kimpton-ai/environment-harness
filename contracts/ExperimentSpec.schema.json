@@ -1,0 +1,341 @@
+{
+  "$defs": {
+    "AgentSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "checkpoint": {
+          "default": false,
+          "title": "Checkpoint",
+          "type": "boolean"
+        },
+        "config": {
+          "additionalProperties": true,
+          "title": "Config",
+          "type": "object"
+        },
+        "id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "implementation": {
+          "minLength": 1,
+          "title": "Implementation",
+          "type": "string"
+        },
+        "policy_version": {
+          "minLength": 1,
+          "title": "Policy Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "implementation",
+        "policy_version"
+      ],
+      "title": "AgentSpec",
+      "type": "object"
+    },
+    "Capabilities": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_checkpoint": {
+          "default": false,
+          "title": "Agent Checkpoint",
+          "type": "boolean"
+        },
+        "branch": {
+          "default": false,
+          "title": "Branch",
+          "type": "boolean"
+        },
+        "checkpoint": {
+          "default": false,
+          "title": "Checkpoint",
+          "type": "boolean"
+        },
+        "external_writes": {
+          "default": false,
+          "title": "External Writes",
+          "type": "boolean"
+        },
+        "live_reads": {
+          "default": false,
+          "title": "Live Reads",
+          "type": "boolean"
+        },
+        "logprobs": {
+          "default": false,
+          "title": "Logprobs",
+          "type": "boolean"
+        },
+        "rendered_requests": {
+          "default": false,
+          "title": "Rendered Requests",
+          "type": "boolean"
+        },
+        "replay": {
+          "default": true,
+          "title": "Replay",
+          "type": "boolean"
+        },
+        "resume": {
+          "default": false,
+          "title": "Resume",
+          "type": "boolean"
+        },
+        "token_ids": {
+          "default": false,
+          "title": "Token Ids",
+          "type": "boolean"
+        }
+      },
+      "title": "Capabilities",
+      "type": "object"
+    },
+    "EnvironmentSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "action_schema": {
+          "additionalProperties": true,
+          "title": "Action Schema",
+          "type": "object"
+        },
+        "capabilities": {
+          "$ref": "#/$defs/Capabilities"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "implementation": {
+          "minLength": 1,
+          "title": "Implementation",
+          "type": "string"
+        },
+        "missing_action": {
+          "default": "reject",
+          "enum": [
+            "reject",
+            "noop"
+          ],
+          "title": "Missing Action",
+          "type": "string"
+        },
+        "modalities": {
+          "default": [
+            "text",
+            "json"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "title": "Modalities",
+          "type": "array"
+        },
+        "observation_schema": {
+          "additionalProperties": true,
+          "title": "Observation Schema",
+          "type": "object"
+        },
+        "phase_deadline": {
+          "default": "wall",
+          "enum": [
+            "wall",
+            "coordinator"
+          ],
+          "title": "Phase Deadline",
+          "type": "string"
+        },
+        "phase_seconds": {
+          "default": 60,
+          "exclusiveMinimum": 0,
+          "maximum": 86400,
+          "title": "Phase Seconds",
+          "type": "number"
+        },
+        "protocol": {
+          "const": "environment-session.v1",
+          "default": "environment-session.v1",
+          "title": "Protocol",
+          "type": "string"
+        },
+        "purposes": {
+          "default": [
+            "evaluation"
+          ],
+          "items": {
+            "enum": [
+              "evaluation",
+              "training"
+            ],
+            "type": "string"
+          },
+          "title": "Purposes",
+          "type": "array"
+        },
+        "scheduling": {
+          "enum": [
+            "sequential",
+            "simultaneous",
+            "event"
+          ],
+          "title": "Scheduling",
+          "type": "string"
+        },
+        "stale_action": {
+          "const": "reject",
+          "default": "reject",
+          "title": "Stale Action",
+          "type": "string"
+        },
+        "version": {
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "implementation",
+        "scheduling"
+      ],
+      "title": "EnvironmentSpec",
+      "type": "object"
+    },
+    "RunPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_endpoints": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Endpoints",
+          "type": "array"
+        },
+        "allowed_operations": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Operations",
+          "type": "array"
+        },
+        "external_writes": {
+          "default": false,
+          "title": "External Writes",
+          "type": "boolean"
+        },
+        "max_artifact_bytes": {
+          "default": 16777216,
+          "minimum": 1,
+          "title": "Max Artifact Bytes",
+          "type": "integer"
+        },
+        "max_cost_micros": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Max Cost Micros",
+          "type": "integer"
+        },
+        "max_event_bytes": {
+          "default": 1048576,
+          "maximum": 16777216,
+          "minimum": 1024,
+          "title": "Max Event Bytes",
+          "type": "integer"
+        },
+        "max_state_bytes": {
+          "default": 4194304,
+          "minimum": 1024,
+          "title": "Max State Bytes",
+          "type": "integer"
+        },
+        "max_turns": {
+          "default": 10000,
+          "minimum": 1,
+          "title": "Max Turns",
+          "type": "integer"
+        }
+      },
+      "title": "RunPolicy",
+      "type": "object"
+    }
+  },
+  "$id": "urn:environment-harness:v1:ExperimentSpec",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "environment": {
+      "$ref": "#/$defs/EnvironmentSpec"
+    },
+    "interventions": {
+      "additionalProperties": true,
+      "title": "Interventions",
+      "type": "object"
+    },
+    "participants": {
+      "items": {
+        "$ref": "#/$defs/AgentSpec"
+      },
+      "minItems": 1,
+      "title": "Participants",
+      "type": "array"
+    },
+    "policy": {
+      "$ref": "#/$defs/RunPolicy"
+    },
+    "purpose": {
+      "default": "evaluation",
+      "enum": [
+        "evaluation",
+        "training"
+      ],
+      "title": "Purpose",
+      "type": "string"
+    },
+    "scenario": {
+      "default": "synthetic",
+      "title": "Scenario",
+      "type": "string"
+    },
+    "scoring_versions": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Scoring Versions",
+      "type": "array"
+    },
+    "seed": {
+      "default": 0,
+      "title": "Seed",
+      "type": "integer"
+    },
+    "split": {
+      "default": "heldout",
+      "enum": [
+        "training",
+        "heldout"
+      ],
+      "title": "Split",
+      "type": "string"
+    },
+    "time_boundary": {
+      "default": "unspecified",
+      "title": "Time Boundary",
+      "type": "string"
+    }
+  },
+  "required": [
+    "environment",
+    "participants"
+  ],
+  "title": "ExperimentSpec",
+  "type": "object"
+}

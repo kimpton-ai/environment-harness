@@ -1,0 +1,39 @@
+{
+  "$id": "urn:environment-harness:v1:AgentSpec",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "checkpoint": {
+      "default": false,
+      "title": "Checkpoint",
+      "type": "boolean"
+    },
+    "config": {
+      "additionalProperties": true,
+      "title": "Config",
+      "type": "object"
+    },
+    "id": {
+      "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "implementation": {
+      "minLength": 1,
+      "title": "Implementation",
+      "type": "string"
+    },
+    "policy_version": {
+      "minLength": 1,
+      "title": "Policy Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "implementation",
+    "policy_version"
+  ],
+  "title": "AgentSpec",
+  "type": "object"
+}

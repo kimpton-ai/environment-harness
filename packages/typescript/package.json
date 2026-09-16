@@ -1,0 +1,32 @@
+{
+  "name": "@environment-harness/client",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js"
+    }
+  },
+  "files": [
+    "dist/client.js",
+    "dist/client.d.ts",
+    "dist/types.js",
+    "dist/types.d.ts",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pollice-verso/environment-harness.git",
+    "directory": "packages/typescript"
+  }
+}

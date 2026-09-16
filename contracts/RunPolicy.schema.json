@@ -1,0 +1,61 @@
+{
+  "$id": "urn:environment-harness:v1:RunPolicy",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "allowed_endpoints": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Allowed Endpoints",
+      "type": "array"
+    },
+    "allowed_operations": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Allowed Operations",
+      "type": "array"
+    },
+    "external_writes": {
+      "default": false,
+      "title": "External Writes",
+      "type": "boolean"
+    },
+    "max_artifact_bytes": {
+      "default": 16777216,
+      "minimum": 1,
+      "title": "Max Artifact Bytes",
+      "type": "integer"
+    },
+    "max_cost_micros": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Max Cost Micros",
+      "type": "integer"
+    },
+    "max_event_bytes": {
+      "default": 1048576,
+      "maximum": 16777216,
+      "minimum": 1024,
+      "title": "Max Event Bytes",
+      "type": "integer"
+    },
+    "max_state_bytes": {
+      "default": 4194304,
+      "minimum": 1024,
+      "title": "Max State Bytes",
+      "type": "integer"
+    },
+    "max_turns": {
+      "default": 10000,
+      "minimum": 1,
+      "title": "Max Turns",
+      "type": "integer"
+    }
+  },
+  "title": "RunPolicy",
+  "type": "object"
+}

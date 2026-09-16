@@ -1,0 +1,39 @@
+{
+  "$id": "urn:environment-harness:v1:Action",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "observation_id": {
+      "title": "Observation Id",
+      "type": "string"
+    },
+    "operation_id": {
+      "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+      "title": "Operation Id",
+      "type": "string"
+    },
+    "participant": {
+      "title": "Participant",
+      "type": "string"
+    },
+    "payload": {
+      "additionalProperties": true,
+      "title": "Payload",
+      "type": "object"
+    },
+    "revision": {
+      "minimum": 0,
+      "title": "Revision",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "operation_id",
+    "participant",
+    "observation_id",
+    "revision",
+    "payload"
+  ],
+  "title": "Action",
+  "type": "object"
+}
