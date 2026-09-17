@@ -73,6 +73,14 @@ reportMissingImports = false
 branch = true
 source = ["environment_harness"]
 
+[tool.coverage.paths]
+source = [
+  "src/environment_harness",
+  "/home/runner/work/environment-harness/environment-harness/src/environment_harness",
+  "/Users/runner/work/environment-harness/environment-harness/src/environment_harness",
+  "D:\\a\\environment-harness\\environment-harness\\src\\environment_harness",
+]
+
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
