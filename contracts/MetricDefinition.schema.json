@@ -1,0 +1,32 @@
+{
+  "$id": "urn:environment-harness:v1:MetricDefinition",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Id",
+      "type": "string"
+    },
+    "unit": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Unit",
+      "type": "string"
+    },
+    "version": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "version",
+    "unit"
+  ],
+  "title": "MetricDefinition",
+  "type": "object"
+}

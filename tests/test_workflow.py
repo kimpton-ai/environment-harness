@@ -23,7 +23,7 @@ def setup(tmp_path):
     spec = ExperimentSpec(
         environment=env.spec,
         participants=tuple(
-            AgentSpec(id=p, implementation="synthetic@1", policy_version="1", checkpoint=True)
+            AgentSpec(id=p, implementation="synthetic-agent@1", policy_version="1", checkpoint=True)
             for p in ("alice", "bob")
         ),
         scoring_versions=("control@1",),
@@ -228,7 +228,7 @@ def test_separate_environment_process(tmp_path):
         who = Principal(tenant="process", subject="researcher", role="researcher")
         spec = ExperimentSpec(
             environment=env.spec,
-            participants=(AgentSpec(id="alice", implementation="synthetic@1", policy_version="1"),),
+            participants=(AgentSpec(id="alice", implementation="synthetic-agent@1", policy_version="1"),),
         )
         environment = session.create(spec, who)["id"]
         result = run(session, environment, who, {"alice": SyntheticAgent()}, turns=1)
@@ -251,7 +251,7 @@ def test_delayed_outcomes_require_a_report(tmp_path):
     who = Principal(tenant="delayed", subject="researcher", role="researcher")
     spec = ExperimentSpec(
         environment=env.spec,
-        participants=(AgentSpec(id="alice", implementation="synthetic@1", policy_version="1"),),
+        participants=(AgentSpec(id="alice", implementation="synthetic-agent@1", policy_version="1"),),
         scoring_versions=("event-measurements@1",),
     )
     environment = session.create(spec, who)["id"]

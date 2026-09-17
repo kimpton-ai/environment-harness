@@ -22,7 +22,7 @@ def lineage(tmp_path):
     spec = ExperimentSpec(
         environment=env.spec,
         participants=tuple(
-            AgentSpec(id=p, implementation="synthetic@1", policy_version="1", checkpoint=True)
+            AgentSpec(id=p, implementation="synthetic-agent@1", policy_version="1", checkpoint=True)
             for p in ("alice", "bob")
         ),
         scoring_versions=("control@1",),
@@ -75,10 +75,10 @@ def test_branch_collapses_inherited_history(lineage):
     store, session, who, parent, child, checkpoint = lineage
     turns = timeline(store, who, child)
     inherited = turns[0]["inherited"]
-    assert inherited["count"] == 25 and inherited["parent"] == parent and inherited["checkpoint"] == checkpoint
+    assert inherited["count"] == 31 and inherited["parent"] == parent and inherited["checkpoint"] == checkpoint
     assert not any(event["kind"] == "history.inherited" for turn in turns for event in turn["other"])
     text = presentation.render_timeline(turns)
-    assert f"Inherited 25 events from parent {parent[:12]} at checkpoint {checkpoint[:12]}." in text
+    assert f"Inherited 31 events from parent {parent[:12]} at checkpoint {checkpoint[:12]}." in text
     assert text.count("Inherited") == 1
     assert "interventions total 20" in text
 
@@ -113,7 +113,7 @@ def test_cli_inspection_commands(lineage, tmp_path, monkeypatch, capsys):
     assert shown.startswith("alice, bob (Branch)\n") and f"Evidence holds {recorded} events across 2 turns." in shown
     assert "No score report recorded." in shown and "reports" in json.loads(main("show", child, "--json"))
     turns = json.loads(main("timeline", child, "--json"))
-    assert turns[0]["revision"] == 3 and turns[0]["inherited"]["count"] == 25
+    assert turns[0]["revision"] == 3 and turns[0]["inherited"]["count"] == 31
     assert "synthetic-secret-alice" not in main("timeline", parent, "--participant", "bob")
     assert "Checkpoint" in main("timeline", parent, "--kind", "checkpoint")
     human = main("compare", parent, child)

@@ -6,7 +6,9 @@ import selectors
 import signal
 import subprocess
 import tempfile
+import threading
 import time
+from contextlib import suppress
 from pathlib import Path
 
 from ..client import EnvironmentClient
@@ -17,11 +19,16 @@ from ..store import encode
 class CommandAgent:
     """Trusted local command. Use DockerBackend for hostile agent programs."""
 
+    managed_cancellation = True
+
     def __init__(self, command, implementation, *, timeout=30, max_bytes=1048576):
         self.command, self.implementation = list(command), implementation
         self.timeout, self.max_bytes = timeout, max_bytes
 
     def act(self, observation):
+        return self.act_cancellable(observation, threading.Event())
+
+    def act_cancellable(self, observation, cancel_event):
         payload = encode(observation).encode()
         if len(payload) > self.max_bytes:
             raise Conflict("agent input exceeds limit")
@@ -30,6 +37,8 @@ class CommandAgent:
             source = Path(directory) / "input.json"
             source.write_bytes(payload)
             with source.open("rb") as stdin:
+                if cancel_event.is_set():
+                    raise Conflict("agent execution cancelled")
                 process = subprocess.Popen(
                     self.command,
                     stdin=stdin,
@@ -45,6 +54,8 @@ class CommandAgent:
                 deadline = time.monotonic() + self.timeout
                 try:
                     while True:
+                        if cancel_event.is_set():
+                            raise Conflict("agent execution cancelled")
                         remaining = deadline - time.monotonic()
                         if remaining <= 0:
                             raise Conflict("agent deadline exceeded")
@@ -56,7 +67,12 @@ class CommandAgent:
                             output.extend(chunk)
                             if len(output) > self.max_bytes:
                                 raise Conflict("agent output exceeds limit")
-                    code = process.wait(timeout=max(0.1, deadline - time.monotonic()))
+                    while process.poll() is None:
+                        if cancel_event.wait(0.05):
+                            raise Conflict("agent execution cancelled")
+                        if time.monotonic() >= deadline:
+                            raise Conflict("agent deadline exceeded")
+                    code = process.returncode
                     if code:
                         raise Conflict("agent program failed")
                     result = json.loads(output)
@@ -65,10 +81,28 @@ class CommandAgent:
                     return result
                 finally:
                     selector.close()
-                    if process.poll() is None:
-                        os.killpg(process.pid, signal.SIGKILL)
-                        process.wait()
+                    self._terminate_group(process)
                     process.stdout.close()
+
+    @staticmethod
+    def _terminate_group(process):
+        # The group may outlive its leader. Always clean descendants, including after success.
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            process.wait()
+            return
+        deadline = time.monotonic() + 1
+        while time.monotonic() < deadline:
+            process.poll()
+            try:
+                os.killpg(process.pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.02)
+        with suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
 
     def checkpoint(self):
         raise Unsupported("arbitrary command programs have no checkpoint hook")

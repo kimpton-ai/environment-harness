@@ -20,6 +20,8 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
+from .history import INHERITED, reconstruct_inherited
+
 SLOTS = ("observation", "attempted", "executed")
 SLOT_KINDS = {"observation.delivered": "observation", "action.attempted": "attempted", "action.executed": "executed"}
 OUTCOME_KINDS = {"transition.committed", "action.executed"}
@@ -131,9 +133,11 @@ def _turn(turns, revision, participants):
 def build_timeline(events, participants=()):
     turns = {}
     committed = set()
+    inherited_events = {}
     for event in sorted(events, key=lambda row: row["seq"]):
         kind, revision, payload = event["kind"], event["revision"], event.get("payload") or {}
-        if kind == "history.inherited":
+        if kind in INHERITED:
+            inherited_events.setdefault(revision, []).append(event)
             turn = _turn(turns, revision, participants)
             record = turn["inherited"] or {
                 "count": 0,
@@ -191,6 +195,10 @@ def build_timeline(events, participants=()):
                     record["checkpoint"] = payload.get("checkpoint")
                     record["parent"] = record["parent"] or payload.get("parent")
             turn["other"].append(event)
+    for revision, history in inherited_events.items():
+        record = turns[revision]["inherited"]
+        record["records"] = list(reconstruct_inherited(history, strict=False))
+        record["count"] = len(record["records"])
     return [turns[key] for key in sorted(turns)]
 
 
@@ -198,6 +206,8 @@ def inherited_sentence(record) -> str:
     text = f"Inherited {record['count']} events from parent {short_id(record['parent'])}"
     if record.get("checkpoint"):
         text += f" at checkpoint {short_id(record['checkpoint'])}"
+    if any(not item["complete"] for item in record.get("records", [])):
+        text += "; some records need more event pages"
     return text + "."
 
 
@@ -297,6 +307,9 @@ def render_timeline(turns, verbose=False, perspective=None) -> str:
         after = [e for e in turn["other"] if first_participant_seq is not None and e["seq"] >= first_participant_seq]
         if turn["inherited"]:
             lines.append("  " + inherited_sentence(turn["inherited"]))
+            if verbose:
+                for item in turn["inherited"].get("records", []):
+                    lines.extend("    " + line for line in json.dumps(item, indent=2).splitlines())
         lines.extend("  " + describe(event) for event in before)
         width = max((len(name) for name in turn["participants"]), default=0)
         active = any(slots[slot] for slots in turn["participants"].values() for slot in SLOTS)
@@ -387,16 +400,26 @@ def render_comparison(result) -> str:
         if record.get("interventions"):
             parts.append(f"interventions {scalars(record['interventions'])}")
         lines.append("  " + "  ".join(parts))
-    metrics = result.get("metrics") or {}
-    if metrics:
-        lines.append("Metrics")
-        for key, summary in metrics.items():
-            error = summary.get("standard_error")
-            lines.append(
-                f"  {key}  mean of lineage means {compact(summary.get('mean_of_lineage_means'))}"
-                f"  independent lineages {summary.get('independent_lineages')}"
-                f"  standard error {compact(error) if error is not None else 'not available'}"
-            )
+    groups = result.get("metric_groups")
+    if groups is not None:
+        for group in groups:
+            definition = group.get("definition") or {}
+            lines.append(f"  {group['metric']} by {group['scorer']}@{group['version']} ({group['kind']})"
+                         f"  unit {definition.get('unit', 'unspecified')}  group {short_id(group['id'])}")
+            summary = group.get("summary")
+            if summary:
+                lines.append(f"    mean of lineage means {compact(summary['mean_of_lineage_means'])}"
+                             f"  independent lineages {summary['independent_lineages']}"
+                             f"  standard error {compact(summary['standard_error']) if summary['standard_error'] is not None else 'not available'}")
+            else:
+                lines.append("    Raw values only: " + ", ".join(
+                    f"{short_id(v['environment'])}={compact(v['value'])}" for v in group['values']))
+            lines.append(f"    reported {group['reported_environments']}/{group['selected_environments']}"
+                         f"  missing {group['missing_environments']}  incomplete {group['incomplete_environments']}")
+    else:
+        for key, summary in (result.get("metrics") or {}).items():
+            lines.append(f"  {key}  mean of lineage means {compact(summary.get('mean_of_lineage_means'))}")
+    lines.extend("  " + warning for warning in result.get("warnings", []))
     for key in ("uncertainty", "design"):
         if result.get(key):
             lines.append(result[key])

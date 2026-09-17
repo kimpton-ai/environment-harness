@@ -68,9 +68,13 @@ function turnAt(turns, revision, participants) {
 export function buildTimeline(events, participants) {
     const turns = new Map();
     const committed = new Set();
+    const inheritedEvents = new Map();
     for (const event of [...events].sort((a, b) => a.seq - b.seq)) {
         const { kind, revision, payload } = event;
-        if (kind === 'history.inherited') {
+        if (kind === 'history.inherited' || kind === 'history.inherited.chunk') {
+            if (!inheritedEvents.has(revision))
+                inheritedEvents.set(revision, []);
+            inheritedEvents.get(revision).push(event);
             const turn = turnAt(turns, revision, participants);
             const parent = typeof payload.environment === 'string' ? payload.environment : null;
             turn.inherited ??= { count: 0, parent, checkpoint: null, first_seq: event.seq, last_seq: event.seq };
@@ -126,11 +130,17 @@ export function buildTimeline(events, participants) {
             turn.other.push(event);
         }
     }
+    for (const [revision, history] of inheritedEvents) {
+        const inherited = turns.get(revision).inherited;
+        inherited.records = reconstructInherited(history);
+        inherited.count = inherited.records.length;
+    }
     return [...turns.keys()].sort((a, b) => a - b).map(key => turns.get(key));
 }
 export function inheritedSentence(inherited) {
     const checkpoint = inherited.checkpoint ? ` at checkpoint ${shortId(inherited.checkpoint)}` : '';
-    return `Inherited ${inherited.count} events from parent ${shortId(inherited.parent)}${checkpoint}.`;
+    const partial = inherited.records?.some(item => !item.complete) ? '; some records need more event pages' : '';
+    return `Inherited ${inherited.count} events from parent ${shortId(inherited.parent)}${checkpoint}${partial}.`;
 }
 export function cellText(event, slot) {
     const payload = event.payload;
@@ -193,3 +203,43 @@ export function turnLabel(turn) {
     return target === null ? `Revision ${turn.revision} (open)` : `Revision ${turn.revision} to ${target}`;
 }
 export const hasActivity = (turn) => Object.values(turn.participants).some(slots => SLOTS.some(slot => slots[slot]));
+export function reconstructInherited(events) {
+    const groups = new Map();
+    const order = [];
+    for (const event of events) {
+        const p = event.payload;
+        if (event.kind === 'history.inherited')
+            order.push({ complete: true, record: p });
+        else if (event.kind === 'history.inherited.chunk') {
+            const key = JSON.stringify([event.environment, event.revision, p.environment, p.seq, p.hash]);
+            if (!groups.has(key)) {
+                groups.set(key, { header: p, chunks: new Map(), audience: JSON.stringify(event.audience) });
+                order.push(key);
+            }
+            const group = groups.get(key);
+            if (['parts', 'encoding', 'record_sha256'].some(k => group.header[k] !== p[k]) ||
+                group.audience !== JSON.stringify(event.audience) || !Number.isInteger(p.part) || !Number.isInteger(p.parts) ||
+                Number(p.part) < 0 || Number(p.part) >= Number(p.parts) || group.chunks.has(Number(p.part)) || typeof p.data !== 'string') {
+                throw new Error('Invalid inherited chunk sequence');
+            }
+            group.chunks.set(Number(p.part), p.data);
+        }
+    }
+    return order.map(item => {
+        if (typeof item !== 'string')
+            return item;
+        const { header, chunks, audience } = groups.get(item);
+        if (chunks.size !== header.parts)
+            return { complete: false, environment: String(header.environment), seq: Number(header.seq) };
+        if (header.encoding !== 'base64-json-v1')
+            throw new Error('Unsupported inherited encoding');
+        const encoded = Array.from({ length: Number(header.parts) }, (_, i) => chunks.get(i)).join('');
+        const bytes = Uint8Array.from(atob(encoded), char => char.charCodeAt(0));
+        const original = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+        if (['environment', 'seq', 'hash'].some(k => original[k] !== header[k]) || JSON.stringify(JSON.parse(String(original.audience))) !== audience) {
+            throw new Error('Inherited record identity mismatch');
+        }
+        // The viewer reconstructs records. Full integrity verification belongs to the supplier SDK.
+        return { complete: true, record: original };
+    });
+}

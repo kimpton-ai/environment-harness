@@ -168,8 +168,12 @@ function renderTurn(turn, perspective) {
     section.append(head);
     const firstSeq = Math.min(...Object.values(turn.participants).flatMap(slots => SLOTS.map(slot => slots[slot]?.seq ?? Infinity)));
     const before = turn.other.filter(event => event.seq < firstSeq), after = turn.other.filter(event => event.seq >= firstSeq);
-    if (turn.inherited)
+    if (turn.inherited) {
         section.append(text('p', inheritedSentence(turn.inherited), 'turn-note'));
+        for (const item of turn.inherited.records ?? []) {
+            section.append(details(item.complete ? 'Inherited record' : 'Incomplete inherited record: load more events', text('pre', json(item)), 'turn-note'));
+        }
+    }
     for (const event of before)
         section.append(renderNote(event));
     if (hasActivity(turn))
@@ -270,6 +274,17 @@ function renderComparison(value) {
         cards.append(card);
     }
     holder.append(cards, text('p', result.uncertainty), text('p', result.design, 'muted'));
+    for (const group of result.metric_groups ?? []) {
+        const block = text('section', '', 'report');
+        block.append(text('p', `${group.metric} by ${group.scorer}@${group.version} (${group.kind}), unit ${group.definition?.unit ?? 'unspecified'}, group ${shortId(group.id)}.`));
+        const summary = group.summary;
+        block.append(text('p', summary ? `Mean of lineage means ${summary.mean_of_lineage_means}, independent lineages ${summary.independent_lineages}, standard error ${summary.standard_error ?? 'not available'}.` : 'Raw values only. No metric definition was declared.'));
+        block.append(text('p', `Reported ${group.reported_environments}/${group.selected_environments}, missing ${group.missing_environments}, incomplete ${group.incomplete_environments}.`, 'muted'));
+        block.append(details('Values and selected report revisions', text('pre', json(group))));
+        holder.append(block);
+    }
+    for (const warning of result.warnings ?? [])
+        holder.append(text('p', warning, 'muted'));
 }
 // Connection
 async function connect(token, rememberLocal = false) {

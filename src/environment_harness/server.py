@@ -147,6 +147,7 @@ def create_app(session, *, local_login=None):
         allowed = {
             "lease": session.lease,
             "release": session.release,
+            "cancel": session.cancel,
             "resolve": session.resolve,
             "close_phase": session.close_phase,
             "checkpoint": session.checkpoint,
@@ -168,8 +169,6 @@ def create_app(session, *, local_login=None):
             result = allowed[cmd.operation](environment, who, **a)
         except TypeError:
             raise HTTPException(422, "invalid command arguments") from None
-        if cmd.operation == "control" and a.get("command") == "cancel":
-            Operations(store).cancel_prepared(environment, who)
         return result
 
     @app.post("/v1/environments/{environment}/credentials")

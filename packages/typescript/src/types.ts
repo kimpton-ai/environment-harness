@@ -11,4 +11,19 @@ export interface AgentSpec {id:string; implementation:string; policy_version:str
 export interface RunPolicy {max_turns:number; max_cost_micros:number; max_event_bytes:number; max_artifact_bytes:number; max_state_bytes:number; allowed_endpoints:string[]; allowed_operations:string[]; external_writes:boolean;}
 export interface ExperimentSpec {environment:EnvironmentSpec; participants:AgentSpec[]; seed:number; scenario:string; split:'training'|'heldout'; purpose:'evaluation'|'training'; time_boundary:string; interventions:Record<string,Json>; scoring_versions:string[]; policy:RunPolicy;}
 export interface Finding {rule:string; participant:string; observation_id:string; action_id:string|null; action_item?:string|null; opportunity_event?:number|null; outcome_event:number; consequence_events:number[]; category:'competence'|'compliance'|'harm'|'infrastructure'|'malformed'; status:'attempted'|'blocked'|'executed'|'consequential'|'omitted'|'inconclusive'; judgment:string; uncertainty:string;}
-export interface ScoreReport {scorer:string; version:string; kind:'deterministic'|'model'|'human'; evidence_cursor:number; metrics:Record<string,Json>; findings:Finding[]; rewards:Record<string,number>; uncertainty:string; provenance:Record<string,Json>;}
+export interface ScoreReport {scorer:string; version:string; kind:'deterministic'|'model'|'human'; evidence_cursor:number; metrics:Record<string,Json>; metric_definitions?:Record<string,MetricDefinition>; findings:Finding[]; rewards:Record<string,number>; uncertainty:string; provenance:Record<string,Json>;}
+export interface MetricDefinition {id: string; version: string; unit: string;}
+export interface ReportEnvelope {environment: string; revision: number; report: ScoreReport; hash: string;}
+export interface MetricSummary {mean_of_lineage_means: number; independent_lineages: number; standard_error: number | null;}
+export interface MetricGroup {
+  id: string; cohort: string; scorer: string; version: string; kind: ScoreReport['kind']; metric: string;
+  definition: MetricDefinition | null; experiment: Record<string, Json>;
+  values: {environment: string; lineage: string; status: string; report_revision: number; report_hash: string; value: number}[];
+  summary: MetricSummary | null; selected_environments: number; reported_environments: number;
+  missing_environments: number; incomplete_environments: number;
+}
+export interface Comparison {
+  environments: {environment: string; parent: string | null; participants: string[]; status: string; revision: number;
+    cost_micros: number; interventions: Record<string, Json>; latest_report: ReportEnvelope | null; selected_reports: ReportEnvelope[]}[];
+  metrics: Record<string, MetricSummary>; metric_groups: MetricGroup[]; warnings: string[]; uncertainty: string; design: string;
+}

@@ -152,17 +152,22 @@ def main():
         result = session.get(args.environment, who)
     elif args.command == "branch":
         result = session.branch(args.environment, who, args.checkpoint, json.loads(args.interventions))
+    elif args.command == "cancel":
+        result = session.cancel(args.environment, who)
     else:
         lease = session.lease(args.environment, who, "cli", ttl=30)
-        if args.command == "checkpoint":
-            result = session.checkpoint(args.environment, who, lease)
-        elif args.command == "resume":
-            result = session.resume(args.environment, who, lease)
-        else:
-            from .operations import Operations
+        try:
+            if args.command == "checkpoint":
+                result = session.checkpoint(args.environment, who, lease)
+            else:
+                result = session.resume(args.environment, who, lease)
+        finally:
+            from contextlib import suppress
 
-            result = session.control(args.environment, who, lease, "cancel")
-            Operations(store).cancel_prepared(args.environment, who)
+            from .errors import Conflict
+
+            with suppress(Conflict):
+                session.release(args.environment, who, lease)
     print(json.dumps(result, indent=2))
 
 

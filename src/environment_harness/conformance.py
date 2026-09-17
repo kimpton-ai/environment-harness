@@ -1,41 +1,49 @@
-"""Small reusable supplier conformance check. Does not imply live qualification."""
+"""Small supplier compatibility check, not a live or stress qualification."""
+
+from contextlib import suppress
 
 from .contracts import Action, Principal
+from .errors import Conflict, Unsupported
 from .runtime import EnvironmentSession
 from .store import uid
 
 
-def check(store, environment, experiment, action_factory):
+def check(store, environment, experiment, action_factory, *, events=()):
+    events = tuple(events)
+    if environment.spec.scheduling == "event" and environment.spec.phase_deadline == "wall" and not events:
+        raise Unsupported("event conformance requires explicit input events")
     who = Principal(tenant=uid(), subject="conformance", role="researcher")
     session = EnvironmentSession(store, environment)
-    environment = session.create(experiment, who)["id"]
+    environment_id = session.create(experiment, who)["id"]
     receipts = []
-    for participant in experiment.participants:
-        agent = Principal(
-            tenant=who.tenant, subject=participant.id, role="agent", environment=environment, participant=participant.id
-        )
-        observation = session.observe(environment, agent)
-        if observation["may_act"]:
-            action = Action(
-                operation_id=uid(),
-                participant=participant.id,
-                observation_id=observation["id"],
-                revision=observation["revision"],
-                payload=action_factory(observation),
+    lease = session.lease(environment_id, who, "conformance")
+    try:
+        for event in events:
+            session.external_event(environment_id, who, lease, **event)
+        for participant in experiment.participants:
+            agent = Principal(
+                tenant=who.tenant, subject=participant.id, role="agent",
+                environment=environment_id, participant=participant.id,
             )
-            receipt = session.submit(environment, agent, action)
-            if receipt["status"] != "accepted" or session.submit(environment, agent, action) != receipt:
-                raise AssertionError("action conformance failed")
-            receipts.append(receipt)
-    lease = session.lease(environment, who, "conformance")
-    session.resolve(environment, who, lease)
-    evidence = store.verify(environment, who)
-    checkpoint = session.checkpoint(environment, who, lease) if environment.spec.capabilities.checkpoint else None
-    session.release(environment, who, lease)
-    return {
-        "environment": environment,
-        "actions": len(receipts),
-        "evidence": evidence,
-        "checkpoint": checkpoint,
-        "scope": "one supplied contract transition; not a live or stress qualification",
-    }
+            observation = session.observe(environment_id, agent)
+            if observation["may_act"]:
+                action = Action(
+                    operation_id=uid(), participant=participant.id, observation_id=observation["id"],
+                    revision=observation["revision"], payload=action_factory(observation),
+                )
+                receipt = session.submit(environment_id, agent, action)
+                if receipt["status"] != "accepted" or session.submit(environment_id, agent, action) != receipt:
+                    raise AssertionError("action conformance failed")
+                receipts.append(receipt)
+        if environment.spec.phase_deadline == "coordinator":
+            session.close_phase(environment_id, who, lease, revision=0)
+        session.resolve(environment_id, who, lease)
+        evidence = store.verify(environment_id, who)
+        checkpoint = session.checkpoint(environment_id, who, lease) if environment.spec.capabilities.checkpoint else None
+        return {
+            "environment": environment_id, "actions": len(receipts), "evidence": evidence,
+            "checkpoint": checkpoint, "scope": "one supplied contract transition; not a live or stress qualification",
+        }
+    finally:
+        with suppress(Conflict):
+            session.release(environment_id, who, lease)
