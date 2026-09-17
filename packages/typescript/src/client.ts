@@ -29,7 +29,7 @@ export class EnvironmentClient {
   agentWork(environment: string) {return this.request<{work: Array<{id: string; revision: number; participant: string; generation: number; status: string}>}>('GET', `/v1/environments/${encodeURIComponent(environment)}/agent-work`);}
   cancel(environment: string) {return this.command<{status: 'cancelled'; unresolved_agent_work: string[]; unresolved_operations: string[]}>(environment, 'cancel');}
   reports(environment: string) {return this.request<Json[]>('GET', `/v1/environments/${encodeURIComponent(environment)}/reports`);}
-  compare(environments: string[]) {return this.request<Comparison>('POST', '/v1/compare', {environments});}
+  compare(environments: string[]) {return this.request<Comparison & Json>('POST', '/v1/compare', {environments});}
   async *replay(environment: string): AsyncGenerator<EvidenceEvent> {
     let cursor = 0;
     while (true) {const page = await this.events(environment, cursor); if (!page.events.length) return; yield* page.events; cursor = page.cursor;}

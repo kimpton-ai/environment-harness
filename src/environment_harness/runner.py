@@ -43,6 +43,8 @@ def _prepare(session, environment, principal, observation, lease):
     with session.store.transaction() as db:
         row = session.store.environment(db, environment, principal, ("agent",))
         session._fence(row, lease)
+        if row["status"] != "running":
+            raise Conflict("session is not running")
         existing = db.execute(
             "SELECT * FROM agent_work WHERE environment=? AND revision=? AND participant=? AND generation=?", key
         ).fetchone()
@@ -229,6 +231,8 @@ def run(session, environment, researcher, agents, *, turns=10, owner=None, phase
                         if session.get(environment, researcher)["status"] != "running":
                             raise Conflict("environment stopped during agent work")
                         done, _ = wait(pending, timeout=0.2, return_when=FIRST_COMPLETED)
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError("agent phase deadline exceeded; unresolved work requires reconciliation")
                         for future in done:
                             principal, observation, work = pending.pop(future)
                             payload = json.loads(future.result())

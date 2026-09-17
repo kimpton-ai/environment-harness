@@ -109,6 +109,7 @@ uv run python scripts/build_contracts.py
 uv run pytest -q
 uv run ruff check src tests scripts examples
 npm run typecheck --prefix packages/typescript
+npm test --prefix packages/typescript
 uv run python scripts/build_contracts.py --check
 uv build
 uv run python scripts/check_distribution.py
@@ -122,3 +123,5 @@ Run the public adapter example with its optional dependencies:
 uv sync --extra server --extra pettingzoo
 uv run --no-sync python examples/pettingzoo_rps.py
 ```
+
+[Compatibility details](docs/COMPATIBILITY.md) cover cancellation, agent registration, score groups and inherited evidence.

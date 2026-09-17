@@ -28,3 +28,5 @@ Only declare checkpoint, resume or branch support when the implementation can re
 Write independent controls for your mechanics, valid and invalid actions, privacy projections and supported interventions. The public `environment_harness.conformance.check` helper checks one transition and the advertised checkpoint path. It is a compatibility check, not evidence that a grader is valid or a hosted deployment is reliable.
 
 Scoring is a separate implementation. Freeze scorer versions in `ExperimentSpec`, record a `ScoreReport` against an evidence cursor, and retain the distinction between deterministic checks, model judgments and human judgments. Preserve unresolved outcomes and explain what each metric establishes. [Protocol](PROTOCOL.md) and [coordinated sessions](coordinated-sessions.md) cover the complete semantics.
+
+The conformance checker accepts explicit `events` for event-driven suppliers. Scorers should provide `metric_definitions` so comparison can distinguish meanings and units. See [conformance and score compatibility](COMPATIBILITY.md).

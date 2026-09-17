@@ -224,3 +224,41 @@ def test_cli_releases_checkpoint_and_resume_leases(tmp_path):
         assert result.returncode == 0, result.stderr
         lease = session.lease(environment, who, 'different-worker')
         session.release(environment, who, lease)
+
+
+def test_phase_timeout_does_not_commit_a_late_action(tmp_path):
+    session, who, environment, _, _ = setup(tmp_path)
+    finished = threading.Event()
+
+    class Slow(SyntheticAgent):
+        def act(self, observation):
+            time.sleep(0.08)
+            finished.set()
+            return {'value': 1}
+
+    with pytest.raises(TimeoutError):
+        run(session, environment, who, {'a': Slow()}, turns=1, phase_timeout=0.02)
+    assert finished.wait(2)
+    assert session.get(environment, who)['revision'] == 0
+    assert not any(e['kind'] == 'action.executed' for e in session.store.replay(environment, who))
+
+
+def test_command_can_cancel_after_closing_stdout(tmp_path):
+    from environment_harness.adapters.programs import CommandAgent
+
+    signal = threading.Event()
+    marker = tmp_path / 'ready'
+    code = 'import os,sys,time; from pathlib import Path; os.close(1); Path(sys.argv[1]).touch(); time.sleep(60)'
+    agent = CommandAgent([sys.executable, '-c', code, str(marker)], 'synthetic@1')
+    with ThreadPoolExecutor() as pool:
+        future = pool.submit(agent.act_cancellable, {}, signal)
+        try:
+            for _ in range(100):
+                if marker.exists():
+                    break
+                time.sleep(0.02)
+            assert marker.exists()
+        finally:
+            signal.set()
+        with pytest.raises(Conflict, match='cancelled'):
+            future.result(timeout=3)
