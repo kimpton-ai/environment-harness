@@ -75,6 +75,24 @@ def test_release_workflow_requires_commit_binding(tmp_path, monkeypatch):
         check_repository.check_release_workflow_binding()
 
 
+@pytest.mark.parametrize(
+    ("required", "description"),
+    [
+        ('"v[0-9]+.[0-9]+.[0-9]+"', "strict SemVer tag trigger"),
+        ("RELEASE_TAG: ${{ github.ref_name }}", "event tag binding"),
+    ],
+)
+def test_release_workflow_requires_automatic_tag_binding(tmp_path, monkeypatch, required, description):
+    workflow = tmp_path / ".github/workflows"
+    workflow.mkdir(parents=True)
+    source = Path(__file__).resolve().parents[1] / ".github/workflows/release.yml"
+    (workflow / "release.yml").write_text(source.read_text().replace(required, "removed"))
+    monkeypatch.setattr(check_repository, "ROOT", tmp_path)
+
+    with pytest.raises(check_repository.PolicyError, match=description):
+        check_repository.check_release_workflow_binding()
+
+
 def npm_lock(name="example", version="1.0.0"):
     return json.dumps(
         {

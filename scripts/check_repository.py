@@ -257,6 +257,8 @@ def check_version_metadata(release_tag: str | None = None) -> None:
 def check_release_workflow_binding() -> None:
     workflow = (ROOT / ".github/workflows/release.yml").read_text()
     required = {
+        '"v[0-9]+.[0-9]+.[0-9]+"': "strict SemVer tag trigger",
+        "RELEASE_TAG: ${{ github.ref_name }}": "event tag binding",
         'test "$GITHUB_SHA" = "$release_commit"': "attested workflow commit",
         'git merge-base --is-ancestor "$release_commit" origin/main': "main ancestry",
         '--release-tag "$RELEASE_TAG"': "tag-to-package version binding",
