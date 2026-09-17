@@ -21,7 +21,7 @@ class Command(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
 
 
-def create_app(session):
+def create_app(session, *, local_login=None):
     store = session.store
     app = FastAPI(title="Environment session service", version="1.0.0")
 
@@ -69,6 +69,18 @@ def create_app(session):
             raise HTTPException(401, "Bearer credential required")
         return store.authenticate(authorization[7:])
 
+    if local_login is not None:
+        @app.post("/local/connect", include_in_schema=False)
+        def local_connect(request: Request, x_local_login: str = Header(default="")):
+            if (
+                request.client is None
+                or request.client.host not in ("127.0.0.1", "::1")
+                or str(request.base_url).rstrip("/") != local_login.origin
+                or request.headers.get("origin") != local_login.origin
+            ):
+                raise HTTPException(403, "Local connection requires the loopback viewer origin")
+            return {"token": local_login.redeem(x_local_login)}
+
     @app.get("/health")
     def health():
         return {"status": "ok", "protocol": "environment-session.v1"}
@@ -83,16 +95,7 @@ def create_app(session):
 
     @app.get("/v1/environments")
     def environments(who=Depends(actor), limit: int = Query(100, ge=1, le=1000)):
-        if who.role != "researcher":
-            raise Forbidden("researcher required")
-        with store.transaction() as db:
-            return [
-                session._public(r)
-                for r in db.execute(
-                    "SELECT * FROM environments WHERE tenant=? AND (CAST(? AS TEXT) IS NULL OR id=?) ORDER BY id DESC LIMIT ?",
-                    (who.tenant, who.environment, who.environment, limit),
-                )
-            ]
+        return session.list(who, limit)
 
     @app.get("/v1/environments/{environment}")
     def get(environment: str, who=Depends(actor)):
@@ -144,6 +147,7 @@ def create_app(session):
         allowed = {
             "lease": session.lease,
             "release": session.release,
+            "cancel": session.cancel,
             "resolve": session.resolve,
             "close_phase": session.close_phase,
             "checkpoint": session.checkpoint,
@@ -165,8 +169,6 @@ def create_app(session):
             result = allowed[cmd.operation](environment, who, **a)
         except TypeError:
             raise HTTPException(422, "invalid command arguments") from None
-        if cmd.operation == "control" and a.get("command") == "cancel":
-            Operations(store).cancel_prepared(environment, who)
         return result
 
     @app.post("/v1/environments/{environment}/credentials")
@@ -260,7 +262,7 @@ def create_app(session):
 
     @app.get("/viewer/{file}")
     def asset(file: str):
-        if file not in ("app.js", "client.js", "types.js", "style.css"):
+        if file not in ("app.js", "timeline.js", "client.js", "types.js", "style.css"):
             raise HTTPException(404)
         return FileResponse(Path(__file__).parent / "viewer" / file)
 

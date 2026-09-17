@@ -79,6 +79,9 @@ class EnvironmentClient:
     def agent_work(self, environment):
         return self.request("GET", f"/v1/environments/{urllib.parse.quote(environment, safe='')}/agent-work")
 
+    def cancel(self, environment):
+        return self.command(environment, "cancel")
+
     def events(self, environment, after=0):
         return self.request("GET", f"/v1/environments/{urllib.parse.quote(environment, safe='')}/events?after={after}")
 

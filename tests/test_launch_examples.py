@@ -19,6 +19,7 @@ def test_branch_example_outcomes_and_private_history(tmp_path):
     assert report["totals"] == {report["parent"]: 10, report["branch"]: 24}
     assert report["comparison"]["metrics"]["synthetic_total"]["independent_lineages"] == 1
     assert report["comparison"]["metrics"]["synthetic_total"]["standard_error"] is None
+    assert report["comparison"]["environments"][0]["participants"] == ["alice", "bob"]
     store = EvidenceStore(tmp_path)
     for environment in (report["parent"], report["branch"]):
         alice = Principal(tenant="local", subject="alice", role="agent", environment=environment, participant="alice")

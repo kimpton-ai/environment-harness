@@ -15,6 +15,7 @@ models = (
     "Action",
     "Transition",
     "Finding",
+    "MetricDefinition",
     "ScoreReport",
 )
 for name in models:

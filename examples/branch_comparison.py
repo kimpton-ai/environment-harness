@@ -49,6 +49,7 @@ def experiment(directory):
         store.report(environment, who, ScoreReport(
             scorer="synthetic-total", version="1", kind="deterministic", evidence_cursor=cursor,
             metrics={"synthetic_total": total},
+            metric_definitions={"synthetic_total": {"id": "synthetic-total", "version": "1", "unit": "count"}},
             uncertainty="Protocol fixture only. This is not a model-performance or safety measure.",
             provenance={"synthetic": True, "source": "examples/branch_comparison.py"},
         ))

@@ -23,7 +23,7 @@ def setup(tmp_path):
     spec = ExperimentSpec(
         environment=env.spec,
         participants=tuple(
-            AgentSpec(id=p, implementation="synthetic@1", policy_version="1", checkpoint=True)
+            AgentSpec(id=p, implementation="synthetic-agent@1", policy_version="1", checkpoint=True)
             for p in ("alice", "bob")
         ),
         scoring_versions=("control@1",),
@@ -168,6 +168,10 @@ def test_api_and_viewer(setup):
     headers = {"Authorization": "Bearer " + token}
     assert client.get("/").status_code == 200
     assert client.get("/viewer/app.js").status_code == 200
+    assert client.get("/viewer/timeline.js").status_code == 200
+    page = client.get("/").text
+    # The viewer reads evidence. Checkpoint, resume, cancel and branch stay command-line and SDK operations.
+    assert 'id="checkpoint"' not in page and "branch-dialog" not in page
     assert client.get("/v1/environments").status_code == 401
     assert client.get("/v1/environments", headers=headers).json()[0]["id"] == environment
     response = client.get(f"/v1/environments/{environment}/events", headers=headers | {"Accept": "text/event-stream"})
@@ -224,7 +228,7 @@ def test_separate_environment_process(tmp_path):
         who = Principal(tenant="process", subject="researcher", role="researcher")
         spec = ExperimentSpec(
             environment=env.spec,
-            participants=(AgentSpec(id="alice", implementation="synthetic@1", policy_version="1"),),
+            participants=(AgentSpec(id="alice", implementation="synthetic-agent@1", policy_version="1"),),
         )
         environment = session.create(spec, who)["id"]
         result = run(session, environment, who, {"alice": SyntheticAgent()}, turns=1)
@@ -247,7 +251,7 @@ def test_delayed_outcomes_require_a_report(tmp_path):
     who = Principal(tenant="delayed", subject="researcher", role="researcher")
     spec = ExperimentSpec(
         environment=env.spec,
-        participants=(AgentSpec(id="alice", implementation="synthetic@1", policy_version="1"),),
+        participants=(AgentSpec(id="alice", implementation="synthetic-agent@1", policy_version="1"),),
         scoring_versions=("event-measurements@1",),
     )
     environment = session.create(spec, who)["id"]

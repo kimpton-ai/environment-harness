@@ -168,18 +168,21 @@ class Operations:
     def cancel_prepared(self, environment, who):
         with self.store.transaction() as db:
             row = self.store.environment(db, environment, who, ("researcher", "worker"))
-            ops = db.execute(
-                "SELECT * FROM operations WHERE environment=? AND status='prepared'", (environment,)
-            ).fetchall()
-            for op in ops:
-                db.execute("UPDATE operations SET status='failed' WHERE environment=? AND id=?", (environment, op["id"]))
-                db.execute("UPDATE environments SET reserved=reserved-? WHERE id=?", (op["reservation"], environment))
-                self.store.append(
-                    db,
-                    environment,
-                    row["revision"],
-                    "operation.cancelled",
-                    {"id": op["id"], "dispatched": False},
-                    (op["participant"],),
-                )
-            return {"cancelled": len(ops)}
+            return self._cancel_prepared(db, environment, row)
+
+    def _cancel_prepared(self, db, environment, row):
+        ops = db.execute(
+            "SELECT * FROM operations WHERE environment=? AND status='prepared'", (environment,)
+        ).fetchall()
+        for op in ops:
+            db.execute("UPDATE operations SET status='failed' WHERE environment=? AND id=?", (environment, op["id"]))
+            db.execute("UPDATE environments SET reserved=reserved-? WHERE id=?", (op["reservation"], environment))
+            self.store.append(
+                db,
+                environment,
+                row["revision"],
+                "operation.cancelled",
+                {"id": op["id"], "dispatched": False},
+                (op["participant"],),
+            )
+        return {"cancelled": len(ops)}

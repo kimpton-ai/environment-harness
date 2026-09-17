@@ -107,6 +107,36 @@
       ],
       "title": "Finding",
       "type": "object"
+    },
+    "MetricDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "unit": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Unit",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "unit"
+      ],
+      "title": "MetricDefinition",
+      "type": "object"
     }
   },
   "$id": "urn:environment-harness:v1:ScoreReport",
@@ -134,6 +164,13 @@
       ],
       "title": "Kind",
       "type": "string"
+    },
+    "metric_definitions": {
+      "additionalProperties": {
+        "$ref": "#/$defs/MetricDefinition"
+      },
+      "title": "Metric Definitions",
+      "type": "object"
     },
     "metrics": {
       "additionalProperties": true,

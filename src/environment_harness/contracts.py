@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from threading import Event
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -144,12 +145,19 @@ class Finding(Record):
     uncertainty: str
 
 
+class MetricDefinition(Record):
+    id: str = Field(min_length=1, max_length=200)
+    version: str = Field(min_length=1, max_length=200)
+    unit: str = Field(min_length=1, max_length=200)
+
+
 class ScoreReport(Record):
     scorer: str
     version: str
     kind: Literal["deterministic", "model", "human"]
     evidence_cursor: int = Field(ge=0)
     metrics: Json
+    metric_definitions: dict[str, MetricDefinition] = Field(default_factory=dict)
     findings: tuple[Finding, ...] = ()
     rewards: dict[str, float] = Field(default_factory=dict)
     uncertainty: str
@@ -173,6 +181,10 @@ class AgentProgram(Protocol):
     def act(self, observation: Json) -> Json: ...
     def checkpoint(self) -> Json: ...
     def restore(self, state: Json) -> None: ...
+
+
+class CancellableAgentProgram(AgentProgram, Protocol):
+    def act_cancellable(self, observation: Json, cancel_event: Event) -> Json: ...
 
 
 class Scorer(Protocol):

@@ -4,6 +4,7 @@ import os
 import sys
 from pathlib import Path
 
+from . import presentation
 from .contracts import AgentSpec, ExperimentSpec, Principal, RunPolicy
 from .errors import HarnessError
 from .evaluation import compare, rollouts
@@ -29,6 +30,7 @@ def main():
     serve = sub.add_parser("serve")
     serve.add_argument("--port", type=int, default=8765)
     serve.add_argument("--environment", default="synthetic-protocol")
+    serve.add_argument("--open", action="store_true", help="Open and connect the local browser viewer")
     for name in ("replay", "attach", "checkpoint", "resume", "cancel", "export"):
         command = sub.add_parser(name)
         command.add_argument("environment")
@@ -40,6 +42,17 @@ def main():
     branch.add_argument("--interventions", default="{}")
     comparison = sub.add_parser("compare")
     comparison.add_argument("environments", nargs="+")
+    comparison.add_argument("--json", action="store_true", help="Print the comparison record instead of the summary")
+    listing = sub.add_parser("list")
+    listing.add_argument("--json", action="store_true")
+    listing.add_argument("--limit", type=int, default=100)
+    for name in ("show", "timeline"):
+        command = sub.add_parser(name)
+        command.add_argument("environment")
+        command.add_argument("--json", action="store_true")
+    sub.choices["timeline"].add_argument("--participant", help="Show only evidence visible to this participant")
+    sub.choices["timeline"].add_argument("--kind", help="Show only event kinds containing this text")
+    sub.choices["timeline"].add_argument("--verbose", "-v", action="store_true", help="Include recorded payloads")
     token = sub.add_parser("token")
     token.add_argument("--environment")
     token.add_argument("--participant")
@@ -57,6 +70,9 @@ def main():
         )
         for row in source:
             print(encode(row))
+        return
+    if args.command in ("list", "show", "timeline", "compare"):
+        inspect(store, who, args)
         return
     env = environment(args.environment) if args.command == "serve" else SyntheticEnvironment()
     if args.command not in ("quickstart", "serve", "token", "compare", "run"):
@@ -94,8 +110,11 @@ def main():
         print(json.dumps(result, indent=2))
         return
     if args.command == "serve":
+        import threading
+
         import uvicorn
 
+        from .local_viewer import LocalViewerLogin, open_when_ready
         from .server import create_app
 
         credential = store.issue(who, 86400)
@@ -103,7 +122,14 @@ def main():
         path.write_text(credential + "\n")
         os.chmod(path, 0o600)
         print(f"Viewer: http://127.0.0.1:{args.port}\nCredential file: {path}", flush=True)
-        uvicorn.run(create_app(session), host="127.0.0.1", port=args.port, access_log=False)
+        login = LocalViewerLogin(f"http://127.0.0.1:{args.port}", credential) if args.open else None
+        server = uvicorn.Server(uvicorn.Config(
+            create_app(session, local_login=login), host="127.0.0.1", port=args.port,
+            access_log=False, proxy_headers=False,
+        ))
+        if login is not None:
+            threading.Thread(target=open_when_ready, args=(server, login), daemon=True).start()
+        server.run()
         return
     if args.command == "token":
         if args.participant:
@@ -122,24 +148,49 @@ def main():
             who = who.model_copy(update={"environment": args.environment})
         print(store.issue(who))
         return
-    if args.command == "compare":
-        result = compare(store, args.environments, who)
-    elif args.command == "attach":
+    if args.command == "attach":
         result = session.get(args.environment, who)
     elif args.command == "branch":
         result = session.branch(args.environment, who, args.checkpoint, json.loads(args.interventions))
+    elif args.command == "cancel":
+        result = session.cancel(args.environment, who)
     else:
         lease = session.lease(args.environment, who, "cli", ttl=30)
-        if args.command == "checkpoint":
-            result = session.checkpoint(args.environment, who, lease)
-        elif args.command == "resume":
-            result = session.resume(args.environment, who, lease)
-        else:
-            from .operations import Operations
+        try:
+            if args.command == "checkpoint":
+                result = session.checkpoint(args.environment, who, lease)
+            else:
+                result = session.resume(args.environment, who, lease)
+        finally:
+            from contextlib import suppress
 
-            result = session.control(args.environment, who, lease, "cancel")
-            Operations(store).cancel_prepared(args.environment, who)
+            from .errors import Conflict
+
+            with suppress(Conflict):
+                session.release(args.environment, who, lease)
     print(json.dumps(result, indent=2))
+
+
+def inspect(store, who, args):
+    """Read-only inspection. Human-readable by default; --json prints the underlying records."""
+    session = EnvironmentSession(store, SyntheticEnvironment())
+    if args.command == "list":
+        rows = session.list(who, args.limit)
+        print(json.dumps(rows, indent=2) if args.json else presentation.render_list(rows))
+        return
+    if args.command == "compare":
+        result = compare(store, args.environments, who)
+        print(json.dumps(result, indent=2) if args.json else presentation.render_comparison(result))
+        return
+    item = session.get(args.environment, who)
+    perspective = getattr(args, "participant", None)
+    events = presentation.filter_events(store.replay(args.environment, who), perspective, getattr(args, "kind", None))
+    turns = presentation.build_timeline(events, item["participants"])
+    if args.command == "timeline":
+        print(json.dumps(turns, indent=2) if args.json else presentation.render_timeline(turns, args.verbose, perspective))
+        return
+    reports = store.reports(args.environment, who)
+    print(json.dumps(item | {"reports": reports}, indent=2) if args.json else presentation.render_environment(item, reports, turns))
 
 
 if __name__ == "__main__":

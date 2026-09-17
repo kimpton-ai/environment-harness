@@ -6,6 +6,8 @@ The supplier service owns the environment. HTTPS commands use bearer credentials
 
 Administrative Python methods are trusted embedding APIs. They must not be exposed directly to untrusted agents. Store directories are private to the operating-system account. SQL credentials, signing keys, model credentials and resource handles belong to the server or worker scope.
 
+The loopback CLI's `serve --open` option opens a browser with a single-use connection ticket in the URL fragment. The viewer removes that fragment and exchanges the ticket through `POST /local/connect`, which requires the exact loopback origin and a loopback peer. Tickets expire after five minutes and cannot be reused. This endpoint is absent from ordinary supplier applications. The CLI disables proxy-header trust. The local viewer stores the resulting bearer credential in tab-scoped session storage for refreshes; manual connections retain credentials only in page memory. Every supplier API request still requires its bearer credential.
+
 ## API
 
 | Operation | Route |
@@ -26,7 +28,7 @@ Administrative Python methods are trusted embedding APIs. They must not be expos
 
 Create requires `X-Operation-ID`, a durable caller-generated 32-character lowercase hex ID. Reusing it with a different experiment fails. Action IDs are stable, participant-bound operations. Accepted and committed receipt retries return the existing result. Do not generate a new ID after an ambiguous timeout.
 
-Commands have shape `{"operation":"checkpoint","arguments":{"lease":{"owner":"worker","epoch":1}}}`. Available commands include lease, release, resolve, checkpoint, resume, branch, control, memory, transfer external_event and finalize_outcomes. Branch takes a checkpoint ID, declared interventions and an optional durable new-environment ID. Lifecycle commands other than create, branch and action submission do not promise general HTTP idempotency. Clients never retry writes implicitly.
+Commands have shape `{"operation":"checkpoint","arguments":{"lease":{"owner":"worker","epoch":1}}}`. Available commands include lease, release, cancel, resolve, checkpoint, resume, branch, control, memory, transfer external_event and finalize_outcomes. Branch takes a checkpoint ID, declared interventions and an optional durable new-environment ID. Lifecycle commands other than create, branch, cancellation and action submission do not promise general HTTP idempotency. Clients never retry writes implicitly.
 
 Events support JSON pages and finite server-sent-event pages. Reconnect with `Last-Event-ID`; an empty page means caught up. Cursors expose ordering gaps but never hidden event payloads. A viewer can disconnect without blocking evidence writes. Artifact access is authorized against its environment and audience before retrieving any bytes.
 
@@ -55,3 +57,5 @@ Local evidence uses sorted, compact ASCII JSON with finite numbers and a SHA-256
 Findings validate participant/action/observation links and existence of referenced outcome/consequence events. The runtime does not adjudicate the scientific truth of a grader's judgment. Comparisons aggregate lineage means and do not treat turns or related branches as independent experiments. Unknown uncertainty remains explicit.
 
 PostgreSQL and S3 support lives in `hosted.py`. Initialize its dedicated schema explicitly. It is not a migration authority for a platform database. Object access stays server-mediated. Production deployment additionally requires resource admission, backup/restore, rotation, transport hardening and the omitted live acceptance checks.
+
+[Session reliability and compatibility](COMPATIBILITY.md) specifies lease-independent cancellation, guarded response recovery, metric grouping, inherited chunks and legacy-store behavior.

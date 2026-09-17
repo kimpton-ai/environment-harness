@@ -143,6 +143,8 @@ class EvidenceStore:
         return row
 
     def append(self, db, environment, revision, kind, payload, audience=(), event_time=None):
+        # REAL columns round-trip integers as floats. Hash the stored representation.
+        event_time = float(event_time) if event_time is not None else None
         raw = encode(payload)
         manifest = json.loads(db.execute("SELECT manifest FROM environments WHERE id=?", (environment,)).fetchone()[0])
         if len(raw.encode()) > manifest["policy"]["max_event_bytes"]:
@@ -187,7 +189,7 @@ class EvidenceStore:
             self.environment(db, environment, who)
             # Filter in SQL before limiting. Cursors reveal ordering, never hidden payloads.
             rows = self._event_page(db, environment, after, who, limit)
-            return [
+            events = [
                 dict(
                     environment=r["environment"],
                     seq=r["seq"],
@@ -202,6 +204,15 @@ class EvidenceStore:
                 )
                 for r in rows
             ]
+            for event in events:
+                timestamp = event["event_time"]
+                if isinstance(timestamp, float) and timestamp.is_integer():
+                    # Older writers hashed integral input before SQLite converted it to REAL.
+                    original = {k: v for k, v in event.items() if k != "hash"}
+                    original["event_time"] = int(timestamp)
+                    if digest(original) == event["hash"]:
+                        event["event_time"] = int(timestamp)
+            return events
 
     def _event_page(self, db, environment, after, who, limit):
         return db.execute(

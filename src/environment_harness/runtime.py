@@ -10,6 +10,7 @@ from jsonschema import Draft202012Validator
 
 from .contracts import Action, ExperimentSpec, Principal, Transition
 from .errors import Conflict, Forbidden, Unsupported
+from .history import inherit
 from .store import EvidenceStore, digest, encode, uid
 
 
@@ -120,6 +121,16 @@ class EnvironmentSession:
             "reserved_micros": row["reserved"],
         }
 
+    def list(self, who, limit=100):
+        if who.role != "researcher":
+            raise Forbidden("researcher required")
+        with self.store.transaction() as db:
+            rows = db.execute(
+                "SELECT * FROM environments WHERE tenant=? AND (CAST(? AS TEXT) IS NULL OR id=?) ORDER BY id DESC LIMIT ?",
+                (who.tenant, who.environment, who.environment, limit),
+            )
+            return [self._public(row) for row in rows]
+
     def get(self, environment, who):
         with self.store.transaction() as db:
             row = self.store.environment(db, environment, who)
@@ -150,6 +161,19 @@ class EnvironmentSession:
             self._fence(row, lease)
             db.execute("UPDATE environments SET lease_until=0 WHERE id=?", (environment,))
         return {"released": True}
+
+    def renew(self, environment, who, lease, ttl=90):
+        """Extend an existing running writer, never reacquire an expired lease."""
+        if not 0 < ttl <= 300:
+            raise ValueError("invalid lease")
+        with self.store.transaction() as db:
+            row = self.store.environment(db, environment, who, ("researcher", "worker"))
+            self._fence(row, lease)
+            if row["status"] != "running":
+                raise Conflict("session is not running")
+            expires = time.time() + ttl
+            db.execute("UPDATE environments SET lease_until=? WHERE id=?", (expires, environment))
+            return {"owner": lease["owner"], "epoch": lease["epoch"], "expires": expires}
 
     def _fence(self, row, lease):
         if (
@@ -507,6 +531,8 @@ class EnvironmentSession:
     def memory(self, environment, who, memory, agent_state=None, expected_revision=None):
         with self.store.transaction() as db:
             row = self.store.environment(db, environment, who, ("agent",))
+            if row["status"] != "running":
+                raise Conflict("session is not running")
             if expected_revision is not None and row["revision"] != expected_revision:
                 raise Conflict("agent state belongs to another revision")
             participants = json.loads(row["participants"])
@@ -596,7 +622,8 @@ class EnvironmentSession:
             limit = json.loads(row["manifest"])["policy"]["max_state_bytes"]
             if len(encode(members)) > limit or len(encode(response)) > limit:
                 raise Conflict("recovered agent state exceeds limit")
-            db.execute("UPDATE environments SET participants=? WHERE id=?", (encode(members), environment))
+            if row["status"] in ("running", "paused"):
+                db.execute("UPDATE environments SET participants=? WHERE id=?", (encode(members), environment))
             db.execute(
                 "UPDATE agent_work SET status='responded',response=?,agent_state=? WHERE environment=? AND id=?",
                 (encode(response), encode(agent_state), environment, operation_id),
@@ -811,15 +838,7 @@ class EnvironmentSession:
                     "SELECT * FROM events WHERE environment=? AND seq<=? ORDER BY seq",
                     (environment, snapshot["evidence_cursor"]),
                 ).fetchall():
-                    self.store.append(
-                        db,
-                        child,
-                        snapshot["revision"],
-                        "history.inherited",
-                        dict(event),
-                        json.loads(event["audience"]),
-                        event["event_time"],
-                    )
+                    inherit(self.store, db, child, snapshot["revision"], event, spec.policy.max_event_bytes)
             self.store.append(
                 db,
                 child,
@@ -861,9 +880,45 @@ class EnvironmentSession:
             )
             return {"status": "completed", "report_revision": report_revision}
 
+    def cancel(self, environment, who):
+        """Cancel execution without acquiring its writer lease. Uncertain effects remain unsettled."""
+        from .operations import Operations
+
+        with self.store.transaction() as db:
+            row = self.store.environment(db, environment, who, ("researcher",))
+            if row["status"] not in ("running", "paused", "cancelled"):
+                raise Conflict("session already terminal")
+            if row["status"] != "cancelled":
+                db.execute(
+                    "UPDATE environments SET status='cancelled',lease_epoch=lease_epoch+1,"
+                    "lease_owner=NULL,lease_until=0 WHERE id=?", (environment,),
+                )
+                db.execute(
+                    "UPDATE agent_work SET status='failed' WHERE environment=? AND status='prepared'",
+                    (environment,),
+                )
+                db.execute(
+                    "UPDATE agent_work SET status='unknown' WHERE environment=? AND status='dispatching'",
+                    (environment,),
+                )
+                Operations(self.store)._cancel_prepared(db, environment, row)
+                self.store.append(db, environment, row["revision"], "session.cancelled", {"reason": "researcher_control"})
+            return {
+                "status": "cancelled",
+                "unresolved_agent_work": [r["id"] for r in db.execute(
+                    "SELECT id FROM agent_work WHERE environment=? AND status='unknown' ORDER BY id", (environment,),
+                )],
+                "unresolved_operations": [r["id"] for r in db.execute(
+                    "SELECT id FROM operations WHERE environment=? AND status IN ('dispatching','unknown') ORDER BY id",
+                    (environment,),
+                )],
+            }
+
     def control(self, environment, who, lease, command):
         if command not in ("pause", "cancel"):
             raise ValueError("unknown control")
+        if command == "cancel":
+            return self.cancel(environment, who)
         with self.store.transaction() as db:
             row = self.store.environment(db, environment, who, ("researcher",))
             self._fence(row, lease)

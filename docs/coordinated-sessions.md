@@ -4,7 +4,7 @@
 
 `AgentJournal` stores serializable, revision-scoped work through the participant checkpoint hook. A program can preserve tool responses and final decisions before submitting an action. State writes check participant authority and the expected environment revision. External operations still use the operation journal and receipt reconciliation; agent memory does not authorize redispatch of an ambiguous effect.
 
-Checkpoints capture an evidence cursor and artifact inventory. A branch inherits events through `history.inherited` envelopes, which preserve the original event row and audience. Child-owned artifact copies and aliases allow handles embedded in checkpointed memory to resolve inside the child. This does not grant access to parent artifacts or make parent credentials valid in the child. Newly delivered observations and decisions use new branch-local identities. Scorers should distinguish inherited history from new decisions.
+Checkpoints capture an evidence cursor and artifact inventory. A branch inherits events through `history.inherited` envelopes or bounded `history.inherited.chunk` records, which preserve the original event row and audience. Child-owned artifact copies and aliases allow handles embedded in checkpointed memory to resolve inside the child. This does not grant access to parent artifacts or make parent credentials valid in the child. Newly delivered observations and decisions use new branch-local identities. Scorers should distinguish inherited history from new decisions.
 
 Findings can identify omissions with a null `action_id`, a delivered observation, and an `opportunity_event`. The opportunity and outcome must identify the same participant and fall within the report cursor. `status="omitted"` describes a recorded omission; uncertainty can instead make the finding inconclusive. `action_item` optionally identifies an item within a composite decision without imposing a domain action schema on the harness.
 
@@ -42,3 +42,5 @@ schema migrations in `src/environment_harness/migrations`. Parameter-marker adap
 does not rewrite ordering, conflict handling or JSON membership semantics.
 Run `PostgresEvidenceStore.initialize()` as the schema owner before starting
 workers. The application constructor does not run migrations.
+
+[Compatibility details](COMPATIBILITY.md) describe cancellation, stale response guards and reconstruction of inherited records.

@@ -1,6 +1,6 @@
 # EnvironmentHarness client
 
-Typed HTTP client for a EnvironmentHarness supplier service. This package uses the same versioned contracts as the Python SDK.
+Typed HTTP client for an EnvironmentHarness supplier service. This package uses the same versioned contracts as the Python SDK.
 
 Install the `environment-harness-client-0.1.0.tgz` asset from the GitHub release with `npm install ./environment-harness-client-0.1.0.tgz`. A registry publication is not required.
 
@@ -16,3 +16,7 @@ The third argument explicitly permits a local HTTP endpoint. Use HTTPS for remot
 Source and documentation: https://github.com/pollice-verso/environment-harness
 
 MIT licensed. See LICENSE.
+
+`client.cancel(environmentId)` cancels a running session without its writer lease and returns unresolved agent work and external operations. `client.compare(ids)` retains the existing response fields and adds typed `metric_groups`, `warnings` and selected report revisions. Incompatible units or definitions appear in separate groups. Legacy reports without definitions remain visible as raw values.
+
+Run `npm test` to compile and exercise client request shapes and inherited-record reconstruction. See [SDK compatibility](../../docs/COMPATIBILITY.md) for details.

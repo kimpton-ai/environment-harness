@@ -29,6 +29,7 @@ export class EnvironmentClient {
     command(environment, operation, args = {}) { return this.request('POST', `/v1/environments/${encodeURIComponent(environment)}/commands`, { operation, arguments: args }); }
     events(environment, after = 0) { return this.request('GET', `/v1/environments/${encodeURIComponent(environment)}/events?after=${after}`); }
     agentWork(environment) { return this.request('GET', `/v1/environments/${encodeURIComponent(environment)}/agent-work`); }
+    cancel(environment) { return this.command(environment, 'cancel'); }
     reports(environment) { return this.request('GET', `/v1/environments/${encodeURIComponent(environment)}/reports`); }
     compare(environments) { return this.request('POST', '/v1/compare', { environments }); }
     async *replay(environment) {

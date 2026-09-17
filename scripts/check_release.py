@@ -59,7 +59,7 @@ try:
             time.sleep(0.1)
     else:
         raise RuntimeError("Installed viewer did not become ready")
-    for asset in ("app.js", "client.js", "types.js", "style.css"):
+    for asset in ("app.js", "timeline.js", "client.js", "types.js", "style.css"):
         assert request("/viewer/" + asset).status == 200
     try:
         request("/v1/environments")
@@ -84,12 +84,20 @@ try:
     events = request(f"/v1/environments/{parent}/events", participant_token).read().decode()
     assert "synthetic-secret-alice" in events
     assert "synthetic-secret-bob" not in events
+    client = EnvironmentClient(origin, token, allow_loopback=True)
+    comparison = client.request("POST", "/v1/compare", {"environments": [parent, child]})
+    assert len(comparison["metric_groups"]) == 1
+    assert comparison["metric_groups"][0]["definition"]["unit"] == "count"
+    cancelled = client.cancel(parent)
+    assert cancelled["status"] == "cancelled" and not cancelled["unresolved_agent_work"]
+    assert client.cancel(parent) == cancelled
 finally:
     server.terminate()
     server.wait(timeout=10)
 print(json.dumps({"wheel_import": True, "parent_total": 10, "branch_total": 24,
     "single_lineage": True, "viewer_assets": True, "authenticated_export": True,
-    "unauthenticated_denied": True, "cross_participant_denied": True}))
+    "unauthenticated_denied": True, "cross_participant_denied": True,
+    "defined_score_groups": True, "idempotent_cancellation": True}))
 '''
 
 
