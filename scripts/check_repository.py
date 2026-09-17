@@ -255,8 +255,10 @@ def check_version_metadata(release_tag: str | None = None) -> None:
 
 
 def check_release_workflow_binding() -> None:
-    workflow = (ROOT / ".github/workflows/release.yml").read_text()
-    required = {
+    release = (ROOT / ".github/workflows/release.yml").read_text()
+    orchestration = (ROOT / ".github/workflows/release-orchestration.yml").read_text()
+    release_pr = (ROOT / ".github/workflows/release-pr.yml").read_text()
+    release_required = {
         '"v[0-9]+.[0-9]+.[0-9]+"': "strict SemVer tag trigger",
         "RELEASE_TAG: ${{ github.ref_name }}": "event tag binding",
         'test "$GITHUB_SHA" = "$release_commit"': "attested workflow commit",
@@ -266,9 +268,36 @@ def check_release_workflow_binding() -> None:
         'gh attestation verify "$artifact"': "per-artifact provenance verification",
         'cmp "$artifact" "$released/$(basename "$artifact")"': "idempotent artifact comparison",
     }
-    missing = [description for snippet, description in required.items() if snippet not in workflow]
+    orchestration_required = {
+        "python scripts/release_version.py detect": "unreleased version detection",
+        "actions/create-github-app-token@": "release App authentication",
+        'app-id: "3369417"': "reviewed release App identity",
+        "permission-contents: write": "scoped tag permission",
+        '--field ref="refs/tags/$RELEASE_TAG"': "protected tag creation",
+        '--field sha="$GITHUB_SHA"': "tag-to-reviewed-main binding",
+    }
+    release_pr_required = {
+        "workflow_dispatch:": "maintainer release decision",
+        "actions/create-github-app-token@": "release App authentication",
+        'app-id: "3369417"': "reviewed release App identity",
+        "permission-contents: write": "scoped release branch permission",
+        "permission-pull-requests: write": "scoped release PR permission",
+        "python scripts/release_version.py prepare": "coordinated version preparation",
+        'git commit --message "chore: release $RELEASE_TAG"': "reviewable release commit",
+        "gh pr create --base main": "release pull request",
+    }
+    missing = [
+        description
+        for workflow, required in (
+            (release, release_required),
+            (orchestration, orchestration_required),
+            (release_pr, release_pr_required),
+        )
+        for snippet, description in required.items()
+        if snippet not in workflow
+    ]
     if missing:
-        raise PolicyError("release workflow lacks " + ", ".join(missing))
+        raise PolicyError("release automation lacks " + ", ".join(missing))
 
 
 def check_dependency_configuration() -> None:
