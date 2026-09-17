@@ -193,17 +193,18 @@ def test_command_output_reader_propagates_stream_failure(monkeypatch):
         run(Stream([OSError("broken")]))
 
 
-def test_subprocess_group_helpers_cover_windows_and_missing_posix_leader(monkeypatch):
-    monkeypatch.setattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 512, raising=False)
+def test_subprocess_group_helpers_cover_windows(monkeypatch):
+    if os.name != "nt":
+        monkeypatch.setattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 512, raising=False)
+        monkeypatch.setattr(_subprocess.os, "name", "nt")
     popen = []
     monkeypatch.setattr(
         _subprocess.subprocess,
         "Popen",
         lambda *args, **kwargs: popen.append((args, kwargs)) or types.SimpleNamespace(),
     )
-    monkeypatch.setattr(_subprocess.os, "name", "nt")
     _subprocess.popen_group(["synthetic"], stdin=subprocess.PIPE)
-    assert popen[-1][1]["creationflags"] == 512
+    assert popen[-1][1]["creationflags"] == subprocess.CREATE_NEW_PROCESS_GROUP
     calls = []
     monkeypatch.setattr(_subprocess.subprocess, "run", lambda *args, **kwargs: calls.append((args, kwargs)))
     process = types.SimpleNamespace(
@@ -223,7 +224,15 @@ def test_subprocess_group_helpers_cover_windows_and_missing_posix_leader(monkeyp
     _subprocess.terminate_tree(types.SimpleNamespace(pid=456, kill=lambda: calls.append("kill"), wait=wait))
     assert waits == [1, None]
 
-    monkeypatch.setattr(_subprocess.os, "name", "posix")
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group lifecycle")
+def test_subprocess_group_helpers_cover_missing_posix_leader(monkeypatch):
+    popen = []
+    monkeypatch.setattr(
+        _subprocess.subprocess,
+        "Popen",
+        lambda *args, **kwargs: popen.append((args, kwargs)) or types.SimpleNamespace(),
+    )
     _subprocess.popen_group(["synthetic"], stdin=subprocess.PIPE)
     assert popen[-1][1]["start_new_session"] is True
     monkeypatch.setattr(

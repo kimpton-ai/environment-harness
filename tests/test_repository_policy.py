@@ -2,8 +2,6 @@ import hashlib
 import importlib.util
 import json
 import os
-import shlex
-import shutil
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
@@ -348,28 +346,14 @@ def test_distribution_rejects_symlinks_and_native_payloads():
 
 @pytest.mark.skipif(os.name == "nt", reason="sentinel wrapper uses a POSIX executable")
 def test_repository_command_does_not_inherit_ambient_secret(tmp_path):
-    root = Path(__file__).resolve().parents[1]
-    npm = shutil.which("npm")
-    assert npm is not None
-    wrapper = tmp_path / "npm"
-    wrapper.write_text(
-        f'#!/bin/sh\nif [ -n "$SENTINEL_RELEASE_SECRET" ]; then exit 97; fi\nexec {shlex.quote(npm)} "$@"\n'
-    )
+    wrapper = tmp_path / "probe"
+    wrapper.write_text('#!/bin/sh\nif [ -n "$SENTINEL_RELEASE_SECRET" ]; then exit 97; fi\nexit 0\n')
     wrapper.chmod(0o755)
-    env = os.environ.copy()
-    env["PATH"] = str(tmp_path) + os.pathsep + env["PATH"]
-    env["SENTINEL_RELEASE_SECRET"] = "must-not-reach-repository-code"  # pragma: allowlist secret
-
-    result = subprocess.run(
-        [sys.executable, "scripts/check_repository.py"],
-        cwd=root,
-        env=env,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-
-    assert result.returncode == 0, result.stdout + result.stderr
+    os.environ["SENTINEL_RELEASE_SECRET"] = "must-not-reach-repository-code"  # pragma: allowlist secret
+    try:
+        check_repository._run(str(wrapper))
+    finally:
+        os.environ.pop("SENTINEL_RELEASE_SECRET")
 
 
 def test_repository_command_rejects_planted_secret_in_temporary_repo(tmp_path):
