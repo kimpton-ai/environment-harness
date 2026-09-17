@@ -9,6 +9,8 @@ let generation = 0;
 let chosenCheckpoint = '';
 const owner = crypto.randomUUID();
 const selected = new Set<string>();
+const localViewer = location.protocol === 'http:' && location.hostname === '127.0.0.1';
+const localCredentialKey = 'environment-harness-local-credential';
 const json = (value: unknown) => JSON.stringify(value, null, 2);
 function message(text: string) {el('message').textContent = text;}
 async function attempt(fn: () => Promise<void>) {try {await fn();} catch (error) {message(error instanceof Error ? error.message : 'Operation failed');}}
@@ -77,7 +79,43 @@ async function download(path: string, filename: string) {
   if (!response.ok) throw new Error(`Export returned HTTP ${response.status}`);
   const link = document.createElement('a'); link.href = URL.createObjectURL(await response.blob()); link.download = filename; link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
-el<HTMLFormElement>('connect-form').onsubmit = event => {event.preventDefault(); void attempt(async () => {client = new EnvironmentClient(location.origin, el<HTMLInputElement>('token').value, true); await client.request('GET', '/v1/environment'); el('access').hidden = true; el('workspace').hidden = false; el('connection').textContent = 'Connected'; try {await list();} catch {message('Participant credentials can attach by environment ID.');}});};
+async function connect(token: string, rememberLocal = false) {
+  client = new EnvironmentClient(location.origin, token, true);
+  await client.request('GET', '/v1/environment');
+  el<HTMLInputElement>('token').value = token;
+  if (localViewer) {
+    try {
+      sessionStorage.removeItem(localCredentialKey);
+      if (rememberLocal) sessionStorage.setItem(localCredentialKey, token);
+    } catch { /* Connection still works when browser storage is disabled. */ }
+  }
+  el('access').hidden = true; el('workspace').hidden = false; el('connection').textContent = 'Connected';
+  try {await list();} catch {message('Participant credentials can attach by environment ID.');}
+}
+el<HTMLFormElement>('connect-form').onsubmit = event => {event.preventDefault(); void attempt(() => connect(el<HTMLInputElement>('token').value));};
+
+async function connectLocal() {
+  const params = new URLSearchParams(location.hash.slice(1));
+  const ticket = params.get('local-login');
+  if (ticket !== null) history.replaceState(null, '', location.pathname + location.search);
+  if (!localViewer) return;
+  let token: string | null = null;
+  try {
+    if (ticket !== null) {
+      try {sessionStorage.removeItem(localCredentialKey);} catch { /* Storage is optional. */ }
+      const response = await fetch('/local/connect', {method:'POST', headers:{'X-Local-Login':ticket}, redirect:'error', cache:'no-store', signal:AbortSignal.timeout(10000)});
+      if (!response.ok) throw new Error('The local connection link expired. Restart with serve --open to reconnect.');
+      token = (await response.json() as {token:string}).token;
+    } else {
+      try {token = sessionStorage.getItem(localCredentialKey);} catch { /* Storage is optional. */ }
+    }
+    if (token) await connect(token, true);
+  } catch (error) {
+    try {sessionStorage.removeItem(localCredentialKey);} catch { /* Storage is optional. */ }
+    message(error instanceof Error ? error.message : 'Local connection failed');
+  }
+}
+void connectLocal();
 el('attach').onclick = () => void attempt(() => attach(el<HTMLInputElement>('environment-id').value.trim()));
 el('refresh').onclick = () => void attempt(async () => {await list(); if (environment) await attach(environment.id);});
 el('load-more').onclick = () => void attempt(loadEvents);

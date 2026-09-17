@@ -8,6 +8,8 @@ let generation = 0;
 let chosenCheckpoint = '';
 const owner = crypto.randomUUID();
 const selected = new Set();
+const localViewer = location.protocol === 'http:' && location.hostname === '127.0.0.1';
+const localCredentialKey = 'environment-harness-local-credential';
 const json = (value) => JSON.stringify(value, null, 2);
 function message(text) { el('message').textContent = text; }
 async function attempt(fn) { try {
@@ -121,7 +123,7 @@ function renderEvents() {
         holder.append(text('p', 'No recorded events match this perspective.'));
 }
 async function lease() { if (!environment)
-    throw new Error('Select an environment first'); return client.command(environment.id, 'lease', { owner, ttl: 30 }); }
+    throw new Error('Select a environment first'); return client.command(environment.id, 'lease', { owner, ttl: 30 }); }
 async function download(path, filename) {
     // Fetch through the authenticated client without putting credentials in URLs.
     const response = await fetch(client.endpoint + path, { headers: { Authorization: `Bearer ${el('token').value}` }, redirect: 'error', cache: 'no-store' });
@@ -133,12 +135,66 @@ async function download(path, filename) {
     link.click();
     setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
-el('connect-form').onsubmit = event => { event.preventDefault(); void attempt(async () => { client = new EnvironmentClient(location.origin, el('token').value, true); await client.request('GET', '/v1/environment'); el('access').hidden = true; el('workspace').hidden = false; el('connection').textContent = 'Connected'; try {
-    await list();
+async function connect(token, rememberLocal = false) {
+    client = new EnvironmentClient(location.origin, token, true);
+    await client.request('GET', '/v1/environment');
+    el('token').value = token;
+    if (localViewer) {
+        try {
+            sessionStorage.removeItem(localCredentialKey);
+            if (rememberLocal)
+                sessionStorage.setItem(localCredentialKey, token);
+        }
+        catch { /* Connection still works when browser storage is disabled. */ }
+    }
+    el('access').hidden = true;
+    el('workspace').hidden = false;
+    el('connection').textContent = 'Connected';
+    try {
+        await list();
+    }
+    catch {
+        message('Participant credentials can attach by environment ID.');
+    }
 }
-catch {
-    message('Participant credentials can attach by environment ID.');
-} }); };
+el('connect-form').onsubmit = event => { event.preventDefault(); void attempt(() => connect(el('token').value)); };
+async function connectLocal() {
+    const params = new URLSearchParams(location.hash.slice(1));
+    const ticket = params.get('local-login');
+    if (ticket !== null)
+        history.replaceState(null, '', location.pathname + location.search);
+    if (!localViewer)
+        return;
+    let token = null;
+    try {
+        if (ticket !== null) {
+            try {
+                sessionStorage.removeItem(localCredentialKey);
+            }
+            catch { /* Storage is optional. */ }
+            const response = await fetch('/local/connect', { method: 'POST', headers: { 'X-Local-Login': ticket }, redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(10000) });
+            if (!response.ok)
+                throw new Error('The local connection link expired. Restart with serve --open to reconnect.');
+            token = (await response.json()).token;
+        }
+        else {
+            try {
+                token = sessionStorage.getItem(localCredentialKey);
+            }
+            catch { /* Storage is optional. */ }
+        }
+        if (token)
+            await connect(token, true);
+    }
+    catch (error) {
+        try {
+            sessionStorage.removeItem(localCredentialKey);
+        }
+        catch { /* Storage is optional. */ }
+        message(error instanceof Error ? error.message : 'Local connection failed');
+    }
+}
+void connectLocal();
 el('attach').onclick = () => void attempt(() => attach(el('environment-id').value.trim()));
 el('refresh').onclick = () => void attempt(async () => { await list(); if (environment)
     await attach(environment.id); });

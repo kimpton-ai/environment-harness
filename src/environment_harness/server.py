@@ -21,7 +21,7 @@ class Command(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
 
 
-def create_app(session):
+def create_app(session, *, local_login=None):
     store = session.store
     app = FastAPI(title="Environment session service", version="1.0.0")
 
@@ -68,6 +68,18 @@ def create_app(session):
         if not authorization.startswith("Bearer "):
             raise HTTPException(401, "Bearer credential required")
         return store.authenticate(authorization[7:])
+
+    if local_login is not None:
+        @app.post("/local/connect", include_in_schema=False)
+        def local_connect(request: Request, x_local_login: str = Header(default="")):
+            if (
+                request.client is None
+                or request.client.host not in ("127.0.0.1", "::1")
+                or str(request.base_url).rstrip("/") != local_login.origin
+                or request.headers.get("origin") != local_login.origin
+            ):
+                raise HTTPException(403, "Local connection requires the loopback viewer origin")
+            return {"token": local_login.redeem(x_local_login)}
 
     @app.get("/health")
     def health():

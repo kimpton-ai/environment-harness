@@ -29,6 +29,7 @@ def main():
     serve = sub.add_parser("serve")
     serve.add_argument("--port", type=int, default=8765)
     serve.add_argument("--environment", default="synthetic-protocol")
+    serve.add_argument("--open", action="store_true", help="Open and connect the local browser viewer")
     for name in ("replay", "attach", "checkpoint", "resume", "cancel", "export"):
         command = sub.add_parser(name)
         command.add_argument("environment")
@@ -94,8 +95,11 @@ def main():
         print(json.dumps(result, indent=2))
         return
     if args.command == "serve":
+        import threading
+
         import uvicorn
 
+        from .local_viewer import LocalViewerLogin, open_when_ready
         from .server import create_app
 
         credential = store.issue(who, 86400)
@@ -103,7 +107,14 @@ def main():
         path.write_text(credential + "\n")
         os.chmod(path, 0o600)
         print(f"Viewer: http://127.0.0.1:{args.port}\nCredential file: {path}", flush=True)
-        uvicorn.run(create_app(session), host="127.0.0.1", port=args.port, access_log=False)
+        login = LocalViewerLogin(f"http://127.0.0.1:{args.port}", credential) if args.open else None
+        server = uvicorn.Server(uvicorn.Config(
+            create_app(session, local_login=login), host="127.0.0.1", port=args.port,
+            access_log=False, proxy_headers=False,
+        ))
+        if login is not None:
+            threading.Thread(target=open_when_ready, args=(server, login), daemon=True).start()
+        server.run()
         return
     if args.command == "token":
         if args.participant:

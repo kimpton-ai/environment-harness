@@ -15,12 +15,12 @@ git clone --branch v0.1.0 --depth 1 https://github.com/pollice-verso/environment
 cd environment-harness
 uv sync --extra server
 uv run python examples/branch_comparison.py --store .local/branch-demo
-uv run environment-harness --store .local/branch-demo serve
+uv run environment-harness --store .local/branch-demo serve --open
 ```
 
-Open `http://127.0.0.1:8765` in your browser. Paste the credential from the `researcher-token` file printed by the server. The credential authorizes only this local harness tenant. The viewer keeps it in page memory and sends it only to the same service origin.
+The viewer opens and connects automatically at `http://127.0.0.1:8765`. No account or credential copying is needed. The browser exchanges a single-use connection link, valid for five minutes, for the local tenant credential and removes the link from the address bar. The local viewer keeps that credential in tab-scoped session storage so refreshing the tab stays connected. API requests still require authentication.
 
-On macOS, copy it without printing it in the terminal: `pbcopy < .local/branch-demo/researcher-token` from a second terminal in this checkout. On other systems, open that file locally and copy its contents. Do not share the credential or include it in a recording.
+Omit `--open` when running without a browser. You can then open the viewer and paste the credential from the printed `researcher-token` file. Manually entered credentials stay in page memory. On macOS, `pbcopy < .local/branch-demo/researcher-token` copies the credential without printing it. Do not share credentials or connection links.
 
 The example runs Alice and Bob for three turns, checkpoints their shared total of 6, and creates a branch with its total set to 20. It runs both environments for two more turns: the parent ends at 10, the branch at 24. Each participant receives its own synthetic private field. The two environments share a lineage; they are not independent samples.
 

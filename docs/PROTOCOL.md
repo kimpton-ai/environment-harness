@@ -6,6 +6,8 @@ The supplier service owns the environment. HTTPS commands use bearer credentials
 
 Administrative Python methods are trusted embedding APIs. They must not be exposed directly to untrusted agents. Store directories are private to the operating-system account. SQL credentials, signing keys, model credentials and resource handles belong to the server or worker scope.
 
+The loopback CLI's `serve --open` option opens a browser with a single-use connection ticket in the URL fragment. The viewer removes that fragment and exchanges the ticket through `POST /local/connect`, which requires the exact loopback origin and a loopback peer. Tickets expire after five minutes and cannot be reused. This endpoint is absent from ordinary supplier applications. The CLI disables proxy-header trust. The local viewer stores the resulting bearer credential in tab-scoped session storage for refreshes; manual connections retain credentials only in page memory. Every supplier API request still requires its bearer credential.
+
 ## API
 
 | Operation | Route |
