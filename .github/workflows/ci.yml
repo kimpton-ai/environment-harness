@@ -114,7 +114,7 @@ jobs:
       - run: uv sync --frozen --extra server
       - name: Combine and enforce cross-platform coverage
         run: |
-          uv run --no-sync coverage combine coverage-data
+          uv run --no-sync coverage combine coverage-data/coverage-*
           uv run --no-sync coverage json
           uv run --no-sync python scripts/check_coverage.py
 
