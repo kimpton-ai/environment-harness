@@ -1,11 +1,11 @@
 """Synthetic protocol fixture only. No benchmark or supplier mechanics."""
 
-from .contracts import Capabilities, EnvironmentSpec, EventInput, Transition
+from .contracts import Capabilities, EnvironmentSpec, EventInput, Mode, Transition
 from .errors import Unsupported
 
 
 class SyntheticEnvironment:
-    def __init__(self, mode="simultaneous"):
+    def __init__(self, mode: Mode = "simultaneous"):
         self.spec = EnvironmentSpec(
             id="synthetic-protocol",
             version="1",

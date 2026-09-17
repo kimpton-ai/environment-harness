@@ -48,8 +48,12 @@ class CommandAgent:
                     env={"PATH": os.defpath, "LANG": "C.UTF-8", "PYTHON_DOTENV_DISABLED": "1"},
                     start_new_session=True,
                 )
+                stdout = process.stdout
+                if stdout is None:
+                    self._terminate_group(process)
+                    raise Conflict("agent output pipe is unavailable")
                 selector = selectors.DefaultSelector()
-                selector.register(process.stdout, selectors.EVENT_READ)
+                selector.register(stdout, selectors.EVENT_READ)
                 output = bytearray()
                 deadline = time.monotonic() + self.timeout
                 try:
@@ -61,7 +65,7 @@ class CommandAgent:
                             raise Conflict("agent deadline exceeded")
                         ready = selector.select(min(remaining, 0.1))
                         if ready:
-                            chunk = os.read(process.stdout.fileno(), 65536)
+                            chunk = os.read(stdout.fileno(), 65536)
                             if not chunk:
                                 break
                             output.extend(chunk)
@@ -82,7 +86,7 @@ class CommandAgent:
                 finally:
                     selector.close()
                     self._terminate_group(process)
-                    process.stdout.close()
+                    stdout.close()
 
     @staticmethod
     def _terminate_group(process):
@@ -97,12 +101,16 @@ class CommandAgent:
             process.poll()
             try:
                 os.killpg(process.pid, 0)
-            except ProcessLookupError:
+            except (PermissionError, ProcessLookupError):
                 break
             time.sleep(0.02)
-        with suppress(ProcessLookupError):
+        with suppress(PermissionError, ProcessLookupError):
             os.killpg(process.pid, signal.SIGKILL)
-        process.wait()
+        try:
+            process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
 
     def checkpoint(self):
         raise Unsupported("arbitrary command programs have no checkpoint hook")

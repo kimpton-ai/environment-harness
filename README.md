@@ -4,6 +4,8 @@ EnvironmentHarness is an open-source SDK for evaluating agents in persistent sha
 
 You provide the environment, agents and grading rules. The harness manages the session lifecycle and records the evidence those rules use. The MIT-licensed SDK includes local execution, an authenticated HTTP service, Python and TypeScript clients, and an evidence viewer. Local installation checks need no account or model API key.
 
+Report vulnerabilities privately through the process in [SECURITY.md](SECURITY.md). Do not put credentials or private environment sessions in a public issue.
+
 [Evaluation workflow](#how-an-evaluation-works) · [Install](#install-and-run) · [Connect an agent](#connect-your-agent) · [Define an environment](#define-your-environment) · [Grading](#grade-and-interpret-results) · [Release scope](docs/STATUS.md)
 
 ## When to use it
@@ -44,7 +46,7 @@ The included counter and agents are synthetic installation checks. They demonstr
 On macOS or Linux, install Python 3.12 or later and [uv](https://docs.astral.sh/uv/getting-started/installation/), then run:
 
 ```sh
-git clone --branch v0.1.0 --depth 1 https://github.com/pollice-verso/environment-harness.git
+git clone --branch v0.2.0 --depth 1 https://github.com/kimpton-ai/environment-harness.git
 cd environment-harness
 uv sync --extra server
 uv run python examples/branch_comparison.py --store .local/branch-demo

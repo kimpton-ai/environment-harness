@@ -70,6 +70,7 @@ def create_app(session, *, local_login=None):
         return store.authenticate(authorization[7:])
 
     if local_login is not None:
+
         @app.post("/local/connect", include_in_schema=False)
         def local_connect(request: Request, x_local_login: str = Header(default="")):
             if (

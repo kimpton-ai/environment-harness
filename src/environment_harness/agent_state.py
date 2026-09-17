@@ -7,7 +7,12 @@ from .errors import Conflict
 
 class AgentJournal:
     def __init__(self, session, environment, principal, revision):
-        self.session, self.environment, self.principal, self.revision = session, environment, principal, revision
+        self.session, self.environment, self.principal, self.revision = (
+            session,
+            environment,
+            principal,
+            revision,
+        )
 
     def load(self):
         with self.session.store.transaction() as db:

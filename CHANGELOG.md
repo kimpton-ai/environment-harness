@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.2.0 - 2026-09-17
+
+The public SDK now includes coordinated vulnerability reporting, governance and support files, dependency cooldowns, immutable workflow and container pins, credential-free security scans, cross-platform CI, positive distribution manifests, installed-wheel smoke tests, SBOM and artifact-attestation release automation, and protected-release setup guidance. Python and TypeScript coverage gates require at least 90% statements/lines and 80% branches; security-critical Python modules meet those floors independently.
+
 Session recovery now rejects stale worker completion and protects reconciled responses. Cancellation works while a writer is active, terminates managed command process groups and reports unresolved effects. The runner validates registered agent implementations, and conformance supports coordinator closure and explicit event inputs.
 
 Comparisons keep incompatible metric definitions and units in separate groups. Legacy reports remain readable as raw values. Large inherited records use bounded chunks and can be branched repeatedly without adding encoding layers. Existing stores require no migration. See [compatibility and protocol details](docs/COMPATIBILITY.md).

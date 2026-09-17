@@ -102,9 +102,15 @@ class EnvironmentSession:
                 ),
             )
             self.store.append(
-                db, environment, 0, "session.created", {"experiment": manifest, "manifest_hash": digest(manifest)}
+                db,
+                environment,
+                0,
+                "session.created",
+                {"experiment": manifest, "manifest_hash": digest(manifest)},
             )
-            return self._public(db.execute("SELECT * FROM environments WHERE id=?", (environment,)).fetchone())
+            return self._public(
+                db.execute("SELECT * FROM environments WHERE id=?", (environment,)).fetchone()
+            )
 
     def _public(self, row):
         manifest = json.loads(row["manifest"])
@@ -231,7 +237,9 @@ class EnvironmentSession:
                 and (spec.scheduling != "sequential" or scheduler["actor"] == participant),
                 "deadline": scheduler["deadline"],
             }
-            self.store.append(db, environment, row["revision"], "observation.delivered", result, (participant,))
+            self.store.append(
+                db, environment, row["revision"], "observation.delivered", result, (participant,)
+            )
             db.execute(
                 "INSERT INTO observations VALUES (?,?,?,?,?,?)",
                 (result["id"], environment, participant, generation, row["revision"], encode(result)),
@@ -355,7 +363,16 @@ class EnvironmentSession:
             if not intent:
                 db.execute(
                     "INSERT INTO transitions VALUES (?,?,?,?,?,?,?,?)",
-                    (environment, phase, input_hash, encode(request), lease["epoch"], "computing", None, None),
+                    (
+                        environment,
+                        phase,
+                        input_hash,
+                        encode(request),
+                        lease["epoch"],
+                        "computing",
+                        None,
+                        None,
+                    ),
                 )
             elif not cached:
                 db.execute(
@@ -483,7 +500,14 @@ class EnvironmentSession:
             }
             db.execute(
                 "UPDATE environments SET state=?,revision=?,rng=?,scheduler=?,status=? WHERE id=?",
-                (encode(result.state), revision, encode(rng.getstate()), encode(scheduler), status, environment),
+                (
+                    encode(result.state),
+                    revision,
+                    encode(rng.getstate()),
+                    encode(scheduler),
+                    status,
+                    environment,
+                ),
             )
             db.execute(
                 "UPDATE transitions SET status='committed' WHERE environment=? AND revision=? AND input_hash=?",
@@ -545,7 +569,9 @@ class EnvironmentSession:
                 participant["agent_state"] = agent_state
             if len(encode(participants)) > json.loads(row["manifest"])["policy"]["max_state_bytes"]:
                 raise Conflict("participant context limit exceeded")
-            db.execute("UPDATE environments SET participants=? WHERE id=?", (encode(participants), environment))
+            db.execute(
+                "UPDATE environments SET participants=? WHERE id=?", (encode(participants), environment)
+            )
             self.store.append(
                 db,
                 environment,
@@ -562,7 +588,9 @@ class EnvironmentSession:
             participants = json.loads(row["participants"])
             if participant not in participants:
                 raise Unsupported("joining requires an environment-specific versioned participant contract")
-            if db.execute("SELECT 1 FROM actions WHERE environment=? AND status='accepted'", (environment,)).fetchone():
+            if db.execute(
+                "SELECT 1 FROM actions WHERE environment=? AND status='accepted'", (environment,)
+            ).fetchone():
                 raise Conflict("authority transfer requires a decision boundary")
             if not active and sum(p["active"] for p in participants.values()) <= 1:
                 raise Conflict("cannot remove last active participant")
@@ -623,7 +651,9 @@ class EnvironmentSession:
             if len(encode(members)) > limit or len(encode(response)) > limit:
                 raise Conflict("recovered agent state exceeds limit")
             if row["status"] in ("running", "paused"):
-                db.execute("UPDATE environments SET participants=? WHERE id=?", (encode(members), environment))
+                db.execute(
+                    "UPDATE environments SET participants=? WHERE id=?", (encode(members), environment)
+                )
             db.execute(
                 "UPDATE agent_work SET status='responded',response=?,agent_state=? WHERE environment=? AND id=?",
                 (encode(response), encode(agent_state), environment, operation_id),
@@ -654,7 +684,8 @@ class EnvironmentSession:
             if exact_agents and any(p["agent_state"] is None for p in participants.values()):
                 raise Unsupported("one or more agent programs cannot continue exactly")
             if db.execute(
-                "SELECT 1 FROM operations WHERE environment=? AND status IN ('dispatching','unknown')", (environment,)
+                "SELECT 1 FROM operations WHERE environment=? AND status IN ('dispatching','unknown')",
+                (environment,),
             ).fetchone():
                 raise Conflict("ambiguous external operations must be reconciled before checkpoint")
             if db.execute(
@@ -681,7 +712,9 @@ class EnvironmentSession:
             }
             snapshot["actions"] = [
                 dict(a)
-                for a in db.execute("SELECT * FROM actions WHERE environment=? AND status='accepted'", (environment,))
+                for a in db.execute(
+                    "SELECT * FROM actions WHERE environment=? AND status='accepted'", (environment,)
+                )
             ]
             snapshot["operations"] = [
                 dict(o)
@@ -698,7 +731,8 @@ class EnvironmentSession:
                 dict(a) for a in db.execute("SELECT * FROM artifacts WHERE environment=?", (environment,))
             ]
             snapshot["artifact_aliases"] = [
-                dict(a) for a in db.execute("SELECT * FROM artifact_aliases WHERE environment=?", (environment,))
+                dict(a)
+                for a in db.execute("SELECT * FROM artifact_aliases WHERE environment=?", (environment,))
             ]
             snapshot["evidence_head"] = db.execute(
                 "SELECT hash FROM events WHERE environment=? ORDER BY seq DESC LIMIT 1", (environment,)
@@ -737,13 +771,16 @@ class EnvironmentSession:
             }:
                 raise Conflict("agent versions changed; explicit migration required")
             if db.execute(
-                "SELECT 1 FROM operations WHERE environment=? AND status IN ('dispatching','unknown')", (environment,)
+                "SELECT 1 FROM operations WHERE environment=? AND status IN ('dispatching','unknown')",
+                (environment,),
             ).fetchone():
                 raise Conflict("reconcile ambiguous operations before resume")
             db.execute("UPDATE environments SET status='running' WHERE id=?", (environment,))
             # The deadline stays fixed. Real time did not stop while the worker was absent.
             self.store.append(db, environment, row["revision"], "session.resumed", {"epoch": lease["epoch"]})
-            return self._public(db.execute("SELECT * FROM environments WHERE id=?", (environment,)).fetchone())
+            return self._public(
+                db.execute("SELECT * FROM environments WHERE id=?", (environment,)).fetchone()
+            )
 
     def branch(self, environment, who, checkpoint, interventions=None, *, new_environment=None):
         with self.store.transaction() as db:
@@ -867,7 +904,8 @@ class EnvironmentSession:
             if not report:
                 raise Conflict("final outcome report is missing")
             if db.execute(
-                "SELECT 1 FROM operations WHERE environment=? AND status NOT IN ('succeeded','failed')", (environment,)
+                "SELECT 1 FROM operations WHERE environment=? AND status NOT IN ('succeeded','failed')",
+                (environment,),
             ).fetchone():
                 raise Conflict("external operations remain unsettled")
             db.execute("UPDATE environments SET status='completed' WHERE id=?", (environment,))
@@ -891,7 +929,8 @@ class EnvironmentSession:
             if row["status"] != "cancelled":
                 db.execute(
                     "UPDATE environments SET status='cancelled',lease_epoch=lease_epoch+1,"
-                    "lease_owner=NULL,lease_until=0 WHERE id=?", (environment,),
+                    "lease_owner=NULL,lease_until=0 WHERE id=?",
+                    (environment,),
                 )
                 db.execute(
                     "UPDATE agent_work SET status='failed' WHERE environment=? AND status='prepared'",
@@ -902,16 +941,25 @@ class EnvironmentSession:
                     (environment,),
                 )
                 Operations(self.store)._cancel_prepared(db, environment, row)
-                self.store.append(db, environment, row["revision"], "session.cancelled", {"reason": "researcher_control"})
+                self.store.append(
+                    db, environment, row["revision"], "session.cancelled", {"reason": "researcher_control"}
+                )
             return {
                 "status": "cancelled",
-                "unresolved_agent_work": [r["id"] for r in db.execute(
-                    "SELECT id FROM agent_work WHERE environment=? AND status='unknown' ORDER BY id", (environment,),
-                )],
-                "unresolved_operations": [r["id"] for r in db.execute(
-                    "SELECT id FROM operations WHERE environment=? AND status IN ('dispatching','unknown') ORDER BY id",
-                    (environment,),
-                )],
+                "unresolved_agent_work": [
+                    r["id"]
+                    for r in db.execute(
+                        "SELECT id FROM agent_work WHERE environment=? AND status='unknown' ORDER BY id",
+                        (environment,),
+                    )
+                ],
+                "unresolved_operations": [
+                    r["id"]
+                    for r in db.execute(
+                        "SELECT id FROM operations WHERE environment=? AND status IN ('dispatching','unknown') ORDER BY id",
+                        (environment,),
+                    )
+                ],
             }
 
     def control(self, environment, who, lease, command):

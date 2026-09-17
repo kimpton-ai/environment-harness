@@ -1,0 +1,98 @@
+"""Prove changed regression tests fail against the base revision."""
+
+from __future__ import annotations
+
+import io
+import os
+import subprocess
+import tarfile
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+BASE = os.environ.get("REGRESSION_BASE_REF", "origin/main")
+PROOF_TARGETS = ("tests/test_diff_coverage_edges.py::test_command_cleanup_falls_back_to_direct_process_kill",)
+SAFE_ENV = {
+    "COMSPEC",
+    "LANG",
+    "LC_ALL",
+    "NUMBER_OF_PROCESSORS",
+    "PATH",
+    "PATHEXT",
+    "SYSTEMROOT",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "WINDIR",
+}
+
+
+def git(*arguments: str, text: bool = False):
+    return subprocess.run(["git", *arguments], cwd=ROOT, check=True, capture_output=True, text=text).stdout
+
+
+def main() -> None:
+    changed = set(
+        git(
+            "diff",
+            "--name-only",
+            "--diff-filter=AM",
+            BASE,
+            "--",
+            "tests/test_*.py",
+            text=True,
+        ).splitlines()
+    )
+    changed.update(
+        git(
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+            "--",
+            "tests/test_*.py",
+            text=True,
+        ).splitlines()
+    )
+    changed = sorted(changed)
+    if not changed:
+        print("regression proof: no added or changed test files")
+        return
+    proof_files = {target.split("::", 1)[0] for target in PROOF_TARGETS}
+    if not proof_files.issubset(changed):
+        raise SystemExit("regression proof targets must be added or changed relative to the base revision")
+    archive = git("archive", "--format=tar", BASE)
+    with tempfile.TemporaryDirectory(prefix="environment-harness-regression-") as directory:
+        checkout = Path(directory) / "base"
+        checkout.mkdir()
+        with tarfile.open(fileobj=io.BytesIO(archive)) as bundle:
+            bundle.extractall(checkout, filter="data")
+        for relative in changed:
+            source = ROOT / relative
+            destination = checkout / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(source.read_bytes())
+        env = {key: value for key, value in os.environ.items() if key in SAFE_ENV}
+        env["UV_CACHE_DIR"] = str(Path(directory) / "uv-cache")
+        result = subprocess.run(
+            [
+                "uv",
+                "run",
+                "--project",
+                str(checkout),
+                "--extra",
+                "server",
+                "pytest",
+                "-q",
+                *PROOF_TARGETS,
+            ],
+            cwd=checkout,
+            env=env,
+            check=False,
+        )
+        if result.returncode == 0:
+            raise SystemExit("changed regression tests also pass on the base revision")
+    print("regression proof: changed tests fail on the base revision")
+
+
+if __name__ == "__main__":
+    main()

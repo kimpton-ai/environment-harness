@@ -38,20 +38,23 @@ class ProcessEnvironment:
                 raise Unavailable("environment request exceeds limit")
             selector = selectors.DefaultSelector()
             try:
-                os.set_blocking(self.process.stdin.fileno(), False)
-                selector.register(self.process.stdin, selectors.EVENT_WRITE)
+                stdin, stdout = self.process.stdin, self.process.stdout
+                if stdin is None or stdout is None:
+                    raise Unavailable("environment worker pipes are unavailable")
+                os.set_blocking(stdin.fileno(), False)
+                selector.register(stdin, selectors.EVENT_WRITE)
                 sent = 0
                 result = bytearray()
                 deadline = time.monotonic() + self.timeout
                 while time.monotonic() < deadline:
                     for key, _ in selector.select(min(0.1, max(0, deadline - time.monotonic()))):
-                        if key.fileobj == self.process.stdin:
-                            sent += os.write(self.process.stdin.fileno(), payload[sent : sent + 65536])
+                        if key.fileobj == stdin:
+                            sent += os.write(stdin.fileno(), payload[sent : sent + 65536])
                             if sent == len(payload):
-                                selector.unregister(self.process.stdin)
-                                selector.register(self.process.stdout, selectors.EVENT_READ)
+                                selector.unregister(stdin)
+                                selector.register(stdout, selectors.EVENT_READ)
                         else:
-                            chunk = os.read(self.process.stdout.fileno(), 65536)
+                            chunk = os.read(stdout.fileno(), 65536)
                             if not chunk:
                                 raise Unavailable("environment worker exited")
                             result.extend(chunk)

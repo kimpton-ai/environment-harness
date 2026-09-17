@@ -1,0 +1,224 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions: {}
+
+env:
+  SUPPORTED_NPM: 11.17.0
+
+jobs:
+  python:
+    name: Python
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@557e51de59eb14aaaba2ed9621916900a91d50c6 # v6.6.1
+        with:
+          version: "0.12.0"
+          enable-cache: false
+      - run: uv sync --frozen --extra server
+      - run: uv run --no-sync pytest --cov --cov-branch --cov-report=term-missing --cov-report=json --cov-report=xml
+      - run: uv run --no-sync python scripts/check_coverage.py
+      - run: uv run --no-sync diff-cover coverage.xml --compare-branch=origin/main --fail-under=100
+      - run: uv run --no-sync python scripts/check_regression_tests.py
+      - run: uv run --no-sync python scripts/check_authorization_mutations.py
+      - run: uv run --no-sync ruff format --check src tests scripts examples
+      - run: uv run --no-sync ruff check src tests scripts examples
+      - run: uv run --no-sync pyright
+      - run: uv run --no-sync python scripts/build_contracts.py --check
+
+  compatibility:
+    name: Compatibility (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {label: linux-py313, os: ubuntu-latest, python: "3.13"}
+          - {label: linux-py314, os: ubuntu-latest, python: "3.14"}
+          - {label: macos-py312, os: macos-latest, python: "3.12"}
+          - {label: windows-py312, os: windows-latest, python: "3.12"}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: astral-sh/setup-uv@557e51de59eb14aaaba2ed9621916900a91d50c6 # v6.6.1
+        with:
+          version: "0.12.0"
+          enable-cache: false
+      - run: uv sync --frozen --extra server
+      - name: Run compatibility tests with branch coverage
+        env:
+          COVERAGE_FILE: coverage-${{ matrix.label }}
+        run: uv run --no-sync pytest -q --cov --cov-branch --cov-report=
+      - name: Upload compatibility coverage
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: compatibility-coverage-${{ matrix.label }}
+          path: coverage-${{ matrix.label }}
+          if-no-files-found: error
+          retention-days: 7
+
+  cross-platform:
+    name: Cross-platform
+    if: always()
+    needs: compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Require every compatibility shard
+        env:
+          MATRIX_RESULT: ${{ needs.compatibility.result }}
+        run: test "$MATRIX_RESULT" = success
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@557e51de59eb14aaaba2ed9621916900a91d50c6 # v6.6.1
+        with:
+          version: "0.12.0"
+          enable-cache: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: compatibility-coverage-*
+          path: coverage-data
+          merge-multiple: true
+      - run: uv sync --frozen --extra server
+      - name: Combine and enforce cross-platform coverage
+        run: |
+          uv run --no-sync coverage combine coverage-data
+          uv run --no-sync coverage json
+          uv run --no-sync python scripts/check_coverage.py
+
+  typescript:
+    name: TypeScript
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22.23.2"
+          cache: npm
+          cache-dependency-path: packages/typescript/package-lock.json
+      - run: npm install --global "npm@${SUPPORTED_NPM}" --ignore-scripts
+      - run: test "$(npm --version)" = "$SUPPORTED_NPM"
+      - run: test "$(npm config get min-release-age)" = 7
+      - run: npm ci --ignore-scripts --prefix packages/typescript
+      - run: npm run typecheck --prefix packages/typescript
+      - run: npm test --prefix packages/typescript
+      - run: python scripts/build_viewer.py --check
+
+  security:
+    name: Security
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@557e51de59eb14aaaba2ed9621916900a91d50c6 # v6.6.1
+        with:
+          version: "0.12.0"
+          enable-cache: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22.23.2"
+      - run: npm install --global "npm@${SUPPORTED_NPM}" --ignore-scripts
+      - run: uv sync --frozen --extra server
+      - run: npm ci --ignore-scripts --prefix packages/typescript
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        if: github.event_name == 'pull_request'
+        with:
+          fail-on-severity: high
+      - name: Scan complete Git history for secrets
+        run: >-
+          docker run --rm --volume "$GITHUB_WORKSPACE:/repo:ro"
+          ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+          git /repo --redact --no-banner
+      - uses: zizmorcore/zizmor-action@70fb788f84895a7701f5643d103d587e460b5c99 # v0.6.3
+        with:
+          advanced-security: false
+          online-audits: false
+          persona: pedantic
+          min-severity: medium
+          version: 1.30.0
+      - run: uv run --no-sync detect-secrets scan
+      - run: uv run --no-sync python scripts/check_repository.py --full
+      - run: uv export --frozen --all-extras --no-dev --no-emit-project --no-hashes | uv run --no-sync pip-audit -r /dev/stdin
+      - run: npm audit --audit-level=high --prefix packages/typescript
+      - name: Scan vulnerabilities and malicious packages with OSV and OpenSSF data
+        run: >-
+          docker run --rm --volume "$GITHUB_WORKSPACE:/repo:ro"
+          ghcr.io/google/osv-scanner-action:v2.5.1@sha256:dcd947131d8d11b8d0964de6590661fb921a4ecbd7b90a7cb21083acfc3fd8cc
+          --lockfile=/repo/uv.lock
+          --lockfile=/repo/packages/typescript/package-lock.json
+
+  distribution:
+    name: Distribution
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@557e51de59eb14aaaba2ed9621916900a91d50c6 # v6.6.1
+        with:
+          version: "0.12.0"
+          enable-cache: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22.23.2"
+      - run: npm install --global "npm@${SUPPORTED_NPM}" --ignore-scripts
+      - run: uv sync --frozen --extra server
+      - run: npm ci --ignore-scripts --prefix packages/typescript
+      - run: python scripts/build_viewer.py --check
+      - run: uv build
+      - run: npm pack --ignore-scripts --pack-destination ../../dist
+        working-directory: packages/typescript
+      - run: uv run --no-sync python scripts/check_distribution.py
+      - run: uv run --no-sync python scripts/check_release.py
+      - run: uv run --no-sync python scripts/check_browser_security.py

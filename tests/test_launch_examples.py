@@ -22,7 +22,9 @@ def test_branch_example_outcomes_and_private_history(tmp_path):
     assert report["comparison"]["environments"][0]["participants"] == ["alice", "bob"]
     store = EvidenceStore(tmp_path)
     for environment in (report["parent"], report["branch"]):
-        alice = Principal(tenant="local", subject="alice", role="agent", environment=environment, participant="alice")
+        alice = Principal(
+            tenant="local", subject="alice", role="agent", environment=environment, participant="alice"
+        )
         events = json.dumps(list(store.replay(environment, alice)))
         assert "synthetic-secret-alice" in events
         assert "synthetic-secret-bob" not in events
@@ -32,6 +34,9 @@ def test_branch_example_outcomes_and_private_history(tmp_path):
 def test_custom_command_example_runs_outside_checkout(tmp_path):
     result = subprocess.run(
         [sys.executable, str(ROOT / "examples/custom_agent.py"), "--store", str(tmp_path / "environment")],
-        cwd=tmp_path, capture_output=True, text=True, check=True,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     assert json.loads(result.stdout)["revision"] == 4

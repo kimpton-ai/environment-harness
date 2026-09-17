@@ -67,7 +67,9 @@ class EnvironmentClient:
         return self.request("GET", path)
 
     def submit(self, environment, action):
-        return self.request("POST", f"/v1/environments/{urllib.parse.quote(environment, safe='')}/actions", action)
+        return self.request(
+            "POST", f"/v1/environments/{urllib.parse.quote(environment, safe='')}/actions", action
+        )
 
     def command(self, environment, operation, **arguments):
         return self.request(
@@ -83,7 +85,9 @@ class EnvironmentClient:
         return self.command(environment, "cancel")
 
     def events(self, environment, after=0):
-        return self.request("GET", f"/v1/environments/{urllib.parse.quote(environment, safe='')}/events?after={after}")
+        return self.request(
+            "GET", f"/v1/environments/{urllib.parse.quote(environment, safe='')}/events?after={after}"
+        )
 
     def replay(self, environment):
         cursor = 0

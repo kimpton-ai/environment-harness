@@ -23,7 +23,11 @@ from datetime import UTC, datetime
 from .history import INHERITED, reconstruct_inherited
 
 SLOTS = ("observation", "attempted", "executed")
-SLOT_KINDS = {"observation.delivered": "observation", "action.attempted": "attempted", "action.executed": "executed"}
+SLOT_KINDS = {
+    "observation.delivered": "observation",
+    "action.attempted": "attempted",
+    "action.executed": "executed",
+}
 OUTCOME_KINDS = {"transition.committed", "action.executed"}
 SHORT = 12
 
@@ -186,7 +190,9 @@ def build_timeline(events, participants=()):
             else:
                 turn["other"].append(event)
         elif shared:
-            turn["shared"].update({key: value for key, value in payload.items() if not isinstance(value, (dict, list))})
+            turn["shared"].update(
+                {key: value for key, value in payload.items() if not isinstance(value, (dict, list))}
+            )
         else:
             if kind == "session.branched":
                 branch_turn = _turn(turns, revision, participants)
@@ -214,8 +220,14 @@ def inherited_sentence(record) -> str:
 def describe(event) -> str:
     kind, payload = event["kind"], event.get("payload") or {}
     if kind == "session.created":
-        participants = [p["id"] for p in (payload.get("experiment") or {}).get("participants", []) if "id" in p]
-        return f"Session created with participants {join_names(participants)}." if participants else "Session created."
+        participants = [
+            p["id"] for p in (payload.get("experiment") or {}).get("participants", []) if "id" in p
+        ]
+        return (
+            f"Session created with participants {join_names(participants)}."
+            if participants
+            else "Session created."
+        )
     if kind == "session.branched":
         text = f"Branched from {short_id(payload.get('parent'))} at checkpoint {short_id(payload.get('checkpoint'))}"
         interventions = payload.get("interventions") or {}
@@ -275,7 +287,11 @@ def next_revision(turn):
 def turn_heading(turn) -> str:
     committed = turn["committed"]
     target = next_revision(turn)
-    label = f"Revision {turn['revision']} to {target}" if target is not None else f"Revision {turn['revision']} (open)"
+    label = (
+        f"Revision {turn['revision']} to {target}"
+        if target is not None
+        else f"Revision {turn['revision']} (open)"
+    )
     parts = [label, format_time(turn["started"])]
     if committed and (committed["terminated"] or committed["truncated"]):
         parts.append("terminated" if committed["terminated"] else "truncated")
@@ -303,8 +319,14 @@ def render_timeline(turns, verbose=False, perspective=None) -> str:
             (slots[slot]["seq"] for slots in turn["participants"].values() for slot in SLOTS if slots[slot]),
             default=None,
         )
-        before = [e for e in turn["other"] if first_participant_seq is None or e["seq"] < first_participant_seq]
-        after = [e for e in turn["other"] if first_participant_seq is not None and e["seq"] >= first_participant_seq]
+        before = [
+            e for e in turn["other"] if first_participant_seq is None or e["seq"] < first_participant_seq
+        ]
+        after = [
+            e
+            for e in turn["other"]
+            if first_participant_seq is not None and e["seq"] >= first_participant_seq
+        ]
         if turn["inherited"]:
             lines.append("  " + inherited_sentence(turn["inherited"]))
             if verbose:
@@ -329,10 +351,13 @@ def render_timeline(turns, verbose=False, perspective=None) -> str:
 def render_list(environments) -> str:
     if not environments:
         return "No environments recorded."
-    rows = [(item["id"], title(item), item["status"], f"revision {item['revision']}") for item in environments]
+    rows = [
+        (item["id"], title(item), item["status"], f"revision {item['revision']}") for item in environments
+    ]
     widths = [max(len(row[column]) for row in rows) for column in range(3)]
     return "\n".join(
-        "  ".join([row[0].ljust(widths[0]), row[1].ljust(widths[1]), row[2].ljust(widths[2]), row[3]]) for row in rows
+        "  ".join([row[0].ljust(widths[0]), row[1].ljust(widths[1]), row[2].ljust(widths[2]), row[3]])
+        for row in rows
     )
 
 
@@ -368,7 +393,9 @@ def render_environment(item, reports, turns) -> str:
     capabilities = [name for name, enabled in (spec.get("capabilities") or {}).items() if enabled]
     if capabilities:
         lines.append(f"Capabilities: {', '.join(capabilities)}.")
-    lines.append(f"Spent {format_cost(item.get('spent_micros'))}. Reserved {format_cost(item.get('reserved_micros'))}.")
+    lines.append(
+        f"Spent {format_cost(item.get('spent_micros'))}. Reserved {format_cost(item.get('reserved_micros'))}."
+    )
     if reports:
         lines.extend(report_sentence(record) for record in reports)
     else:
@@ -386,7 +413,9 @@ def render_environment(item, reports, turns) -> str:
 def render_comparison(result) -> str:
     records = result.get("environments") or []
     lineages = {record.get("lineage") for record in records}
-    lines = [f"Compared {len(records)} environments in {len(lineages)} lineage{'s' if len(lineages) != 1 else ''}."]
+    lines = [
+        f"Compared {len(records)} environments in {len(lineages)} lineage{'s' if len(lineages) != 1 else ''}."
+    ]
     for record in records:
         report = (record.get("latest_report") or {}).get("report") or {}
         parts = [
@@ -404,18 +433,28 @@ def render_comparison(result) -> str:
     if groups is not None:
         for group in groups:
             definition = group.get("definition") or {}
-            lines.append(f"  {group['metric']} by {group['scorer']}@{group['version']} ({group['kind']})"
-                         f"  unit {definition.get('unit', 'unspecified')}  group {short_id(group['id'])}")
+            lines.append(
+                f"  {group['metric']} by {group['scorer']}@{group['version']} ({group['kind']})"
+                f"  unit {definition.get('unit', 'unspecified')}  group {short_id(group['id'])}"
+            )
             summary = group.get("summary")
             if summary:
-                lines.append(f"    mean of lineage means {compact(summary['mean_of_lineage_means'])}"
-                             f"  independent lineages {summary['independent_lineages']}"
-                             f"  standard error {compact(summary['standard_error']) if summary['standard_error'] is not None else 'not available'}")
+                lines.append(
+                    f"    mean of lineage means {compact(summary['mean_of_lineage_means'])}"
+                    f"  independent lineages {summary['independent_lineages']}"
+                    f"  standard error {compact(summary['standard_error']) if summary['standard_error'] is not None else 'not available'}"
+                )
             else:
-                lines.append("    Raw values only: " + ", ".join(
-                    f"{short_id(v['environment'])}={compact(v['value'])}" for v in group['values']))
-            lines.append(f"    reported {group['reported_environments']}/{group['selected_environments']}"
-                         f"  missing {group['missing_environments']}  incomplete {group['incomplete_environments']}")
+                lines.append(
+                    "    Raw values only: "
+                    + ", ".join(
+                        f"{short_id(v['environment'])}={compact(v['value'])}" for v in group["values"]
+                    )
+                )
+            lines.append(
+                f"    reported {group['reported_environments']}/{group['selected_environments']}"
+                f"  missing {group['missing_environments']}  incomplete {group['incomplete_environments']}"
+            )
     else:
         for key, summary in (result.get("metrics") or {}).items():
             lines.append(f"  {key}  mean of lineage means {compact(summary.get('mean_of_lineage_means'))}")

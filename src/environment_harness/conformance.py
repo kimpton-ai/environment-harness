@@ -22,27 +22,43 @@ def check(store, environment, experiment, action_factory, *, events=()):
             session.external_event(environment_id, who, lease, **event)
         for participant in experiment.participants:
             agent = Principal(
-                tenant=who.tenant, subject=participant.id, role="agent",
-                environment=environment_id, participant=participant.id,
+                tenant=who.tenant,
+                subject=participant.id,
+                role="agent",
+                environment=environment_id,
+                participant=participant.id,
             )
             observation = session.observe(environment_id, agent)
             if observation["may_act"]:
                 action = Action(
-                    operation_id=uid(), participant=participant.id, observation_id=observation["id"],
-                    revision=observation["revision"], payload=action_factory(observation),
+                    operation_id=uid(),
+                    participant=participant.id,
+                    observation_id=observation["id"],
+                    revision=observation["revision"],
+                    payload=action_factory(observation),
                 )
                 receipt = session.submit(environment_id, agent, action)
-                if receipt["status"] != "accepted" or session.submit(environment_id, agent, action) != receipt:
+                if (
+                    receipt["status"] != "accepted"
+                    or session.submit(environment_id, agent, action) != receipt
+                ):
                     raise AssertionError("action conformance failed")
                 receipts.append(receipt)
         if environment.spec.phase_deadline == "coordinator":
             session.close_phase(environment_id, who, lease, revision=0)
         session.resolve(environment_id, who, lease)
         evidence = store.verify(environment_id, who)
-        checkpoint = session.checkpoint(environment_id, who, lease) if environment.spec.capabilities.checkpoint else None
+        checkpoint = (
+            session.checkpoint(environment_id, who, lease)
+            if environment.spec.capabilities.checkpoint
+            else None
+        )
         return {
-            "environment": environment_id, "actions": len(receipts), "evidence": evidence,
-            "checkpoint": checkpoint, "scope": "one supplied contract transition; not a live or stress qualification",
+            "environment": environment_id,
+            "actions": len(receipts),
+            "evidence": evidence,
+            "checkpoint": checkpoint,
+            "scope": "one supplied contract transition; not a live or stress qualification",
         }
     finally:
         with suppress(Conflict):

@@ -39,26 +39,36 @@ def experiment(directory):
     child = session.branch(parent, who, checkpoint["id"], {"total": 20})["id"]
     print("Checkpoint saved. Branch changes its own total to 20; parent stays at 6.")
 
-    observations = {
-        p: session.observe(parent, who, p)["payload"] for p in ("alice", "bob")
-    }
+    observations = {p: session.observe(parent, who, p)["payload"] for p in ("alice", "bob")}
     for environment in (parent, child):
         advance(environment, 2)
         total = session.observe(environment, who, "alice")["payload"]["total"]
         cursor = store.verify(environment, who)["events"]
-        store.report(environment, who, ScoreReport(
-            scorer="synthetic-total", version="1", kind="deterministic", evidence_cursor=cursor,
-            metrics={"synthetic_total": total},
-            metric_definitions={"synthetic_total": {"id": "synthetic-total", "version": "1", "unit": "count"}},
-            uncertainty="Protocol fixture only. This is not a model-performance or safety measure.",
-            provenance={"synthetic": True, "source": "examples/branch_comparison.py"},
-        ))
+        store.report(
+            environment,
+            who,
+            ScoreReport(
+                scorer="synthetic-total",
+                version="1",
+                kind="deterministic",
+                evidence_cursor=cursor,
+                metrics={"synthetic_total": total},
+                metric_definitions={
+                    "synthetic_total": {"id": "synthetic-total", "version": "1", "unit": "count"}
+                },
+                uncertainty="Protocol fixture only. This is not a model-performance or safety measure.",
+                provenance={"synthetic": True, "source": "examples/branch_comparison.py"},
+            ),
+        )
         with (Path(directory) / f"{environment}.jsonl").open("w") as output:
             for event in store.replay(environment, who):
                 output.write(json.dumps(event) + "\n")
 
     result = {
-        "synthetic": True, "parent": parent, "branch": child, "checkpoint": checkpoint["id"],
+        "synthetic": True,
+        "parent": parent,
+        "branch": child,
+        "checkpoint": checkpoint["id"],
         "observations_at_checkpoint": observations,
         "totals": {w: session.observe(w, who, "alice")["payload"]["total"] for w in (parent, child)},
         "comparison": compare(store, [parent, child], who),
