@@ -12,4 +12,4 @@ GitHub settings are part of the security boundary and cannot be enforced by file
 
 Dependency updates are never auto-merged. Review branch rules after ownership or GitHub App changes and record exceptions in a tracked security issue.
 
-Dispatch the release workflow from the protected release tag and supply that same tag as its input. The workflow requires the tag target, checked-out `HEAD`, and GitHub workflow `GITHUB_SHA` to be the same commit on `main`; its package metadata must equal the tag. Provenance therefore identifies the commit that supplied the released files, and an existing release can only be rerun when every artifact is byte-for-byte identical.
+Push a protected strict-SemVer `v*` tag to start the release workflow automatically. The workflow requires the tag target, checked-out `HEAD`, and GitHub workflow `GITHUB_SHA` to be the same commit on `main`; its package metadata must equal the tag. Provenance therefore identifies the commit that supplied the released files, and an existing release can only be rerun when every artifact is byte-for-byte identical.
