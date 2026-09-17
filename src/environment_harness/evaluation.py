@@ -34,7 +34,8 @@ def rollouts(store, environment, who, *, require_token_ids=False, require_logpro
             request = json.loads(action["request"])
             obs = json.loads(
                 db.execute(
-                    "SELECT body FROM observations WHERE environment=? AND id=?", (environment, request["observation_id"])
+                    "SELECT body FROM observations WHERE environment=? AND id=?",
+                    (environment, request["observation_id"]),
                 ).fetchone()[0]
             )
         if require_token_ids or require_logprobs:
@@ -70,10 +71,15 @@ def compare(store, environments, who):
             cohort = {k: manifest[k] for k in ("environment", "participants", "purpose", "split", "policy")}
             cohort_id = digest(cohort)
             record = {
-                "environment": environment, "lineage": row["lineage"], "parent": row["parent"],
-                "status": row["status"], "revision": row["revision"],
-                "participants": list(json.loads(row["participants"])), "cost_micros": row["spent"],
-                "interventions": manifest["interventions"], "cohort": cohort_id,
+                "environment": environment,
+                "lineage": row["lineage"],
+                "parent": row["parent"],
+                "status": row["status"],
+                "revision": row["revision"],
+                "participants": list(json.loads(row["participants"])),
+                "cost_micros": row["spent"],
+                "interventions": manifest["interventions"],
+                "cohort": cohort_id,
             }
         cohorts.setdefault(cohort_id, []).append(record)
         reports = store.reports(environment, who)
@@ -91,17 +97,34 @@ def compare(store, environments, who):
                     continue
                 definition = report.get("metric_definitions", {}).get(metric)
                 identity = {
-                    "cohort": cohort_id, "scorer": report["scorer"], "version": report["version"],
-                    "kind": report["kind"], "metric": metric, "definition": definition,
+                    "cohort": cohort_id,
+                    "scorer": report["scorer"],
+                    "version": report["version"],
+                    "kind": report["kind"],
+                    "metric": metric,
+                    "definition": definition,
                 }
                 group_id = digest(identity)
-                group = groups.setdefault(group_id, identity | {
-                    "id": group_id, "experiment": cohort, "values": [], "summary": None,
-                })
-                group["values"].append({
-                    "environment": environment, "lineage": record["lineage"], "status": record["status"],
-                    "report_revision": envelope["revision"], "report_hash": envelope["hash"], "value": value,
-                })
+                group = groups.setdefault(
+                    group_id,
+                    identity
+                    | {
+                        "id": group_id,
+                        "experiment": cohort,
+                        "values": [],
+                        "summary": None,
+                    },
+                )
+                group["values"].append(
+                    {
+                        "environment": environment,
+                        "lineage": record["lineage"],
+                        "status": record["status"],
+                        "report_revision": envelope["revision"],
+                        "report_hash": envelope["hash"],
+                        "value": value,
+                    }
+                )
     warnings, names = [], {}
     for group in groups.values():
         names.setdefault(group["metric"], []).append(group)
@@ -111,15 +134,18 @@ def compare(store, environments, who):
         group["missing_environments"] = len(eligible) - len(group["values"])
         group["incomplete_environments"] = sum(r["status"] != "completed" for r in eligible)
         if group["definition"] is None:
-            warnings.append(f"{group['scorer']}@{group['version']} {group['metric']}: "
-                            "metric definition missing; raw values only.")
+            warnings.append(
+                f"{group['scorer']}@{group['version']} {group['metric']}: "
+                "metric definition missing; raw values only."
+            )
             continue
         lineages = {}
         for value in group["values"]:
             lineages.setdefault(value["lineage"], []).append(value["value"])
         means = [statistics.mean(values) for values in lineages.values()]
         group["summary"] = {
-            "mean_of_lineage_means": statistics.mean(means), "independent_lineages": len(means),
+            "mean_of_lineage_means": statistics.mean(means),
+            "independent_lineages": len(means),
             "standard_error": statistics.stdev(means) / math.sqrt(len(means)) if len(means) > 1 else None,
         }
     metrics = {}
@@ -127,10 +153,15 @@ def compare(store, environments, who):
         if len(matches) == 1 and matches[0]["summary"] is not None:
             metrics[metric] = matches[0]["summary"]
         elif len(matches) > 1:
-            warnings.append(f"{metric}: incompatible score groups are shown separately; no combined statistic.")
+            warnings.append(
+                f"{metric}: incompatible score groups are shown separately; no combined statistic."
+            )
     return {
-        "environments": records, "metrics": metrics,
-        "metric_groups": sorted(groups.values(), key=lambda g: (g["metric"], g["scorer"], g["version"], g["id"])),
+        "environments": records,
+        "metrics": metrics,
+        "metric_groups": sorted(
+            groups.values(), key=lambda g: (g["metric"], g["scorer"], g["version"], g["id"])
+        ),
         "warnings": warnings,
         "uncertainty": "Branches and turns share a lineage. One lineage cannot establish between-environment uncertainty.",
         "design": "Interventions are declared. Causal identification still depends on the experiment design.",

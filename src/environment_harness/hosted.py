@@ -6,6 +6,7 @@ by their platform. Constructing the store does not change a database schema.
 
 import re
 from contextlib import contextmanager
+from typing import cast
 
 from .store import EvidenceStore
 
@@ -47,10 +48,14 @@ class PostgresEvidenceStore(EvidenceStore):
 
     def connect(self):
         import psycopg
-        from psycopg.rows import dict_row
+        from psycopg import sql
+        from psycopg.rows import DictRow, dict_row
 
-        connection = psycopg.connect(self.dsn, row_factory=dict_row)
-        connection.execute(f'SET search_path TO "{self.schema}"')
+        connection = cast(
+            "psycopg.Connection[DictRow]",
+            psycopg.connect(self.dsn, row_factory=dict_row),  # pyright: ignore[reportArgumentType]
+        )
+        connection.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(self.schema)))
         return connection
 
     @contextmanager
@@ -74,10 +79,16 @@ class PostgresEvidenceStore(EvidenceStore):
         import hashlib
         from importlib.resources import files
 
+        from psycopg import sql as postgres_sql
+
         migrations = files("environment_harness").joinpath("migrations")
         with self.connect() as connection:
             connection.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (self.schema,))
-            connection.execute(f'CREATE SCHEMA IF NOT EXISTS "{self.schema}"')
+            connection.execute(
+                postgres_sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(
+                    postgres_sql.Identifier(self.schema)
+                )
+            )
             connection.execute(
                 "CREATE TABLE IF NOT EXISTS schema_migrations "
                 "(version TEXT PRIMARY KEY, sha256 TEXT NOT NULL)"
@@ -94,7 +105,7 @@ class PostgresEvidenceStore(EvidenceStore):
                     if applied["sha256"] != checksum:
                         raise ValueError("applied harness migration checksum changed")
                     continue
-                connection.execute(sql)
+                connection.execute(sql.encode())
                 connection.execute("INSERT INTO schema_migrations VALUES (%s,%s)", (migration.name, checksum))
 
     def _write_artifact(self, environment, key, data):

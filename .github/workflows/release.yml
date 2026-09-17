@@ -1,0 +1,130 @@
+name: Attested GitHub release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing protected v* tag to release
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      artifact-digest: ${{ steps.upload.outputs.artifact-digest }}
+    steps:
+      - name: Validate release tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require the release commit to be on main
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          git fetch --no-tags origin main
+          release_commit=$(git rev-parse "$RELEASE_TAG^{commit}")
+          test "$(git rev-parse HEAD)" = "$release_commit"
+          test "$GITHUB_SHA" = "$release_commit"
+          git merge-base --is-ancestor "$release_commit" origin/main
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@557e51de59eb14aaaba2ed9621916900a91d50c6 # v6.6.1
+        with:
+          version: "0.12.0"
+          enable-cache: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22.23.2"
+      - run: npm install --global npm@11.17.0 --ignore-scripts
+      - run: uv sync --frozen --extra server
+      - run: npm ci --ignore-scripts --prefix packages/typescript
+      - run: uv run --no-sync python scripts/build_viewer.py --check
+      - run: uv build --no-build-isolation
+      - run: npm pack --ignore-scripts --pack-destination ../../dist
+        working-directory: packages/typescript
+      - run: uv run --no-sync python scripts/check_repository.py --full --release-tag "$RELEASE_TAG"
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+      - run: uv run --no-sync python scripts/check_release.py
+      - run: uv export --frozen --all-extras --no-dev --no-emit-project --no-hashes | uv run --no-sync pip-audit -r /dev/stdin
+      - run: npm audit --audit-level=high --prefix packages/typescript
+      - run: uv export --frozen --all-extras --no-dev --no-emit-project --output-file "$RUNNER_TEMP/release-requirements.txt"
+      - run: uv run --no-sync cyclonedx-py requirements "$RUNNER_TEMP/release-requirements.txt" --output-reproducible --output-format JSON --output-file dist/python-sbom.cdx.json
+      - run: npm sbom --sbom-format cyclonedx --prefix packages/typescript > dist/npm-sbom.cdx.json
+      - run: sha256sum dist/* > dist/SHA256SUMS
+      - name: Upload reviewed artifacts
+        id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-artifacts
+          path: dist/
+          if-no-files-found: error
+          compression-level: 0
+
+  attest:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact-id }}
+          path: dist
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: dist/*
+
+  publish:
+    needs: [build, attest]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: github-release
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifact by immutable ID and verify service digest
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact-id }}
+          path: dist
+      - name: Verify artifact provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for artifact in dist/*; do
+            gh attestation verify "$artifact" --repo "${{ github.repository }}"
+          done
+      - name: Publish immutable GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            released="$RUNNER_TEMP/released"
+            mkdir -p "$released"
+            gh release download "$RELEASE_TAG" --repo "${{ github.repository }}" --dir "$released"
+            test "$(find dist -maxdepth 1 -type f | wc -l)" -eq "$(find "$released" -maxdepth 1 -type f | wc -l)"
+            for artifact in dist/*; do
+              cmp "$artifact" "$released/$(basename "$artifact")"
+            done
+            exit 0
+          fi
+          gh release create "$RELEASE_TAG" dist/* --repo "${{ github.repository }}" --verify-tag --generate-notes

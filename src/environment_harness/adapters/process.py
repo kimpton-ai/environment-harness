@@ -6,8 +6,7 @@ snapshot is accepted. The environment still serializes its own durable state.
 
 import json
 import os
-import selectors
-import signal
+import queue
 import subprocess
 import threading
 import time
@@ -15,59 +14,88 @@ import time
 from ..contracts import EnvironmentSpec, Transition
 from ..errors import Unavailable
 from ..store import encode
+from ._subprocess import popen_group, terminate_tree
 
 
 class ProcessEnvironment:
     def __init__(self, command, *, timeout=30, max_bytes=16777216):
         self.timeout, self.max_bytes = timeout, max_bytes
         self.lock = threading.Lock()
-        self.process = subprocess.Popen(
+        self.process = popen_group(
             command,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             env={"PATH": os.defpath, "PYTHON_DOTENV_DISABLED": "1"},
-            start_new_session=True,
         )
+        self.responses = queue.Queue()
+        self.reader = threading.Thread(target=self._read_responses, daemon=True)
+        self.reader.start()
         self.spec = EnvironmentSpec.model_validate(self._call("spec", {}))
+
+    def _read_responses(self):
+        stdout = self.process.stdout
+        if stdout is None:
+            self.responses.put(Unavailable("environment worker output pipe is unavailable"))
+            return
+        try:
+            while line := stdout.readline(self.max_bytes + 2):
+                if len(line) > self.max_bytes or not line.endswith(b"\n"):
+                    self.responses.put(Unavailable("environment response exceeds limit"))
+                    return
+                self.responses.put(line)
+        except (OSError, ValueError):
+            self.responses.put(Unavailable("environment worker output pipe failed"))
+        finally:
+            self.responses.put(None)
 
     def _call(self, method, arguments):
         with self.lock:
             payload = (encode({"method": method, "arguments": arguments}) + "\n").encode()
             if len(payload) > self.max_bytes:
                 raise Unavailable("environment request exceeds limit")
-            selector = selectors.DefaultSelector()
             try:
-                os.set_blocking(self.process.stdin.fileno(), False)
-                selector.register(self.process.stdin, selectors.EVENT_WRITE)
-                sent = 0
-                result = bytearray()
+                stdin, stdout = self.process.stdin, self.process.stdout
+                if stdin is None or stdout is None:
+                    raise Unavailable("environment worker pipes are unavailable")
+                written = queue.Queue()
+
+                def write_request():
+                    try:
+                        stdin.write(payload)
+                        stdin.flush()
+                        written.put(None)
+                    except (OSError, ValueError) as exc:
+                        written.put(exc)
+
+                threading.Thread(target=write_request, daemon=True).start()
                 deadline = time.monotonic() + self.timeout
                 while time.monotonic() < deadline:
-                    for key, _ in selector.select(min(0.1, max(0, deadline - time.monotonic()))):
-                        if key.fileobj == self.process.stdin:
-                            sent += os.write(self.process.stdin.fileno(), payload[sent : sent + 65536])
-                            if sent == len(payload):
-                                selector.unregister(self.process.stdin)
-                                selector.register(self.process.stdout, selectors.EVENT_READ)
-                        else:
-                            chunk = os.read(self.process.stdout.fileno(), 65536)
-                            if not chunk:
-                                raise Unavailable("environment worker exited")
-                            result.extend(chunk)
-                            if len(result) > self.max_bytes:
-                                raise Unavailable("environment response exceeds limit")
-                            if b"\n" in result:
-                                response = json.loads(result)
-                                if "error" in response:
-                                    raise Unavailable("environment worker rejected request")
-                                return response["result"]
+                    try:
+                        write_result = written.get_nowait()
+                    except queue.Empty:
+                        pass
+                    else:
+                        if isinstance(write_result, Exception):
+                            raise Unavailable("environment worker input pipe failed") from write_result
+                    try:
+                        line = self.responses.get(timeout=min(0.1, max(0, deadline - time.monotonic())))
+                    except queue.Empty:
+                        if self.process.poll() is not None:
+                            raise Unavailable("environment worker exited")
+                        continue
+                    if line is None:
+                        raise Unavailable("environment worker exited")
+                    if isinstance(line, Exception):
+                        raise line
+                    response = json.loads(line)
+                    if "error" in response:
+                        raise Unavailable("environment worker rejected request")
+                    return response["result"]
                 raise Unavailable("environment worker deadline exceeded")
             except BaseException:
                 self.close()
                 raise
-            finally:
-                selector.close()
 
     def initialize(self, experiment):
         return self._call("initialize", {"experiment": experiment.model_dump(mode="json")})
@@ -89,8 +117,8 @@ class ProcessEnvironment:
 
     def close(self):
         if self.process.poll() is None:
-            os.killpg(self.process.pid, signal.SIGKILL)
-            self.process.wait()
+            terminate_tree(self.process, grace=1)
         for stream in (self.process.stdin, self.process.stdout):
             if stream:
                 stream.close()
+        self.reader.join(timeout=1)

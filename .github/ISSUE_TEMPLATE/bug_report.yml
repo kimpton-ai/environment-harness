@@ -1,0 +1,26 @@
+name: Bug report
+description: Report a reproducible EnvironmentHarness defect using synthetic data.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include credentials, private environment sessions, supplier code, or security exploits.
+  - type: input
+    id: version
+    attributes:
+      label: EnvironmentHarness version
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Synthetic reproduction
+      description: Include operating system, runtimes, exact commands, expected behavior, and actual behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      render: shell

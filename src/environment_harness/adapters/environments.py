@@ -102,7 +102,7 @@ class PettingZooParallel(EphemeralAdapter):
                     p: {"terminated": bool(terminations.get(p)), "truncated": bool(truncations.get(p))}
                     for p in actions
                 },
-                rewards=plain(rewards),
+                rewards={str(participant): float(reward) for participant, reward in rewards.items()},
                 terminated=not self.native.agents and not any(truncations.values()),
                 truncated=not self.native.agents and any(truncations.values()),
             )
@@ -155,7 +155,9 @@ class PettingZooAEC(EphemeralAdapter):
                     "turn": self.turn,
                     "observations": self._observations(state["observations"]),
                 },
-                rewards=plain(self.native.rewards),
+                rewards={
+                    str(participant): float(reward) for participant, reward in self.native.rewards.items()
+                },
                 terminated=done,
                 next_actor=self.native.agent_selection if not done else actor,
             )

@@ -1,8 +1,14 @@
 # Contributing
 
-Use Python 3.12 or later, uv and Node.js 22 or later. Run `uv sync --extra server` and `npm ci --prefix packages/typescript`.
+Use Python 3.12 or later, uv 0.12.0, Node.js 22, and npm 11.17 or later. Run `uv sync --extra server` and `npm ci --ignore-scripts --prefix packages/typescript`. Resolution observes the seven-day dependency cooldown in [docs/DEPENDENCY-SECURITY.md](docs/DEPENDENCY-SECURITY.md).
+
+The PostgreSQL integration test uses PostgreSQL 17.6 Alpine at an immutable container digest in the weekly workflow. Update both the version and digest deliberately when testing a newer database release.
+
+Python and TypeScript ship as one coordinated three-component SemVer release. Keep `pyproject.toml`, `environment_harness.__version__`, `packages/typescript/package.json`, and both npm lockfile version fields identical. Patch releases contain backward-compatible fixes. Minor releases contain new capabilities and, while the SDK is below 1.0, any intentionally incompatible public change with documented migration guidance. After 1.0, incompatible public API or contract changes require a major release. A release moves the accumulated notes from `Unreleased` to a dated version, uses the exact immutable `vX.Y.Z` tag, and never rebuilds different artifacts under an existing version.
 
 Before submitting a change, run `make check`, `make viewer`, `npm run typecheck --prefix packages/typescript`, and `make build`. Include a small reproducible example of the behavior you changed. Schema changes must update the generated JSON and TypeScript contracts. `src/environment_harness/presentation.py` and `packages/typescript/src/timeline.ts` must keep the same turn-grouping rules and field names so the command line and the viewer describe evidence identically. Do not change protocol semantics without describing compatibility and migration.
+
+CI requires at least 90% statement and 80% branch coverage overall and for security-critical modules. Changed executable lines require 100% diff coverage. A changed regression test must also fail when applied to `origin/main`.
 
 Keep domain implementations, credentials and recorded private data out of this repository. Examples and test fixtures must be synthetic or explicitly redistributable. Optional integration support should state its actual checkpoint and recovery limits.
 

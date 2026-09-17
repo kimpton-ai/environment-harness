@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: https://github.com/kimpton-ai/environment-harness/security/advisories/new
+    about: Report vulnerabilities privately; do not open a public issue.
+  - name: Support question
+    url: https://github.com/kimpton-ai/environment-harness/discussions
+    about: Ask usage and integration questions.
