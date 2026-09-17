@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling==1.27.0"]
+requires = ["hatchling==1.32.0"]
 build-backend = "hatchling.build"
 
 [project]
@@ -36,7 +36,7 @@ dev = [
   "cyclonedx-bom>=7,<8",
   "detect-secrets>=1.5,<2",
   "diff-cover>=9.7,<10",
-  "hatchling==1.27.0",
+  "hatchling==1.32.0",
   "httpx>=0.28.1,<1",
   "pip-audit>=2.10,<3",
   "pyright>=1.1.405,<2",
