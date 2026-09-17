@@ -7,6 +7,8 @@ updates:
     cooldown:
       default-days: 7
     open-pull-requests-limit: 5
+    reviewers:
+      - kimpton-ai/maintainers
   - package-ecosystem: npm
     directory: /packages/typescript
     schedule:
@@ -14,6 +16,8 @@ updates:
     cooldown:
       default-days: 7
     open-pull-requests-limit: 5
+    reviewers:
+      - kimpton-ai/maintainers
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -21,3 +25,5 @@ updates:
     cooldown:
       default-days: 7
     open-pull-requests-limit: 5
+    reviewers:
+      - kimpton-ai/maintainers
