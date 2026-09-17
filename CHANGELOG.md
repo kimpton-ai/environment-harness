@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 0.2.0 - 2026-09-17
+## 0.2.1 - 2026-09-17
 
 The public SDK now includes coordinated vulnerability reporting, governance and support files, dependency cooldowns, immutable workflow and container pins, credential-free security scans, cross-platform CI, positive distribution manifests, installed-wheel smoke tests, SBOM and tag-triggered artifact-attestation release automation, and protected-release setup guidance. Release maintainers create the reviewed protected tag manually; Actions stores no long-lived release credential. Python and TypeScript coverage gates require at least 90% statements/lines and 80% branches; security-critical Python modules meet those floors independently.
 
