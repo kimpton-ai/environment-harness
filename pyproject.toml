@@ -35,7 +35,7 @@ dev = [
   "cryptography>=50.0.1,<51",
   "cyclonedx-bom>=7,<8",
   "detect-secrets>=1.5,<2",
-  "diff-cover>=9.7,<10",
+  "diff-cover>=9.7,<11",
   "hatchling==1.27.0",
   "httpx>=0.28.1,<1",
   "pip-audit>=2.10,<3",
