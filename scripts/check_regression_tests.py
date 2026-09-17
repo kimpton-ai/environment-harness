@@ -11,7 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = os.environ.get("REGRESSION_BASE_REF", "origin/main")
-PROOF_TARGETS = ("tests/test_diff_coverage_edges.py::test_command_cleanup_falls_back_to_direct_process_kill",)
+PROOF_TARGETS = ("tests/test_repository_policy.py::test_release_workflow_requires_automatic_tag_binding",)
 SAFE_ENV = {
     "COMSPEC",
     "LANG",
