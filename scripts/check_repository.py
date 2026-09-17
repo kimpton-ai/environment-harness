@@ -26,6 +26,7 @@ FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 ACTION = re.compile(r"\buses:\s*([^\s#]+)(?:\s*#.*)?$")
 CONTAINER_IMAGE = re.compile(r"[A-Za-z0-9._/-]+:[^\s@]+@sha256:[0-9a-f]{64}")
 SEMVER = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
+APP_CREDENTIAL_NAME = "_".join(("RELEASE", "APP", "PRIVATE", "KEY"))
 SECRET_PATTERNS = {
     "AWS access key": re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"),
     "GitHub token": re.compile(r"\b(?:gh[opurs]_[A-Za-z0-9_]{30,}|github_pat_[A-Za-z0-9_]{40,})\b"),
@@ -254,10 +255,25 @@ def check_version_metadata(release_tag: str | None = None) -> None:
         raise PolicyError(f"release tag {release_tag!r} does not match metadata version v{version}")
 
 
+def check_release_commit(release_tag: str) -> None:
+    parent = _git_file(f"{release_tag}^{{commit}}^1", "pyproject.toml")
+    if parent is None:
+        raise PolicyError("release tag lacks a readable first-parent project version")
+    parent_version = tomllib.loads(parent.decode()).get("project", {}).get("version")
+    current_version = release_tag.removeprefix("v")
+    if not isinstance(parent_version, str) or not SEMVER.fullmatch(parent_version):
+        raise PolicyError("release commit parent has a malformed project version")
+    previous = tuple(int(part) for part in parent_version.split("."))
+    current = tuple(int(part) for part in current_version.split("."))
+    if previous >= current:
+        raise PolicyError(
+            f"release commit must introduce a version newer than its first parent: "
+            f"{parent_version} -> {current_version}"
+        )
+
+
 def check_release_workflow_binding() -> None:
     release = (ROOT / ".github/workflows/release.yml").read_text()
-    orchestration = (ROOT / ".github/workflows/release-orchestration.yml").read_text()
-    release_pr = (ROOT / ".github/workflows/release-pr.yml").read_text()
     release_required = {
         '"v[0-9]+.[0-9]+.[0-9]+"': "strict SemVer tag trigger",
         "RELEASE_TAG: ${{ github.ref_name }}": "event tag binding",
@@ -268,36 +284,22 @@ def check_release_workflow_binding() -> None:
         'gh attestation verify "$artifact"': "per-artifact provenance verification",
         'cmp "$artifact" "$released/$(basename "$artifact")"': "idempotent artifact comparison",
     }
-    orchestration_required = {
-        "python scripts/release_version.py detect": "unreleased version detection",
-        "actions/create-github-app-token@": "release App authentication",
-        'app-id: "3369417"': "reviewed release App identity",
-        "permission-contents: write": "scoped tag permission",
-        '--field ref="refs/tags/$RELEASE_TAG"': "protected tag creation",
-        '--field sha="$GITHUB_SHA"': "tag-to-reviewed-main binding",
-    }
-    release_pr_required = {
-        "workflow_dispatch:": "maintainer release decision",
-        "actions/create-github-app-token@": "release App authentication",
-        'app-id: "3369417"': "reviewed release App identity",
-        "permission-contents: write": "scoped release branch permission",
-        "permission-pull-requests: write": "scoped release PR permission",
-        "python scripts/release_version.py prepare": "coordinated version preparation",
-        'git commit --message "chore: release $RELEASE_TAG"': "reviewable release commit",
-        "gh pr create --base main": "release pull request",
-    }
-    missing = [
-        description
-        for workflow, required in (
-            (release, release_required),
-            (orchestration, orchestration_required),
-            (release_pr, release_pr_required),
-        )
-        for snippet, description in required.items()
-        if snippet not in workflow
-    ]
+    missing = [description for snippet, description in release_required.items() if snippet not in release]
     if missing:
-        raise PolicyError("release automation lacks " + ", ".join(missing))
+        raise PolicyError("release workflow lacks " + ", ".join(missing))
+    forbidden = {
+        "actions/create-github-app-token@": "GitHub App private-key authentication",
+        "private-key:": "private-key input",
+        APP_CREDENTIAL_NAME: "long-lived release credential",
+    }
+    workflow_text = "\n".join(
+        line.split("#", 1)[0]
+        for path in sorted((ROOT / ".github/workflows").glob("*.y*ml"))
+        for line in path.read_text().splitlines()
+    )
+    present = [description for snippet, description in forbidden.items() if snippet in workflow_text]
+    if present:
+        raise PolicyError("workflows use prohibited " + ", ".join(present))
 
 
 def check_dependency_configuration() -> None:
@@ -596,6 +598,8 @@ def main() -> None:
         ("generated files", check_generated),
         ("distributions", check_distributions),
     ]
+    if args.release_tag:
+        checks.insert(2, ("release commit", lambda: check_release_commit(args.release_tag)))
     if args.full:
         checks.insert(
             4, ("dependency age", lambda: check_dependency_ages(args.base_ref or _default_base(), now))
