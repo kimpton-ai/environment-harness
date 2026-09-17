@@ -190,6 +190,7 @@ def test_cancel_is_atomic_idempotent_and_preserves_unknown_reservations(tmp_path
 
 
 @pytest.mark.parametrize("transport", ["cli", "http"])
+@pytest.mark.skipif(os.name == "nt", reason="asserts POSIX signal and process-state semantics")
 def test_cancel_active_command_stops_parent_and_child(tmp_path, transport):
     from environment_harness.adapters.programs import CommandAgent
 

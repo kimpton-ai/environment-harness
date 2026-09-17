@@ -93,6 +93,12 @@ def test_action_findings_require_same_participant_observation_and_outcome(tmp_pa
     assert (
         store.report(environment, researcher, report(store, researcher, environment, valid))["revision"] == 1
     )
+    with pytest.raises(Conflict, match="scorer version"):
+        store.report(
+            environment,
+            researcher,
+            report(store, researcher, environment, valid).model_copy(update={"version": "2"}),
+        )
 
     invalid = [
         action_finding(observations["a"], action, outcome, consequence, observation_id=uid()),

@@ -80,7 +80,7 @@ def main() -> None:
                     "--disable-extensions",
                     "--disable-background-networking",
                     "--no-first-run",
-                    "--virtual-time-budget=5000",
+                    "--no-proxy-server",
                     f"--user-data-dir={root / 'profile'}",
                     "--dump-dom",
                     origin + "/",

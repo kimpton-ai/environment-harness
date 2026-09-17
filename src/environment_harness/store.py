@@ -304,11 +304,12 @@ class EvidenceStore:
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
-        fd = os.open(folder, os.O_RDONLY)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
+        if os.name != "nt":
+            fd = os.open(folder, os.O_RDONLY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
 
     def _read_artifact(self, environment, key):
         return (self.root / "artifacts" / environment / key).read_bytes()

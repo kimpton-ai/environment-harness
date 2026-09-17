@@ -189,7 +189,7 @@ def test_docker_backend_enforces_isolation_and_ownership(monkeypatch):
 
     monkeypatch.setattr(backends.subprocess, "run", execute)
     handle = backend.start(["agent", "--safe"], identity="worker_1", limits={})
-    assert handle == "abc123def456"
+    assert handle == "abc123def456"  # pragma: allowlist secret
     command = calls[0][0]
     assert "--network=none" in command and "--read-only" in command and "--cap-drop=ALL" in command
     assert backend.status(handle) == {"status": "running", "exit_code": 0}
@@ -215,7 +215,7 @@ def test_docker_backend_rejects_unowned_container(monkeypatch):
         lambda *_args, **_kwargs: types.SimpleNamespace(stdout='[{"Config":{"Labels":{}},"State":{}}]'),
     )
     with pytest.raises(Forbidden, match="not owned"):
-        backend.status("abcdef123456")
+        backend.status("abcdef123456")  # pragma: allowlist secret
 
 
 def test_modal_backend_uses_network_blocking(monkeypatch):

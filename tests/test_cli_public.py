@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import types
 
@@ -115,7 +116,9 @@ def test_cli_serve_uses_loopback_and_protected_credential(tmp_path, monkeypatch,
     assert "http://127.0.0.1:9876" in output and seen["ran"]
     assert seen["config"].kwargs["host"] == "127.0.0.1"
     token = store_path / "researcher-token"
-    assert token.exists() and token.stat().st_mode & 0o777 == 0o600
+    assert token.exists()
+    if os.name != "nt":
+        assert token.stat().st_mode & 0o777 == 0o600
 
 
 def test_cli_inspect_forwards_limit(tmp_path, monkeypatch, capsys):

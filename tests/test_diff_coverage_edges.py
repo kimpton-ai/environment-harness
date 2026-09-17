@@ -1,9 +1,11 @@
 import base64
 import hashlib
+import io
 import json
+import os
+import queue
 import subprocess
 import threading
-import time
 import types
 from contextlib import contextmanager
 
@@ -17,6 +19,7 @@ from environment_harness import (
     Principal,
     runner,
 )
+from environment_harness.adapters import _subprocess
 from environment_harness.adapters.process import ProcessEnvironment
 from environment_harness.adapters.programs import CommandAgent
 from environment_harness.errors import Conflict, Unavailable
@@ -96,6 +99,146 @@ def test_missing_subprocess_pipes_are_explicit_failures(monkeypatch):
     assert terminated == [fake]
 
 
+def test_process_environment_pipe_failures_are_bounded(monkeypatch):
+    environment = object.__new__(ProcessEnvironment)
+    environment.lock = threading.Lock()
+    environment.max_bytes = 1024
+    environment.timeout = 0.2
+    environment.responses = queue.Queue()
+    closed = []
+    monkeypatch.setattr(environment, "close", lambda: closed.append(True))
+
+    class Process:
+        stdout = object()
+
+        @staticmethod
+        def poll():
+            return None
+
+    environment.process = Process()
+    environment.process.stdin = types.SimpleNamespace(
+        write=lambda _payload: (_ for _ in ()).throw(OSError("closed")), flush=lambda: None
+    )
+    with pytest.raises(Unavailable, match="input pipe"):
+        environment._call("x", {})
+    assert closed
+
+    environment.process.stdin = io.BytesIO()
+    for response, message in (
+        (None, "worker exited"),
+        (Unavailable("synthetic response failure"), "synthetic response failure"),
+        (b'{"error":"synthetic"}\n', "rejected request"),
+    ):
+        environment.responses.put(response)
+        with pytest.raises(Unavailable, match=message):
+            environment._call("x", {})
+
+    environment.responses = queue.Queue()
+    environment.process.poll = lambda: 1
+    with pytest.raises(Unavailable, match="worker exited"):
+        environment._call("x", {})
+
+    environment.timeout = -1
+    with pytest.raises(Unavailable, match="deadline"):
+        environment._call("x", {})
+
+    environment.max_bytes = 1
+    with pytest.raises(Unavailable, match="request exceeds"):
+        environment._call("too-large", {})
+
+
+def test_process_environment_reader_rejects_missing_oversized_and_broken_output():
+    environment = object.__new__(ProcessEnvironment)
+    environment.max_bytes = 4
+
+    for stream, message in (
+        (None, "output pipe is unavailable"),
+        (io.BytesIO(b"oversized"), "response exceeds limit"),
+        (
+            types.SimpleNamespace(readline=lambda _limit: (_ for _ in ()).throw(OSError("broken"))),
+            "output pipe failed",
+        ),
+    ):
+        environment.responses = queue.Queue()
+        environment.process = types.SimpleNamespace(stdout=stream)
+        environment._read_responses()
+        assert message in str(environment.responses.get())
+
+
+def test_command_output_reader_propagates_stream_failure(monkeypatch):
+    class Stream:
+        def __init__(self, chunks):
+            self.chunks = iter(chunks)
+
+        def read(self, _size):
+            chunk = next(self.chunks)
+            if isinstance(chunk, Exception):
+                raise chunk
+            return chunk
+
+        def close(self):
+            pass
+
+    def run(stream):
+        process = types.SimpleNamespace(stdout=stream, returncode=0, poll=lambda: 0)
+        monkeypatch.setattr(
+            "environment_harness.adapters.programs.subprocess.Popen", lambda *_a, **_k: process
+        )
+        agent = CommandAgent(["synthetic"], "synthetic")
+        monkeypatch.setattr(agent, "_terminate_group", lambda _process: None)
+        return agent.act({})
+
+    assert run(Stream([b"{}", b""])) == {}
+    with pytest.raises(Conflict, match="output pipe failed"):
+        run(Stream([OSError("broken")]))
+
+
+def test_subprocess_group_helpers_cover_windows_and_missing_posix_leader(monkeypatch):
+    monkeypatch.setattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 512, raising=False)
+    popen = []
+    monkeypatch.setattr(
+        _subprocess.subprocess,
+        "Popen",
+        lambda *args, **kwargs: popen.append((args, kwargs)) or types.SimpleNamespace(),
+    )
+    monkeypatch.setattr(_subprocess.os, "name", "nt")
+    _subprocess.popen_group(["synthetic"], stdin=subprocess.PIPE)
+    assert popen[-1][1]["creationflags"] == 512
+    calls = []
+    monkeypatch.setattr(_subprocess.subprocess, "run", lambda *args, **kwargs: calls.append((args, kwargs)))
+    process = types.SimpleNamespace(
+        pid=123,
+        kill=lambda: calls.append("kill"),
+        wait=lambda timeout=None: calls.append(("wait", timeout)),
+    )
+    _subprocess.terminate_tree(process)
+    assert calls and "taskkill" in calls[0][0][0]
+    waits = []
+
+    def wait(timeout=None):
+        waits.append(timeout)
+        if len(waits) == 1:
+            raise subprocess.TimeoutExpired("synthetic", timeout)
+
+    _subprocess.terminate_tree(types.SimpleNamespace(pid=456, kill=lambda: calls.append("kill"), wait=wait))
+    assert waits == [1, None]
+
+    monkeypatch.setattr(_subprocess.os, "name", "posix")
+    _subprocess.popen_group(["synthetic"], stdin=subprocess.PIPE)
+    assert popen[-1][1]["start_new_session"] is True
+    monkeypatch.setattr(
+        _subprocess.os,
+        "killpg",
+        lambda *_args: (_ for _ in ()).throw(ProcessLookupError),
+    )
+    waited = []
+    _subprocess.terminate_tree(
+        types.SimpleNamespace(pid=123, wait=lambda timeout=None: waited.append(timeout))
+    )
+    assert waited == [None]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group fallback")
 def test_command_cleanup_falls_back_to_direct_process_kill(monkeypatch):
     calls = []
 
@@ -130,7 +273,7 @@ def test_phase_guard_and_main_loop_deadlines_are_independent(tmp_path, monkeypat
     failures = []
     signal = threading.Event()
     with runner.phase_guard(object(), "environment", object(), {}, failures, {"a": signal}, 0):
-        time.sleep(0.25)
+        assert signal.wait(2)
     assert isinstance(failures[0], TimeoutError) and signal.is_set()
 
     implementation = SyntheticEnvironment()

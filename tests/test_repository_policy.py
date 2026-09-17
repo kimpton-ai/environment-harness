@@ -317,7 +317,7 @@ def test_secret_scanner_rejects_planted_credential(tmp_path, monkeypatch):
 
 def test_exact_unexpired_secret_exception_is_accepted(tmp_path, monkeypatch):
     now = datetime(2026, 9, 17, tzinfo=UTC)
-    secret = "AKIA" + "B" * 16
+    secret = "AKIA" + "B" * 16  # pragma: allowlist secret
     planted = tmp_path / "planted.txt"
     planted.write_text("credential=" + secret)
     (tmp_path / ".github").mkdir()
@@ -358,7 +358,7 @@ def test_repository_command_does_not_inherit_ambient_secret(tmp_path):
     wrapper.chmod(0o755)
     env = os.environ.copy()
     env["PATH"] = str(tmp_path) + os.pathsep + env["PATH"]
-    env["SENTINEL_RELEASE_SECRET"] = "must-not-reach-repository-code"
+    env["SENTINEL_RELEASE_SECRET"] = "must-not-reach-repository-code"  # pragma: allowlist secret
 
     result = subprocess.run(
         [sys.executable, "scripts/check_repository.py"],

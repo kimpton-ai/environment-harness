@@ -182,7 +182,10 @@ jobs:
           min-severity: medium
           version: 1.30.0
       - run: uv run --no-sync detect-secrets scan
-      - run: uv run --no-sync python scripts/check_repository.py --full
+      - name: Verify repository policy and upstream publication metadata
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: uv run --no-sync python scripts/check_repository.py --full
       - run: uv export --frozen --all-extras --no-dev --no-emit-project --no-hashes | uv run --no-sync pip-audit -r /dev/stdin
       - run: npm audit --audit-level=high --prefix packages/typescript
       - name: Scan vulnerabilities and malicious packages with OSV and OpenSSF data
