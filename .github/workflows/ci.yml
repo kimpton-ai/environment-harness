@@ -183,6 +183,7 @@ jobs:
           version: 1.30.0
       - run: uv run --no-sync detect-secrets scan
       - run: uv build
+      - run: npm run build --prefix packages/typescript
       - run: npm pack --ignore-scripts --pack-destination ../../dist
         working-directory: packages/typescript
       - name: Verify repository policy and upstream publication metadata
