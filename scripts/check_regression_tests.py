@@ -11,7 +11,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = os.environ.get("REGRESSION_BASE_REF", "origin/main")
-PROOF_TARGETS = ("tests/test_repository_policy.py::test_release_workflow_requires_automatic_tag_binding",)
+PROOF_TARGETS = (
+    "tests/test_repository_policy.py::test_release_workflow_requires_automatic_release_orchestration",
+)
 SAFE_ENV = {
     "COMSPEC",
     "LANG",

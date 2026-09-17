@@ -16,7 +16,7 @@
 /.github/action-pins.json @kimpton-ai/security @kimpton-ai/maintainers
 /.github/dependency-exceptions.json @kimpton-ai/security @kimpton-ai/maintainers
 /.github/secret-exceptions.json @kimpton-ai/security @kimpton-ai/maintainers
-/.github/workflows/release.yml @kimpton-ai/security @kimpton-ai/maintainers
+/.github/workflows/release*.yml @kimpton-ai/security @kimpton-ai/maintainers
 /scripts/ @kimpton-ai/security @kimpton-ai/maintainers
 /src/environment_harness/server.py @kimpton-ai/security @kimpton-ai/maintainers
 /src/environment_harness/store.py @kimpton-ai/security @kimpton-ai/maintainers

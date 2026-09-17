@@ -2,9 +2,10 @@ import hashlib
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,15 @@ def load_script(name):
 
 check_distribution = load_script("check_distribution")
 check_repository = load_script("check_repository")
+
+
+def configure_release_workflows(tmp_path):
+    workflows = tmp_path / ".github/workflows"
+    workflows.mkdir(parents=True)
+    source = Path(__file__).resolve().parents[1] / ".github/workflows"
+    for name in ("release.yml", "release-orchestration.yml", "release-pr.yml"):
+        shutil.copyfile(source / name, workflows / name)
+    return workflows
 
 
 def configure_versions(tmp_path, python_version="0.2.0", npm_version="0.2.0", lock_version="0.2.0"):
@@ -63,12 +73,9 @@ def test_release_version_mismatch_fails_closed(
 
 
 def test_release_workflow_requires_commit_binding(tmp_path, monkeypatch):
-    workflow = tmp_path / ".github/workflows"
-    workflow.mkdir(parents=True)
-    source = Path(__file__).resolve().parents[1] / ".github/workflows/release.yml"
-    (workflow / "release.yml").write_text(
-        source.read_text().replace('test "$GITHUB_SHA" = "$release_commit"', "true")
-    )
+    workflows = configure_release_workflows(tmp_path)
+    release = workflows / "release.yml"
+    release.write_text(release.read_text().replace('test "$GITHUB_SHA" = "$release_commit"', "true"))
     monkeypatch.setattr(check_repository, "ROOT", tmp_path)
 
     with pytest.raises(check_repository.PolicyError, match="attested workflow commit"):
@@ -83,14 +90,105 @@ def test_release_workflow_requires_commit_binding(tmp_path, monkeypatch):
     ],
 )
 def test_release_workflow_requires_automatic_tag_binding(tmp_path, monkeypatch, required, description):
-    workflow = tmp_path / ".github/workflows"
-    workflow.mkdir(parents=True)
-    source = Path(__file__).resolve().parents[1] / ".github/workflows/release.yml"
-    (workflow / "release.yml").write_text(source.read_text().replace(required, "removed"))
+    workflows = configure_release_workflows(tmp_path)
+    release = workflows / "release.yml"
+    release.write_text(release.read_text().replace(required, "removed"))
     monkeypatch.setattr(check_repository, "ROOT", tmp_path)
 
     with pytest.raises(check_repository.PolicyError, match=description):
         check_repository.check_release_workflow_binding()
+
+
+def test_release_workflow_requires_automatic_release_orchestration(tmp_path, monkeypatch):
+    workflows = tmp_path / ".github/workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "release.yml").write_text(
+        '"v[0-9]+.[0-9]+.[0-9]+"\n'
+        "RELEASE_TAG: ${{ github.ref_name }}\n"
+        'test "$GITHUB_SHA" = "$release_commit"\n'
+        'git merge-base --is-ancestor "$release_commit" origin/main\n'
+        '--release-tag "$RELEASE_TAG"\n'
+        "uv build --no-build-isolation\n"
+        'gh attestation verify "$artifact"\n'
+        'cmp "$artifact" "$released/$(basename "$artifact")"\n'
+    )
+    (workflows / "release-orchestration.yml").write_text(
+        "python scripts/release_version.py detect\n"
+        "actions/create-github-app-token@\n"
+        'app-id: "3369417"\n'
+        "permission-contents: write\n"
+        '--field ref="refs/tags/$RELEASE_TAG"\n'
+    )
+    (workflows / "release-pr.yml").write_text(
+        "workflow_dispatch:\n"
+        "actions/create-github-app-token@\n"
+        'app-id: "3369417"\n'
+        "permission-contents: write\n"
+        "permission-pull-requests: write\n"
+        "python scripts/release_version.py prepare\n"
+        'git commit --message "chore: release $RELEASE_TAG"\n'
+        "gh pr create --base main\n"
+    )
+    monkeypatch.setattr(check_repository, "ROOT", tmp_path)
+
+    with pytest.raises(check_repository.PolicyError, match="tag-to-reviewed-main binding"):
+        check_repository.check_release_workflow_binding()
+
+
+def configure_release_tree(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    for name in (
+        "CHANGELOG.md",
+        "README.md",
+        "pyproject.toml",
+        "uv.lock",
+        "packages/typescript/package.json",
+        "packages/typescript/package-lock.json",
+        "src/environment_harness/__init__.py",
+    ):
+        destination = tmp_path / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(root / name, destination)
+    changelog = (tmp_path / "CHANGELOG.md").read_text()
+    (tmp_path / "CHANGELOG.md").write_text(
+        changelog.replace("## Unreleased\n", "## Unreleased\n\n- Added a synthetic release note.\n", 1)
+    )
+
+
+def test_prepare_release_updates_all_version_surfaces(tmp_path):
+    release_version = load_script("release_version")
+    configure_release_tree(tmp_path)
+
+    version = release_version.prepare_release(tmp_path, "minor", date(2026, 9, 18))
+
+    assert version == "0.3.0"
+    assert release_version.current_version(tmp_path) == version
+    assert 'name = "environment-harness"\nversion = "0.3.0"' in (tmp_path / "uv.lock").read_text()
+    assert "--branch v0.3.0" in (tmp_path / "README.md").read_text()
+    assert (
+        "## 0.3.0 - 2026-09-18\n\n- Added a synthetic release note."
+        in (tmp_path / "CHANGELOG.md").read_text()
+    )
+
+
+def test_prepare_release_requires_unreleased_notes(tmp_path):
+    release_version = load_script("release_version")
+    configure_release_tree(tmp_path)
+    changelog = (tmp_path / "CHANGELOG.md").read_text()
+    (tmp_path / "CHANGELOG.md").write_text(changelog.replace("\n- Added a synthetic release note.\n", "\n"))
+
+    with pytest.raises(release_version.ReleaseError, match="Unreleased section is empty"):
+        release_version.prepare_release(tmp_path, "patch", date(2026, 9, 18))
+
+
+def test_release_tag_is_created_once_and_never_for_a_downgrade():
+    release_version = load_script("release_version")
+    changelog = "# Changelog\n\n## Unreleased\n\n## 0.2.0 - 2026-09-17\n"
+
+    assert release_version.select_release_tag("0.2.0", ["v0.1.0"], changelog) == "v0.2.0"
+    assert release_version.select_release_tag("0.2.0", ["v0.1.0", "v0.2.0"], changelog) is None
+    with pytest.raises(release_version.ReleaseError, match="older than existing release"):
+        release_version.select_release_tag("0.2.0", ["v0.3.0"], changelog)
 
 
 def npm_lock(name="example", version="1.0.0"):
