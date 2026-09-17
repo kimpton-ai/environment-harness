@@ -120,6 +120,16 @@ class EnvironmentSession:
             "reserved_micros": row["reserved"],
         }
 
+    def list(self, who, limit=100):
+        if who.role != "researcher":
+            raise Forbidden("researcher required")
+        with self.store.transaction() as db:
+            rows = db.execute(
+                "SELECT * FROM environments WHERE tenant=? AND (CAST(? AS TEXT) IS NULL OR id=?) ORDER BY id DESC LIMIT ?",
+                (who.tenant, who.environment, who.environment, limit),
+            )
+            return [self._public(row) for row in rows]
+
     def get(self, environment, who):
         with self.store.transaction() as db:
             row = self.store.environment(db, environment, who)

@@ -24,7 +24,7 @@ Omit `--open` when running without a browser. You can then open the viewer and p
 
 The example runs Alice and Bob for three turns, checkpoints their shared total of 6, and creates a branch with its total set to 20. It runs both environments for two more turns: the parent ends at 10, the branch at 24. Each participant receives its own synthetic private field. The two environments share a lineage; they are not independent samples.
 
-Select either environment in the viewer. Filter the timeline by participant and observation, expand the recorded payload, and inspect the checkpoint. Select both environment checkboxes and click **Compare selected environments**. **Export evidence** downloads the selected environment's complete JSONL history. The script also writes `demo.json` and both JSONL exports into the store directory.
+Select either environment in the viewer. The timeline groups evidence by state revision, with one row per participant showing the observation, the attempted action and the executed outcome. Filter by participant perspective or activity, expand any cell for its recorded payload, and open a checkpoint row for the command that branches from it. Select both environment checkboxes and click **Compare selected environments**. **Export evidence** downloads the selected environment's complete JSONL history. The script also writes `demo.json` and both JSONL exports into the store directory.
 
 The wheel contains the built viewer. Node.js is only needed when changing its TypeScript source. Core installation without the optional server dependencies supports the Python API, CLI and evidence exports:
 
@@ -38,6 +38,9 @@ environment-harness doctor
 Replace `ENVIRONMENT` and `CHECKPOINT` with the printed identifiers. Use the same store for all commands.
 
 ```sh
+uv run environment-harness --store .local/branch-demo list
+uv run environment-harness --store .local/branch-demo show ENVIRONMENT
+uv run environment-harness --store .local/branch-demo timeline ENVIRONMENT --participant alice
 uv run environment-harness --store .local/branch-demo attach ENVIRONMENT
 uv run environment-harness --store .local/branch-demo checkpoint ENVIRONMENT
 uv run environment-harness --store .local/branch-demo branch ENVIRONMENT CHECKPOINT --interventions '{"total": 20}'
@@ -48,9 +51,11 @@ uv run environment-harness --store .local/branch-demo export ENVIRONMENT > traje
 uv run environment-harness --store .local/branch-demo cancel ENVIRONMENT
 ```
 
-Replay reads evidence without loading an environment or invoking an agent. Resume marks the latest committed state ready to continue; the CLI command and viewer button do not execute additional agent turns. Call `run(...)` with the registered agents to advance it, as shown in [the complete example](examples/branch_comparison.py). Resume never rewinds successful external effects. Branch restores an immutable checkpoint into a separate environment. It rejects unsupported counterfactuals and checkpoints with pending decisions or external operations.
+`list`, `show` and `timeline` print readable summaries of recorded environments. `timeline` groups events by the state revision an action was taken from and prints one line per participant with the observation, the attempted action and the executed outcome. `--participant` limits it to the evidence that participant could see, `--kind` filters event kinds, and `--verbose` includes the recorded payloads. `compare` prints a summary; `--json` on any of these commands prints the underlying records. `attach`, `replay` and `export` remain JSON for scripts.
 
-The viewer displays event timelines, participant perspectives, model/tool activity, artifact links, checkpoints, branch controls, scores, costs, frozen experiments and environment comparisons. It retains the latest 500 events; full history is available through paginated API reads and exports. Researcher perspective selection is a display filter. Participant API credentials enforce the actual access boundary.
+Replay reads evidence without loading an environment or invoking an agent. Resume marks the latest committed state ready to continue; the CLI command does not execute additional agent turns. Call `run(...)` with the registered agents to advance it, as shown in [the complete example](examples/branch_comparison.py). Resume never rewinds successful external effects. Branch restores an immutable checkpoint into a separate environment. It rejects unsupported counterfactuals and checkpoints with pending decisions or external operations.
+
+The viewer reads evidence and never writes to an environment. It shows the timeline grouped by revision with per-participant observation, action and outcome, participant perspectives, model and tool activity, artifact links, checkpoints, scores, costs, the frozen experiment and environment comparisons. Checkpoint, resume, cancel and branch are command-line and SDK operations. It retains the latest 500 events; full history is available through paginated API reads and exports. Researcher perspective selection is a display filter. Participant API credentials enforce the actual access boundary.
 
 ## Python API
 

@@ -1,11 +1,104 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>EnvironmentHarness</title><link rel="stylesheet" href="/viewer/style.css"><script type="module" src="/viewer/app.js"></script></head>
-<body><header><a class="brand" href="/">EnvironmentHarness</a><span class="tag">Evidence explorer</span><span id="connection">Disconnected</span></header>
-<main><section id="access" class="panel"><h1>Inspect persistent environments.</h1><p>Connect to this supplier service with your researcher or participant credential. Evidence stays on the service.</p><form id="connect-form"><label for="token">Access credential</label><div class="row"><input id="token" type="password" autocomplete="off" placeholder="Paste your environment service credential" required><button>Connect</button></div></form><p class="muted">For a local session, start the server with serve --open to connect automatically. Local connections stay signed in when this tab refreshes. You can also use the researcher-token file printed by the server.</p></section>
-<div id="workspace" hidden><aside class="panel"><div class="row"><h2>Environments</h2><button id="refresh" class="quiet">Refresh</button></div><div id="environments"></div><label for="environment-id">Attach by environment ID</label><div class="row"><input id="environment-id" placeholder="Environment ID"><button id="attach" class="quiet">Attach</button></div><button id="compare" class="quiet wide">Compare selected environments</button></aside>
-<section class="content"><div class="panel"><div class="row"><h1 id="environment-title">Select an environment</h1><span id="environment-status" class="tag"></span></div><div id="stats" class="stats"></div><p id="lineage" class="muted"></p><div class="row controls"><button id="checkpoint">Checkpoint</button><button id="resume" class="quiet">Resume</button><button id="pause" class="quiet">Pause</button><button id="cancel" class="danger">Cancel</button><button id="export" class="quiet">Export evidence</button></div></div>
-<div class="panel"><div class="row"><h2>Timeline</h2><label>Perspective <select id="perspective"><option value="">Authorized evidence</option></select></label><label>Activity <select id="kind"><option value="">All events</option><option value="observation">Observations</option><option value="action">Actions</option><option value="model">Model calls</option><option value="operation">Tools and services</option><option value="checkpoint">Checkpoints</option><option value="authority">Authority</option><option value="report">Scores</option></select></label></div><p id="timeline-note" class="muted">The latest 500 authorized events appear here. Export retrieves the full recorded history.</p><div id="timeline"></div><button id="load-more" class="quiet">Load next page</button></div>
-<div class="panel"><h2>Scores and findings</h2><div id="reports">No environment selected.</div></div><details class="panel"><summary>Frozen experiment</summary><pre id="manifest"></pre></details><div class="panel" id="comparison-panel" hidden><h2>Environment comparison</h2><div id="comparison-summary"></div><details><summary>Full comparison record</summary><pre id="comparison"></pre></details></div></section></div>
-<p id="message" role="status" aria-live="polite"></p></main>
-<dialog id="branch-dialog"><form id="branch-form"><h2>Create an isolated branch</h2><p id="checkpoint-label"></p><label for="interventions">Declared interventions (JSON)</label><textarea id="interventions" rows="5">{}</textarea><div class="row"><button>Create branch</button><button type="button" id="close-branch" class="quiet">Close</button></div></form></dialog>
-</body></html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>EnvironmentHarness</title>
+  <link rel="stylesheet" href="/viewer/style.css">
+  <script type="module" src="/viewer/app.js"></script>
+</head>
+<body>
+<header>
+  <a class="brand" href="/">EnvironmentHarness</a>
+  <span id="connection">Disconnected</span>
+</header>
+<main>
+  <section id="access" class="panel">
+    <h1>Inspect recorded environments.</h1>
+    <p>Connect to this supplier service with your researcher or participant credential. Evidence stays on the service, and this viewer only reads it.</p>
+    <form id="connect-form">
+      <label for="token">Access credential</label>
+      <div class="row">
+        <input id="token" type="password" autocomplete="off" placeholder="Paste your environment service credential" required>
+        <button>Connect</button>
+      </div>
+    </form>
+    <p class="muted">For a local session, start the server with serve --open to connect automatically. Local connections stay signed in when this tab refreshes. You can also use the researcher-token file printed by the server.</p>
+  </section>
+
+  <div id="workspace" hidden>
+    <aside class="panel">
+      <div class="row">
+        <h2>Environments</h2>
+        <button id="refresh" class="quiet">Refresh</button>
+      </div>
+      <div id="environments"></div>
+      <label for="environment-id">Attach by environment ID</label>
+      <div class="row">
+        <input id="environment-id" placeholder="Environment ID">
+        <button id="attach" class="quiet">Attach</button>
+      </div>
+      <button id="compare" class="quiet wide">Compare selected environments</button>
+    </aside>
+
+    <section class="content">
+      <div class="panel">
+        <div class="row">
+          <h1 id="environment-title">Select an environment</h1>
+          <span id="environment-status" class="tag"></span>
+        </div>
+        <p class="identity"><span id="environment-identity"></span><button id="copy-id" class="quiet small">Copy</button></p>
+        <div id="stats" class="stats"></div>
+        <p id="lineage" class="muted"></p>
+        <div class="row actions">
+          <button id="export" class="quiet">Export evidence</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="row">
+          <h2>Timeline</h2>
+          <label>Perspective <select id="perspective"><option value="">Everyone</option></select></label>
+          <label>Activity
+            <select id="kind">
+              <option value="">All events</option>
+              <option value="observation">Observations</option>
+              <option value="action">Actions</option>
+              <option value="model">Model calls</option>
+              <option value="operation">Tools and services</option>
+              <option value="checkpoint">Checkpoints</option>
+              <option value="authority">Authority</option>
+              <option value="report">Scores</option>
+            </select>
+          </label>
+        </div>
+        <p id="timeline-note" class="muted">The latest 500 authorized events appear here, grouped by revision. Export retrieves the full recorded history.</p>
+        <div id="timeline"></div>
+        <button id="load-more" class="quiet" hidden>Load next page</button>
+      </div>
+
+      <div class="panel">
+        <h2>Scores and findings</h2>
+        <div id="reports"><p class="muted">No environment selected.</p></div>
+      </div>
+
+      <details class="panel">
+        <summary>Frozen experiment</summary>
+        <pre id="manifest"></pre>
+      </details>
+
+      <div class="panel" id="comparison-panel" hidden>
+        <h2>Environment comparison</h2>
+        <div id="comparison-summary"></div>
+        <details>
+          <summary>Full comparison record</summary>
+          <pre id="comparison"></pre>
+        </details>
+      </div>
+    </section>
+  </div>
+  <p id="message" role="status" aria-live="polite"></p>
+</main>
+</body>
+</html>

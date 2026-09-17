@@ -59,7 +59,7 @@ try:
             time.sleep(0.1)
     else:
         raise RuntimeError("Installed viewer did not become ready")
-    for asset in ("app.js", "client.js", "types.js", "style.css"):
+    for asset in ("app.js", "timeline.js", "client.js", "types.js", "style.css"):
         assert request("/viewer/" + asset).status == 200
     try:
         request("/v1/environments")

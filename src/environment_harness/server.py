@@ -95,16 +95,7 @@ def create_app(session, *, local_login=None):
 
     @app.get("/v1/environments")
     def environments(who=Depends(actor), limit: int = Query(100, ge=1, le=1000)):
-        if who.role != "researcher":
-            raise Forbidden("researcher required")
-        with store.transaction() as db:
-            return [
-                session._public(r)
-                for r in db.execute(
-                    "SELECT * FROM environments WHERE tenant=? AND (CAST(? AS TEXT) IS NULL OR id=?) ORDER BY id DESC LIMIT ?",
-                    (who.tenant, who.environment, who.environment, limit),
-                )
-            ]
+        return session.list(who, limit)
 
     @app.get("/v1/environments/{environment}")
     def get(environment: str, who=Depends(actor)):
@@ -272,7 +263,7 @@ def create_app(session, *, local_login=None):
 
     @app.get("/viewer/{file}")
     def asset(file: str):
-        if file not in ("app.js", "client.js", "types.js", "style.css"):
+        if file not in ("app.js", "timeline.js", "client.js", "types.js", "style.css"):
             raise HTTPException(404)
         return FileResponse(Path(__file__).parent / "viewer" / file)
 

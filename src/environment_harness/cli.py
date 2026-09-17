@@ -4,6 +4,7 @@ import os
 import sys
 from pathlib import Path
 
+from . import presentation
 from .contracts import AgentSpec, ExperimentSpec, Principal, RunPolicy
 from .errors import HarnessError
 from .evaluation import compare, rollouts
@@ -41,6 +42,17 @@ def main():
     branch.add_argument("--interventions", default="{}")
     comparison = sub.add_parser("compare")
     comparison.add_argument("environments", nargs="+")
+    comparison.add_argument("--json", action="store_true", help="Print the comparison record instead of the summary")
+    listing = sub.add_parser("list")
+    listing.add_argument("--json", action="store_true")
+    listing.add_argument("--limit", type=int, default=100)
+    for name in ("show", "timeline"):
+        command = sub.add_parser(name)
+        command.add_argument("environment")
+        command.add_argument("--json", action="store_true")
+    sub.choices["timeline"].add_argument("--participant", help="Show only evidence visible to this participant")
+    sub.choices["timeline"].add_argument("--kind", help="Show only event kinds containing this text")
+    sub.choices["timeline"].add_argument("--verbose", "-v", action="store_true", help="Include recorded payloads")
     token = sub.add_parser("token")
     token.add_argument("--environment")
     token.add_argument("--participant")
@@ -58,6 +70,9 @@ def main():
         )
         for row in source:
             print(encode(row))
+        return
+    if args.command in ("list", "show", "timeline", "compare"):
+        inspect(store, who, args)
         return
     env = environment(args.environment) if args.command == "serve" else SyntheticEnvironment()
     if args.command not in ("quickstart", "serve", "token", "compare", "run"):
@@ -133,9 +148,7 @@ def main():
             who = who.model_copy(update={"environment": args.environment})
         print(store.issue(who))
         return
-    if args.command == "compare":
-        result = compare(store, args.environments, who)
-    elif args.command == "attach":
+    if args.command == "attach":
         result = session.get(args.environment, who)
     elif args.command == "branch":
         result = session.branch(args.environment, who, args.checkpoint, json.loads(args.interventions))
@@ -151,6 +164,28 @@ def main():
             result = session.control(args.environment, who, lease, "cancel")
             Operations(store).cancel_prepared(args.environment, who)
     print(json.dumps(result, indent=2))
+
+
+def inspect(store, who, args):
+    """Read-only inspection. Human-readable by default; --json prints the underlying records."""
+    session = EnvironmentSession(store, SyntheticEnvironment())
+    if args.command == "list":
+        rows = session.list(who, args.limit)
+        print(json.dumps(rows, indent=2) if args.json else presentation.render_list(rows))
+        return
+    if args.command == "compare":
+        result = compare(store, args.environments, who)
+        print(json.dumps(result, indent=2) if args.json else presentation.render_comparison(result))
+        return
+    item = session.get(args.environment, who)
+    perspective = getattr(args, "participant", None)
+    events = presentation.filter_events(store.replay(args.environment, who), perspective, getattr(args, "kind", None))
+    turns = presentation.build_timeline(events, item["participants"])
+    if args.command == "timeline":
+        print(json.dumps(turns, indent=2) if args.json else presentation.render_timeline(turns, args.verbose, perspective))
+        return
+    reports = store.reports(args.environment, who)
+    print(json.dumps(item | {"reports": reports}, indent=2) if args.json else presentation.render_environment(item, reports, turns))
 
 
 if __name__ == "__main__":

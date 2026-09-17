@@ -71,6 +71,8 @@ def compare(store, environments, who):
                 "lineage": row["lineage"],
                 "parent": row["parent"],
                 "status": row["status"],
+                "revision": row["revision"],
+                "participants": list(json.loads(row["participants"])),
                 "cost_micros": row["spent"],
                 "interventions": json.loads(row["manifest"])["interventions"],
             }

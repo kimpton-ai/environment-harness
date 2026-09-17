@@ -168,6 +168,10 @@ def test_api_and_viewer(setup):
     headers = {"Authorization": "Bearer " + token}
     assert client.get("/").status_code == 200
     assert client.get("/viewer/app.js").status_code == 200
+    assert client.get("/viewer/timeline.js").status_code == 200
+    page = client.get("/").text
+    # The viewer reads evidence. Checkpoint, resume, cancel and branch stay command-line and SDK operations.
+    assert 'id="checkpoint"' not in page and "branch-dialog" not in page
     assert client.get("/v1/environments").status_code == 401
     assert client.get("/v1/environments", headers=headers).json()[0]["id"] == environment
     response = client.get(f"/v1/environments/{environment}/events", headers=headers | {"Accept": "text/event-stream"})

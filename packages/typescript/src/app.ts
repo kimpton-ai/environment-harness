@@ -1,84 +1,215 @@
+// EnvironmentHarness evidence viewer. It reads recorded evidence and never writes to an
+// environment. Checkpoint, resume, cancel and branch are command-line and SDK operations.
 import {EnvironmentClient} from './client.js';
-import type {Checkpoint, EvidenceEvent, Json, Lease, Environment} from './types.js';
+import {
+  MISSING, SLOTS, buildTimeline, cellText, describe, filterEvents, formatCost, formatTime, hasActivity,
+  inheritedSentence, shortId, title, turnLabel, scalars, type Slot, type Turn,
+} from './timeline.js';
+import type {EvidenceEvent, Json, Environment} from './types.js';
+
+// State
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 let client: EnvironmentClient;
+let catalog: Environment[] = [];
 let environment: Environment | null = null;
 let events: EvidenceEvent[] = [];
 let cursor = 0;
 let generation = 0;
-let chosenCheckpoint = '';
-const owner = crypto.randomUUID();
 const selected = new Set<string>();
 const localViewer = location.protocol === 'http:' && location.hostname === '127.0.0.1';
 const localCredentialKey = 'environment-harness-local-credential';
 const json = (value: unknown) => JSON.stringify(value, null, 2);
+
+// Helpers
 function message(text: string) {el('message').textContent = text;}
 async function attempt(fn: () => Promise<void>) {try {await fn();} catch (error) {message(error instanceof Error ? error.message : 'Operation failed');}}
-function text(tag: string, value: string, className = '') {const node = document.createElement(tag); node.textContent = value; node.className = className; return node;}
+function text(tag: string, value: string, className = '') {const node = document.createElement(tag); node.textContent = value; if (className) node.className = className; return node;}
+function details(summary: string, body: HTMLElement, className = '', id = '') {
+  const node = document.createElement('details'); node.className = className; if (id) node.dataset.eventId = id;
+  node.append(text('summary', summary), body); return node;
+}
+const known = (id: string | null | undefined) => catalog.find(row => row.id === id);
+function reference(id: string | null | undefined) {const item = known(id); return item ? `${title(item)} ${shortId(id)}` : shortId(id);}
+
+// API
 async function list() {
-  const rows = await client.list(); const holder = el('environments'); holder.replaceChildren();
-  for (const item of rows) {
-    const row = text('div', '', 'environment'); const check = document.createElement('input'); check.type = 'checkbox'; check.checked = selected.has(item.id); check.setAttribute('aria-label', 'Compare ' + item.id);
-    check.onchange = () => {check.checked ? selected.add(item.id) : selected.delete(item.id);};
-    const button = text('button', item.id.slice(0, 12)); button.append(text('small', `${item.status} · revision ${item.revision}`)); button.onclick = () => void attempt(() => attach(item.id));
-    row.append(check, button); holder.append(row);
-  }
+  catalog = (await client.list()).sort((a, b) => a.lineage.localeCompare(b.lineage) || Number(Boolean(a.parent)) - Number(Boolean(b.parent)) || a.id.localeCompare(b.id));
+  renderList();
+  return catalog;
 }
 async function attach(id: string) {
-  const ticket = ++generation; const item = await client.get(id); if (ticket !== generation) return;
-  environment = item; cursor = 0; events = []; el('environment-title').textContent = item.id.slice(0, 16); el('environment-status').textContent = item.status;
-  el('lineage').textContent = `Lineage ${item.lineage}${item.parent ? ` · Parent ${item.parent}` : ''}`;
-  const stats = el('stats'); stats.replaceChildren();
-  for (const [label, value] of [['Revision', String(item.revision)], ['Participants', String(item.participants.length)], ['Cost', '$'+(item.spent_micros/1e6).toFixed(6)], ['Reserved', '$'+(item.reserved_micros/1e6).toFixed(6)]]) {
-    const stat = text('div', '', 'stat'); stat.append(text('span', label), text('strong', value)); stats.append(stat);
-  }
-  el('manifest').textContent = json(item.experiment ?? item.environment);
-  const perspective = el<HTMLSelectElement>('perspective'); perspective.replaceChildren(new Option('Authorized evidence', ''));
+  const ticket = ++generation;
+  const item = await client.get(id);
+  if (ticket !== generation) return;
+  environment = item; cursor = 0; events = [];
+  renderHeader(item);
+  const perspective = el<HTMLSelectElement>('perspective');
+  const previous = perspective.value;
+  perspective.replaceChildren(new Option('Everyone', ''));
   for (const participant of item.participants) perspective.add(new Option(participant, participant));
-  const caps = item.environment.capabilities as Record<string, Json>;
-  el<HTMLButtonElement>('checkpoint').disabled = !caps?.checkpoint;
-  el<HTMLButtonElement>('resume').disabled = !caps?.resume;
+  if (item.participants.includes(previous)) perspective.value = previous;
+  el('comparison-panel').hidden = true;
+  renderList();
   await loadEvents();
-  try {const reports = await client.reports(id); if (ticket === generation) {el('reports').replaceChildren(reports.length ? text('pre', json(reports)) : text('p', 'No scoring revision has been recorded.'));}}
-  catch {if (ticket === generation) el('reports').textContent = 'Scores require researcher or scorer authority.';}
+  try {const reports = await client.reports(id); if (ticket === generation) renderReports(reports);}
+  catch {if (ticket === generation) el('reports').replaceChildren(text('p', 'Scores require researcher or scorer authority.', 'muted'));}
 }
 async function loadEvents() {
-  if (!environment) return; const id = environment.id; const ticket = generation;
-  const page = await client.events(id, cursor); if (ticket !== generation) return;
+  if (!environment) return;
+  const ticket = generation;
+  const page = await client.events(environment.id, cursor);
+  if (ticket !== generation) return;
   cursor = page.cursor; events = [...events, ...page.events].slice(-500);
-  if (page.events.length || !events.length) renderEvents();
-  el('timeline-note').textContent = `Showing ${events.length} authorized events through cursor ${cursor}. Export retrieves the full history.`;
+  if (page.events.length || !events.length) renderTimeline();
+  el('timeline-note').textContent = events.length === 500
+    ? 'The latest 500 authorized events appear here, grouped by revision. Export retrieves the full recorded history.'
+    : `${events.length} recorded events, grouped by revision.`;
+  el<HTMLButtonElement>('load-more').hidden = page.events.length < 200;
 }
-function renderEvents() {
-  const perspective = el<HTMLSelectElement>('perspective').value;
-  const kind = el<HTMLSelectElement>('kind').value;
+async function download(path: string, filename: string) {
+  // Fetch through the authenticated client without putting credentials in URLs.
+  const response = await fetch(client.endpoint + path, {headers: {Authorization: `Bearer ${el<HTMLInputElement>('token').value}`}, redirect: 'error', cache: 'no-store'});
+  if (!response.ok) throw new Error(`Export returned HTTP ${response.status}`);
+  const link = document.createElement('a'); link.href = URL.createObjectURL(await response.blob()); link.download = filename; link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+async function runCompare(ids: string[]) {
+  if (ids.length < 2) throw new Error('Select at least two environments.');
+  const result = await client.compare(ids);
+  el('comparison-panel').hidden = false;
+  renderComparison(result);
+  el('comparison').textContent = json(result);
+  el('comparison-panel').scrollIntoView({behavior: 'smooth', block: 'start'});
+}
+
+// Rendering
+function renderList() {
+  const holder = el('environments'); holder.replaceChildren();
+  for (const item of catalog) {
+    const row = text('div', '', 'environment');
+    const check = document.createElement('input'); check.type = 'checkbox'; check.checked = selected.has(item.id);
+    check.setAttribute('aria-label', `Compare ${title(item)}`);
+    check.onchange = () => {check.checked ? selected.add(item.id) : selected.delete(item.id);};
+    const button = text('button', title(item)); button.setAttribute('aria-current', String(environment?.id === item.id));
+    button.append(text('small', `${item.status}, revision ${item.revision}, ${shortId(item.id)}`));
+    button.onclick = () => void attempt(() => attach(item.id));
+    row.append(check, button); holder.append(row);
+  }
+  if (!catalog.length) holder.append(text('p', 'No environments are recorded in this store yet.', 'muted'));
+}
+function renderHeader(item: Environment) {
+  el('environment-title').textContent = title(item);
+  el('environment-status').textContent = item.status;
+  el('environment-identity').textContent = item.id;
+  const stats = el('stats'); stats.replaceChildren();
+  for (const [label, value] of [['Revision', String(item.revision)], ['Participants', String(item.participants.length)], ['Spent', formatCost(item.spent_micros)], ['Reserved', formatCost(item.reserved_micros)]]) {
+    const stat = text('div', '', 'stat'); stat.append(text('strong', value), text('span', label)); stats.append(stat);
+  }
+  const spec = item.environment as Record<string, Json>;
+  const lineage = item.parent ? `Branched from ${reference(item.parent)}.` : `Original environment in lineage ${shortId(item.lineage)}.`;
+  el('lineage').textContent = `${typeof spec.implementation === 'string' ? spec.implementation : String(spec.id)} with ${String(spec.scheduling ?? 'unspecified')} scheduling. ${lineage}`;
+  el('manifest').textContent = json(item.experiment ?? item.environment);
+}
+function renderTimeline() {
   const holder = el('timeline');
   const expanded = new Set(Array.from(holder.querySelectorAll<HTMLDetailsElement>('details[open]')).map(node => node.dataset.eventId));
   holder.replaceChildren();
-  for (const event of events.filter(event => (!perspective || event.audience.includes('*') || event.audience.includes(perspective)) && (!kind || event.kind.includes(kind)))) {
-    const row = text('article', '', 'event'); row.append(text('div', '#'+event.seq, 'sequence'));
-    const body = text('div', ''); const details = document.createElement('details'); details.append(text('summary', event.kind));
-    details.dataset.eventId = `${event.environment}:${event.seq}`;
-    details.open = expanded.has(details.dataset.eventId);
-    details.append(text('p', `Revision ${event.revision} · ${new Date(event.ingested*1000).toLocaleString()} · ${event.audience.length ? event.audience.join(', ') : 'Researcher evidence'}`, 'meta'));
-    details.append(text('pre', json(event.payload))); body.append(details);
-    if (event.kind === 'checkpoint.committed') {
-      const button = text('button', 'Branch from checkpoint', 'quiet'); button.onclick = () => {chosenCheckpoint = String(event.payload.id); el('checkpoint-label').textContent = chosenCheckpoint; el<HTMLDialogElement>('branch-dialog').showModal();}; body.append(button);
-    }
-    if (event.kind === 'artifact') {
-      const button = text('button', 'Download artifact', 'quiet'); button.onclick = () => void attempt(async () => {await download(`/v1/environments/${environment!.id}/artifacts/${event.payload.id}`, String(event.payload.id));}); body.append(button);
-    }
-    row.append(body); holder.append(row);
+  const perspective = el<HTMLSelectElement>('perspective').value;
+  const turns = buildTimeline(filterEvents(events, perspective, el<HTMLSelectElement>('kind').value), environment?.participants ?? []);
+  for (const turn of turns) holder.append(renderTurn(turn, perspective));
+  if (!turns.length) holder.append(text('p', 'No recorded events match this perspective.', 'muted'));
+  for (const node of holder.querySelectorAll<HTMLDetailsElement>('details[data-event-id]')) node.open = expanded.has(node.dataset.eventId);
+}
+function renderTurn(turn: Turn, perspective: string) {
+  const section = text('section', '', 'turn');
+  const head = text('div', '', 'turn-head');
+  head.append(text('h3', turnLabel(turn)), text('span', formatTime(turn.started), 'time'));
+  if (turn.committed?.terminated) head.append(text('span', 'terminated', 'tag'));
+  else if (turn.committed?.truncated) head.append(text('span', 'truncated', 'tag'));
+  if (Object.keys(turn.shared).length) head.append(text('span', scalars(turn.shared), 'shared'));
+  section.append(head);
+  const firstSeq = Math.min(...Object.values(turn.participants).flatMap(slots => SLOTS.map(slot => slots[slot]?.seq ?? Infinity)));
+  const before = turn.other.filter(event => event.seq < firstSeq), after = turn.other.filter(event => event.seq >= firstSeq);
+  if (turn.inherited) section.append(text('p', inheritedSentence(turn.inherited), 'turn-note'));
+  for (const event of before) section.append(renderNote(event));
+  if (hasActivity(turn)) for (const [name, slots] of Object.entries(turn.participants)) section.append(renderParticipantRow(name, slots, perspective));
+  for (const event of after) section.append(renderNote(event));
+  return section;
+}
+function renderParticipantRow(name: string, slots: Turn['participants'][string], perspective: string) {
+  const row = text('div', '', 'turn-row'); row.append(text('span', name, 'participant'));
+  const empty = SLOTS.every(slot => !slots[slot]);
+  if (empty) {row.append(text('span', perspective && name !== perspective ? 'not visible from this perspective' : 'no events in this turn', 'cell missing')); return row;}
+  for (const slot of SLOTS) {
+    const event = slots[slot];
+    if (!event) {row.append(text('span', MISSING[slot], 'cell missing')); continue;}
+    const cell = details(cellText(event, slot), payload(event), 'cell', `${event.environment}:${event.seq}`);
+    if (slot === 'executed' && typeof event.payload.reward === 'number') cell.classList.add(event.payload.reward >= 0 ? 'positive' : 'negative');
+    row.append(cell);
   }
-  if (!holder.children.length) holder.append(text('p', 'No recorded events match this perspective.'));
+  return row;
 }
-async function lease() {if (!environment) throw new Error('Select a environment first'); return client.command<Lease>(environment.id, 'lease', {owner, ttl:30});}
-async function download(path: string, filename: string) {
-  // Fetch through the authenticated client without putting credentials in URLs.
-  const response = await fetch(client.endpoint + path, {headers:{Authorization:`Bearer ${el<HTMLInputElement>('token').value}`}, redirect:'error', cache:'no-store'});
-  if (!response.ok) throw new Error(`Export returned HTTP ${response.status}`);
-  const link = document.createElement('a'); link.href = URL.createObjectURL(await response.blob()); link.download = filename; link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+function payload(event: EvidenceEvent) {
+  const body = text('div', '', 'payload');
+  body.append(text('p', `${event.kind}, event ${event.seq}, state revision ${event.revision}, ${formatTime(event.event_time ?? event.ingested)}.`, 'muted'));
+  body.append(text('pre', json(event.payload)));
+  return body;
 }
+function renderNote(event: EvidenceEvent) {
+  const sentence = describe(event);
+  const body = payload(event);
+  if (event.kind === 'checkpoint.committed' && environment) {
+    body.prepend(text('p', 'To branch from this checkpoint, run the command below.', 'muted'), text('pre', `environment-harness branch ${environment.id} ${String(event.payload.id)}`));
+  }
+  const note = details(sentence, body, 'turn-note', `${event.environment}:${event.seq}`);
+  if (event.kind === 'artifact') {
+    const button = text('button', 'Download artifact', 'quiet');
+    button.onclick = () => void attempt(() => download(`/v1/environments/${environment!.id}/artifacts/${String(event.payload.id)}`, String(event.payload.id)));
+    body.append(button);
+  }
+  return note;
+}
+function renderReports(value: Json[]) {
+  const holder = el('reports'); holder.replaceChildren();
+  const records = value as unknown as {revision: number; report: {metrics: Record<string, Json>; scorer: string; version: string; evidence_cursor: number; findings: unknown[]; uncertainty: string}}[];
+  if (!records.length) {holder.append(text('p', 'No score report recorded.', 'muted')); return;}
+  for (const record of records) {
+    const block = text('div', '', 'report');
+    const findings = record.report.findings?.length ?? 0;
+    block.append(text('p', `Score report revision ${record.revision} by ${record.report.scorer}@${record.report.version} at evidence cursor ${record.report.evidence_cursor}.${findings ? ` ${findings} finding${findings === 1 ? '' : 's'}.` : ''}`));
+    const metrics = text('div', '', 'metrics');
+    for (const [key, metric] of Object.entries(record.report.metrics ?? {})) {
+      const row = text('div', '', 'metric'); row.append(text('strong', typeof metric === 'object' ? JSON.stringify(metric) : String(metric)), text('span', key.replaceAll('_', ' '))); metrics.append(row);
+    }
+    block.append(metrics);
+    if (record.report.uncertainty) block.append(text('p', record.report.uncertainty, 'muted'));
+    block.append(details('Full report record', text('pre', json(record))));
+    holder.append(block);
+  }
+}
+function renderComparison(value: Json) {
+  const result = value as unknown as {environments: {environment: string; parent: string | null; participants?: string[]; status?: string; revision?: number; cost_micros?: number; interventions: Record<string, Json>; latest_report: {report: {metrics: Record<string, Json>}} | null}[]; uncertainty: string; design: string};
+  const holder = el('comparison-summary'); holder.replaceChildren();
+  const cards = text('div', '', 'comparison-cards');
+  for (const item of result.environments) {
+    const card = text('section', '', 'comparison-card');
+    const button = text('button', title({participants: item.participants ?? known(item.environment)?.participants, parent: item.parent, id: item.environment}), 'link');
+    button.setAttribute('aria-current', String(environment?.id === item.environment));
+    button.onclick = () => void attempt(() => attach(item.environment));
+    card.append(button);
+    card.append(text('p', `${shortId(item.environment)}, ${item.status ?? 'unknown'}, revision ${item.revision ?? '?'}, cost ${formatCost(item.cost_micros)}.`, 'muted'));
+    for (const [key, changed] of Object.entries(item.interventions ?? {})) card.append(text('p', `${key.replaceAll('_', ' ')} set to ${typeof changed === 'object' ? JSON.stringify(changed) : String(changed)}.`, 'muted'));
+    const metrics = item.latest_report?.report.metrics ?? {};
+    for (const [key, metric] of Object.entries(metrics)) {
+      const row = text('div', '', 'metric'); row.append(text('strong', typeof metric === 'object' ? JSON.stringify(metric) : String(metric)), text('span', key.replaceAll('_', ' '))); card.append(row);
+    }
+    if (!Object.keys(metrics).length) card.append(text('p', 'No score report recorded.', 'muted'));
+    cards.append(card);
+  }
+  holder.append(cards, text('p', result.uncertainty), text('p', result.design, 'muted'));
+}
+
+// Connection
 async function connect(token: string, rememberLocal = false) {
   client = new EnvironmentClient(location.origin, token, true);
   await client.request('GET', '/v1/environment');
@@ -90,7 +221,11 @@ async function connect(token: string, rememberLocal = false) {
     } catch { /* Connection still works when browser storage is disabled. */ }
   }
   el('access').hidden = true; el('workspace').hidden = false; el('connection').textContent = 'Connected';
-  try {await list();} catch {message('Participant credentials can attach by environment ID.');}
+  try {
+    const rows = await list();
+    const initial = rows.find(row => !row.parent) ?? rows[0];
+    if (initial) await attach(initial.id);
+  } catch {message('Participant credentials can attach by environment ID.');}
 }
 el<HTMLFormElement>('connect-form').onsubmit = event => {event.preventDefault(); void attempt(() => connect(el<HTMLInputElement>('token').value));};
 
@@ -103,9 +238,9 @@ async function connectLocal() {
   try {
     if (ticket !== null) {
       try {sessionStorage.removeItem(localCredentialKey);} catch { /* Storage is optional. */ }
-      const response = await fetch('/local/connect', {method:'POST', headers:{'X-Local-Login':ticket}, redirect:'error', cache:'no-store', signal:AbortSignal.timeout(10000)});
+      const response = await fetch('/local/connect', {method: 'POST', headers: {'X-Local-Login': ticket}, redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(10000)});
       if (!response.ok) throw new Error('The local connection link expired. Restart with serve --open to reconnect.');
-      token = (await response.json() as {token:string}).token;
+      token = (await response.json() as {token: string}).token;
     } else {
       try {token = sessionStorage.getItem(localCredentialKey);} catch { /* Storage is optional. */ }
     }
@@ -116,34 +251,13 @@ async function connectLocal() {
   }
 }
 void connectLocal();
+
+// Wiring
 el('attach').onclick = () => void attempt(() => attach(el<HTMLInputElement>('environment-id').value.trim()));
 el('refresh').onclick = () => void attempt(async () => {await list(); if (environment) await attach(environment.id);});
 el('load-more').onclick = () => void attempt(loadEvents);
-el('perspective').onchange = renderEvents; el('kind').onchange = renderEvents;
-el('checkpoint').onclick = () => void attempt(async () => {const saved = await client.command<Checkpoint>(environment!.id, 'checkpoint', {lease:await lease()}); message('Checkpoint saved: '+saved.id); await loadEvents();});
-for (const command of ['resume', 'pause', 'cancel']) el(command).onclick = () => void attempt(async () => {const activeLease = await lease(); await client.command(environment!.id, command === 'resume' ? 'resume' : 'control', {lease:activeLease, ...(command === 'resume' ? {} : {command})}); await attach(environment!.id); message('Session '+command+' applied.');});
+el('perspective').onchange = renderTimeline; el('kind').onchange = renderTimeline;
 el('export').onclick = () => void attempt(() => download(`/v1/environments/${environment!.id}/export`, `${environment!.id}.jsonl`));
-el('compare').onclick = () => void attempt(async () => {if (selected.size < 2) throw new Error('Select at least two environments.'); const result = await client.compare([...selected]); el('comparison-panel').hidden = false; renderComparison(result); el('comparison').textContent = json(result);});
-el('close-branch').onclick = () => el<HTMLDialogElement>('branch-dialog').close();
-el<HTMLFormElement>('branch-form').onsubmit = event => {event.preventDefault(); void attempt(async () => {const interventions: unknown = JSON.parse(el<HTMLTextAreaElement>('interventions').value); const child = await client.command<Environment>(environment!.id, 'branch', {checkpoint:chosenCheckpoint, interventions, new_environment:crypto.randomUUID().replaceAll('-', '')}); el<HTMLDialogElement>('branch-dialog').close(); await list(); await attach(child.id); message('Isolated branch created.');});};
+el('compare').onclick = () => void attempt(() => runCompare([...selected]));
+el('copy-id').onclick = () => void attempt(async () => {if (environment) {await navigator.clipboard.writeText(environment.id); message('Environment ID copied.');}});
 setInterval(() => {if (environment && document.visibilityState === 'visible') void attempt(loadEvents);}, 3000);
-
-function renderComparison(value: Json) {
-  const result = value as unknown as {environments: {environment: string; parent: string | null; latest_report: {report: {metrics: Record<string, Json>}} | null}[]; uncertainty: string; design: string};
-  const holder = el('comparison-summary'); holder.replaceChildren();
-  const cards = text('div', '', 'comparison-cards');
-  for (const item of result.environments) {
-    const card = text('section', '', 'comparison-card');
-    card.append(text('h3', item.parent ? 'Branched environment' : 'Parent environment'));
-    card.append(text('p', item.environment.slice(0, 12), 'muted'));
-    const metrics = item.latest_report?.report.metrics ?? {};
-    for (const [name, metric] of Object.entries(metrics)) {
-      const row = text('p', '', 'metric');
-      row.append(text('span', name.replaceAll('_', ' ')), text('strong', typeof metric === 'object' ? json(metric) : String(metric)));
-      card.append(row);
-    }
-    if (!Object.keys(metrics).length) card.append(text('p', 'No scoring report recorded.'));
-    cards.append(card);
-  }
-  holder.append(cards, text('p', result.uncertainty), text('p', result.design, 'muted'));
-}
