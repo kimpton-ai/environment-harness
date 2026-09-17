@@ -281,18 +281,19 @@ def test_phase_timeout_does_not_commit_a_late_action(tmp_path):
     class Slow(SyntheticAgent):
         def act(self, observation):
             started.set()
-            assert release.wait(2)
+            assert release.wait(10)
             finished.set()
             return {"value": 1}
 
     with ThreadPoolExecutor() as pool:
         future = pool.submit(run, session, environment, who, {"a": Slow()}, turns=1, phase_timeout=0.05)
         assert started.wait(2)
-        time.sleep(0.1)
-        release.set()
-        with pytest.raises(TimeoutError):
-            future.result(timeout=2)
-    assert finished.wait(2)
+        try:
+            with pytest.raises(TimeoutError, match="agent phase deadline exceeded"):
+                future.result(timeout=5)
+        finally:
+            release.set()
+    assert finished.wait(5)
     assert session.get(environment, who)["revision"] == 0
     assert not any(e["kind"] == "action.executed" for e in session.store.replay(environment, who))
 
