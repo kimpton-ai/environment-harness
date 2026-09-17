@@ -1,4 +1,4 @@
-"""Prepare a release PR and decide whether main needs a release tag."""
+"""Prepare a reviewed release change and validate its maintainer-created tag."""
 
 from __future__ import annotations
 
@@ -205,4 +205,4 @@ if __name__ == "__main__":
     try:
         main()
     except ReleaseError as error:
-        raise SystemExit(f"release automation failed: {error}") from error
+        raise SystemExit(f"release preparation failed: {error}") from error

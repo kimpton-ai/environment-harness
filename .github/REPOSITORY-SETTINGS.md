@@ -5,15 +5,15 @@ GitHub settings are part of the security boundary and cannot be enforced by file
 - a `main` ruleset requiring the `Python`, `Cross-platform`, `TypeScript`, `Security`, and `Distribution` checks;
 - at least one independent approval, required CODEOWNERS approval, dismissal of stale approvals, and approval of the complete commit range;
 - blocked direct pushes, force pushes, branch deletion, and ordinary administrator/team bypasses;
-- a `v*` tag ruleset allowing creation only by release maintainers and the `kimpton-ci` GitHub App, while blocking update/deletion;
-- protected `github-release` environment approval by the security/release team;
+- a `v*` tag ruleset allowing creation only by release maintainers, while blocking update/deletion and automation bypass;
+- protected `github-release` environment approval by a security/release maintainer other than the release PR author;
 - immutable GitHub Releases and GitHub Private Vulnerability Reporting; and
-- GitHub App identity verification for automation—names resembling trusted bots are not sufficient.
+- review of the complete release commit range before a maintainer creates a tag.
 
-Install `kimpton-ci` for this repository with only Contents and Pull requests write access. Store one of its private keys as the `RELEASE_APP_PRIVATE_KEY` Actions secret and rotate it through the GitHub App settings. The public App ID is pinned in the workflows. Enterprise policy intentionally prevents the ambient `GITHUB_TOKEN` from opening release PRs or bypassing tag creation.
+Do not install a release GitHub App or store a long-lived release credential in Actions. Release preparation and protected tag creation are deliberate maintainer operations. Dependency updates are never auto-merged. Review branch rules after ownership changes and record exceptions in a tracked security issue.
 
-Dependency updates are never auto-merged. Review branch rules after ownership or GitHub App changes and record exceptions in a tracked security issue.
+After adding notes under `Unreleased`, a maintainer creates a release branch and runs `python scripts/release_version.py prepare --bump patch` (or `minor`/`major`). The helper synchronizes every Python, TypeScript, lockfile, and README version. Validate the proposed tag with `python scripts/release_version.py validate --release-tag vX.Y.Z`, run the release checks, and open a normal reviewed PR.
 
-Run **Prepare release PR** with a patch, minor, or major choice after adding notes under `Unreleased`. The workflow synchronizes every Python, TypeScript, lockfile, and README version and opens a normal reviewed PR. When that PR merges, release orchestration creates the protected strict-SemVer tag at the reviewed `main` commit and dispatches the attested publisher on that tag. A maintainer may still push the same protected tag as a recovery path.
+After that PR merges, copy its merge commit SHA from GitHub; do not substitute the newest `main` commit if later changes have landed. Fetch `main` and tags, detach at the recorded merge commit, and run `python scripts/release_version.py detect`. A release maintainer then creates the reported protected tag at that recorded commit with `git tag vX.Y.Z <release-merge-sha>` and pushes only `refs/tags/vX.Y.Z`. The tag dispatches the attested publisher, which still waits for independent `github-release` environment approval.
 
-The publisher requires the tag target, checked-out `HEAD`, and GitHub workflow `GITHUB_SHA` to be the same commit on `main`; its package metadata must equal the tag. Provenance therefore identifies the commit that supplied the released files, and an existing release can only be rerun when every artifact is byte-for-byte identical. Keep the `github-release` environment approval independent of the release PR author and automation initiator.
+The publisher requires the tag target, checked-out `HEAD`, and GitHub workflow `GITHUB_SHA` to be the same commit on `main`; its package metadata must equal the tag, and its first parent must carry an older package version. This prevents a later `main` commit from being substituted for the reviewed release merge. Provenance therefore identifies the commit that supplied the released files, and an existing release can only be rerun when every artifact is byte-for-byte identical. Keep the `github-release` environment approval independent of the release PR author and automation initiator.

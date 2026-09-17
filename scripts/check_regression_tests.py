@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BASE = os.environ.get("REGRESSION_BASE_REF", "origin/main")
 PROOF_TARGETS = (
-    "tests/test_repository_policy.py::test_release_workflow_requires_automatic_release_orchestration",
+    "tests/test_repository_policy.py::test_release_workflows_exclude_long_lived_app_credentials",
 )
 SAFE_ENV = {
     "COMSPEC",
@@ -31,6 +31,13 @@ SAFE_ENV = {
 
 def git(*arguments: str, text: bool = False):
     return subprocess.run(["git", *arguments], cwd=ROOT, check=True, capture_output=True, text=text).stdout
+
+
+def require_regression_test_failure(returncode: int) -> None:
+    if returncode == 0:
+        raise SystemExit("changed regression tests also pass on the base revision")
+    if returncode != 1:
+        raise SystemExit(f"regression proof runner failed with exit code {returncode}")
 
 
 def main() -> None:
@@ -91,8 +98,7 @@ def main() -> None:
             env=env,
             check=False,
         )
-        if result.returncode == 0:
-            raise SystemExit("changed regression tests also pass on the base revision")
+        require_regression_test_failure(result.returncode)
     print("regression proof: changed tests fail on the base revision")
 
 

@@ -23,14 +23,15 @@ def load_script(name):
 
 check_distribution = load_script("check_distribution")
 check_repository = load_script("check_repository")
+check_regression_tests = load_script("check_regression_tests")
+LEGACY_APP_CREDENTIAL = "_".join(("RELEASE", "APP", "PRIVATE", "KEY"))
 
 
 def configure_release_workflows(tmp_path):
     workflows = tmp_path / ".github/workflows"
     workflows.mkdir(parents=True)
     source = Path(__file__).resolve().parents[1] / ".github/workflows"
-    for name in ("release.yml", "release-orchestration.yml", "release-pr.yml"):
-        shutil.copyfile(source / name, workflows / name)
+    shutil.copyfile(source / "release.yml", workflows / "release.yml")
     return workflows
 
 
@@ -72,6 +73,22 @@ def test_release_version_mismatch_fails_closed(
         check_repository.check_version_metadata(tag)
 
 
+@pytest.mark.parametrize("parent_version", ["0.2.0", "0.3.0", "invalid"])
+def test_release_commit_must_introduce_a_newer_version(monkeypatch, parent_version):
+    parent = f'[project]\nversion = "{parent_version}"\n'.encode()
+    monkeypatch.setattr(check_repository, "_git_file", lambda _reference, _path: parent)
+
+    with pytest.raises(check_repository.PolicyError, match="version"):
+        check_repository.check_release_commit("v0.2.0")
+
+
+def test_release_commit_accepts_version_introducing_parent(monkeypatch):
+    parent = b'[project]\nversion = "0.1.0"\n'
+    monkeypatch.setattr(check_repository, "_git_file", lambda _reference, _path: parent)
+
+    check_repository.check_release_commit("v0.2.0")
+
+
 def test_release_workflow_requires_commit_binding(tmp_path, monkeypatch):
     workflows = configure_release_workflows(tmp_path)
     release = workflows / "release.yml"
@@ -89,7 +106,7 @@ def test_release_workflow_requires_commit_binding(tmp_path, monkeypatch):
         ("RELEASE_TAG: ${{ github.ref_name }}", "event tag binding"),
     ],
 )
-def test_release_workflow_requires_automatic_tag_binding(tmp_path, monkeypatch, required, description):
+def test_release_workflow_requires_tag_event_binding(tmp_path, monkeypatch, required, description):
     workflows = configure_release_workflows(tmp_path)
     release = workflows / "release.yml"
     release.write_text(release.read_text().replace(required, "removed"))
@@ -99,40 +116,43 @@ def test_release_workflow_requires_automatic_tag_binding(tmp_path, monkeypatch, 
         check_repository.check_release_workflow_binding()
 
 
-def test_release_workflow_requires_automatic_release_orchestration(tmp_path, monkeypatch):
-    workflows = tmp_path / ".github/workflows"
-    workflows.mkdir(parents=True)
-    (workflows / "release.yml").write_text(
-        '"v[0-9]+.[0-9]+.[0-9]+"\n'
-        "RELEASE_TAG: ${{ github.ref_name }}\n"
-        'test "$GITHUB_SHA" = "$release_commit"\n'
-        'git merge-base --is-ancestor "$release_commit" origin/main\n'
-        '--release-tag "$RELEASE_TAG"\n'
-        "uv build --no-build-isolation\n"
-        'gh attestation verify "$artifact"\n'
-        'cmp "$artifact" "$released/$(basename "$artifact")"\n'
-    )
-    (workflows / "release-orchestration.yml").write_text(
-        "python scripts/release_version.py detect\n"
-        "actions/create-github-app-token@\n"
-        'app-id: "3369417"\n'
-        "permission-contents: write\n"
-        '--field ref="refs/tags/$RELEASE_TAG"\n'
-    )
-    (workflows / "release-pr.yml").write_text(
-        "workflow_dispatch:\n"
-        "actions/create-github-app-token@\n"
-        'app-id: "3369417"\n'
-        "permission-contents: write\n"
-        "permission-pull-requests: write\n"
-        "python scripts/release_version.py prepare\n"
-        'git commit --message "chore: release $RELEASE_TAG"\n'
-        "gh pr create --base main\n"
-    )
+@pytest.mark.parametrize(
+    "credential",
+    ["actions/create-github-app-token@", "private-key:", LEGACY_APP_CREDENTIAL],
+)
+def test_release_workflows_reject_long_lived_app_credentials(tmp_path, monkeypatch, credential):
+    workflows = configure_release_workflows(tmp_path)
+    (workflows / "unsafe-release.yml").write_text(f"permissions: {{}}\n{credential}\n")
     monkeypatch.setattr(check_repository, "ROOT", tmp_path)
 
-    with pytest.raises(check_repository.PolicyError, match="tag-to-reviewed-main binding"):
+    with pytest.raises(check_repository.PolicyError, match="prohibited"):
         check_repository.check_release_workflow_binding()
+
+
+def test_release_workflow_credential_comments_are_not_policy_violations(tmp_path, monkeypatch):
+    workflows = configure_release_workflows(tmp_path)
+    (workflows / "comment.yml").write_text("permissions: {}\n# private-key: is prohibited\n")
+    monkeypatch.setattr(check_repository, "ROOT", tmp_path)
+
+    check_repository.check_release_workflow_binding()
+
+
+def test_release_workflows_exclude_long_lived_app_credentials():
+    workflows = Path(__file__).resolve().parents[1] / ".github/workflows"
+    workflow_text = "\n".join(path.read_text() for path in workflows.glob("*.y*ml"))
+
+    assert "actions/create-github-app-token@" not in workflow_text
+    assert "private-key:" not in workflow_text
+    assert LEGACY_APP_CREDENTIAL not in workflow_text
+
+
+def test_regression_proof_requires_an_actual_test_failure():
+    check_regression_tests.require_regression_test_failure(1)
+    with pytest.raises(SystemExit, match="also pass"):
+        check_regression_tests.require_regression_test_failure(0)
+    for returncode in (2, 3, 4, 5):
+        with pytest.raises(SystemExit, match=f"exit code {returncode}"):
+            check_regression_tests.require_regression_test_failure(returncode)
 
 
 def configure_release_tree(tmp_path):
