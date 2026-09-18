@@ -46,7 +46,7 @@ The included counter and agents are synthetic installation checks. They demonstr
 On macOS or Linux, install Python 3.12 or later and [uv](https://docs.astral.sh/uv/getting-started/installation/), then run:
 
 ```sh
-git clone --branch v0.2.1 --depth 1 https://github.com/kimpton-ai/environment-harness.git
+git clone --branch v0.2.2 --depth 1 https://github.com/kimpton-ai/environment-harness.git
 cd environment-harness
 uv sync --extra server
 uv run python examples/branch_comparison.py --store .local/branch-demo
