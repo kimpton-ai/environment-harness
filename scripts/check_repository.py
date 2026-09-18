@@ -284,6 +284,7 @@ def check_release_workflow_binding() -> None:
         'gh attestation verify "$artifact"': "per-artifact provenance verification",
         'cmp "$artifact" "$released/$(basename "$artifact")"': "idempotent artifact comparison",
         'cache: ""': "disabled setup-node package cache",
+        "cd dist && sha256sum -- * > SHA256SUMS": "download-friendly checksum paths",
     }
     missing = [description for snippet, description in release_required.items() if snippet not in release]
     if missing:

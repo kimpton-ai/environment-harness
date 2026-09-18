@@ -155,6 +155,7 @@ def test_dependabot_routine_update_policy_fails_closed(tmp_path, monkeypatch, co
         ('"v[0-9]+.[0-9]+.[0-9]+"', "strict SemVer tag trigger"),
         ("RELEASE_TAG: ${{ github.ref_name }}", "event tag binding"),
         ('cache: ""', "disabled setup-node package cache"),
+        ("cd dist && sha256sum -- * > SHA256SUMS", "download-friendly checksum paths"),
     ],
 )
 def test_release_workflow_requires_tag_event_binding(tmp_path, monkeypatch, required, description):

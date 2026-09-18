@@ -67,7 +67,7 @@ jobs:
       - run: uv export --frozen --all-extras --no-dev --no-emit-project --output-file "$RUNNER_TEMP/release-requirements.txt"
       - run: uv run --no-sync cyclonedx-py requirements "$RUNNER_TEMP/release-requirements.txt" --output-reproducible --output-format JSON --output-file dist/python-sbom.cdx.json
       - run: npm sbom --sbom-format cyclonedx --prefix packages/typescript > dist/npm-sbom.cdx.json
-      - run: sha256sum dist/* > dist/SHA256SUMS
+      - run: cd dist && sha256sum -- * > SHA256SUMS
       - name: Upload reviewed artifacts
         id: upload
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
