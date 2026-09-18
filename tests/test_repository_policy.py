@@ -247,6 +247,12 @@ def test_prepare_release_updates_all_version_surfaces(tmp_path):
     )
 
 
+def test_readme_names_supported_uv_version():
+    root = Path(__file__).resolve().parents[1]
+
+    assert "uv 0.12.0 or later" in (root / "README.md").read_text()
+
+
 def test_prepare_release_requires_unreleased_notes(tmp_path):
     release_version = load_script("release_version")
     configure_release_tree(tmp_path)

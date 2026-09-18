@@ -121,6 +121,24 @@ def test_cli_serve_uses_loopback_and_protected_credential(tmp_path, monkeypatch,
         assert token.stat().st_mode & 0o777 == 0o600
 
 
+def test_cli_serve_exits_cleanly_on_keyboard_interrupt(tmp_path, monkeypatch, capsys):
+    class Server:
+        def __init__(self, _config):
+            pass
+
+        def run(self):
+            raise KeyboardInterrupt
+
+    class Config:
+        def __init__(self, app, **kwargs):
+            self.app = app
+            self.kwargs = kwargs
+
+    monkeypatch.setitem(sys.modules, "uvicorn", types.SimpleNamespace(Server=Server, Config=Config))
+
+    invoke(monkeypatch, capsys, tmp_path / "store", "serve")
+
+
 def test_cli_inspect_forwards_limit(tmp_path, monkeypatch, capsys):
     store = EvidenceStore(tmp_path / "store")
     who = Principal(tenant="local", subject="local-researcher", role="researcher")

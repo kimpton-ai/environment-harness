@@ -15,7 +15,7 @@
 </header>
 <main>
   <section id="access" class="panel">
-    <h1>Inspect recorded environments.</h1>
+    <h1>Inspect recorded environment sessions.</h1>
     <p>Connect to this supplier service with your researcher or participant credential. Evidence stays on the service, and this viewer only reads it.</p>
     <form id="connect-form">
       <label for="token">Access credential</label>
@@ -30,7 +30,7 @@
   <div id="workspace" hidden>
     <aside class="panel">
       <div class="row">
-        <h2>Environments</h2>
+        <h2>Environment sessions</h2>
         <button id="refresh" class="quiet">Refresh</button>
       </div>
       <div id="environments"></div>
@@ -39,13 +39,23 @@
         <input id="environment-id" placeholder="Environment ID">
         <button id="attach" class="quiet">Attach</button>
       </div>
-      <button id="compare" class="quiet wide">Compare selected environments</button>
+      <button id="compare" class="quiet wide">Compare selected sessions</button>
     </aside>
 
     <section class="content">
+      <div class="panel viewer-guide">
+        <h1>What am I looking at?</h1>
+        <p>This is a read-only evidence viewer for environment sessions stored by EnvironmentHarness. It does not run agents or change the environment.</p>
+        <ol>
+          <li><strong>Select</strong> an original or branched session on the left.</li>
+          <li><strong>Trace</strong> what each participant observed, attempted, and caused in the timeline.</li>
+          <li><strong>Compare</strong> two checked sessions to see their shared history, branch intervention, and recorded results.</li>
+        </ol>
+      </div>
+
       <div class="panel">
         <div class="row">
-          <h1 id="environment-title">Select an environment</h1>
+          <h1 id="environment-title">Select an environment session</h1>
           <span id="environment-status" class="tag"></span>
         </div>
         <p class="identity"><span id="environment-identity"></span><button id="copy-id" class="quiet small">Copy</button></p>
@@ -89,7 +99,8 @@
       </details>
 
       <div class="panel" id="comparison-panel" hidden>
-        <h2>Environment comparison</h2>
+        <h2>Environment session comparison</h2>
+        <p class="muted comparison-explanation">The original and branch share history up to the checkpoint. Any declared intervention applies only to the branch; the cards below show each session's later recorded result.</p>
         <div id="comparison-summary"></div>
         <details>
           <summary>Full comparison record</summary>
