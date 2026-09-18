@@ -398,7 +398,10 @@ def test_http_exports_comparison_viewer_and_invalid_requests(tmp_path):
     )
     for bad in ([], "not-a-list", [str(index) for index in range(101)]):
         assert client.post("/v1/compare", headers=headers, json={"environments": bad}).status_code == 422
-    assert client.get("/").status_code == 200
+    viewer = client.get("/")
+    assert viewer.status_code == 200
+    assert "What am I looking at?" in viewer.text
+    assert "It does not run agents or change the environment." in viewer.text
     for asset in ("app.js", "timeline.js", "client.js", "types.js", "style.css"):
         assert client.get(f"/viewer/{asset}").status_code == 200
     assert client.get("/viewer/private.txt").status_code == 404

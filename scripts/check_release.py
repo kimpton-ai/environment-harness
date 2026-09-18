@@ -37,10 +37,13 @@ from urllib.request import Request, urlopen
 
 import environment_harness
 from environment_harness import EvidenceStore, Principal
+from importlib.metadata import version
 
 assert str(Path(environment_harness.__file__).resolve()).startswith(str(Path(sys.prefix).resolve()))
 from environment_harness.client import EnvironmentClient
 from importlib.resources import files
+assert version("environment-harness") == environment_harness.__version__ == os.environ["EXPECTED_VERSION"]
+assert files("environment_harness").joinpath("py.typed").is_file()
 assert any(
     item.name.endswith(".sql") for item in files("environment_harness").joinpath("migrations").iterdir()
 )

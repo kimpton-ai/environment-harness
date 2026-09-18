@@ -7,6 +7,8 @@ import stat
 import tarfile
 import tomllib
 import zipfile
+from email.parser import BytesParser
+from email.policy import default
 from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,9 +27,9 @@ ROOT_FILES = {
 }
 DIRECTORY_SUFFIXES = {
     "contracts": {".json"},
-    "docs": {".md"},
+    "docs": {".md", ".png"},
     "examples": {".py"},
-    "src": {".css", ".html", ".js", ".py", ".sql"},
+    "src": {".css", ".html", ".js", ".py", ".sql", ".typed"},
 }
 
 
@@ -35,11 +37,39 @@ def project_version() -> str:
     return tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
 
 
-def metadata_version(content: bytes, artifact: str) -> str:
-    for line in content.decode().splitlines():
-        if line.startswith("Version: "):
-            return line.removeprefix("Version: ")
-    raise SystemExit(f"embedded version is missing from {artifact}")
+def npm_version(version: str) -> str:
+    for marker, stage in (("rc", "rc"), ("b", "beta"), ("a", "alpha")):
+        if marker in version:
+            base, serial = version.rsplit(marker, 1)
+            return f"{base}-{stage}.{serial}"
+    return version
+
+
+def check_metadata(content: bytes, artifact: str) -> None:
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+    metadata = BytesParser(policy=default).parsebytes(content)
+    required = {
+        "Name": project["name"],
+        "Version": project["version"],
+        "Requires-Python": project["requires-python"],
+        "License-Expression": project["license"],
+        "Description-Content-Type": "text/markdown",
+    }
+    for name, expected in required.items():
+        value = metadata.get(name)
+        if value != expected and not (
+            name == "Description-Content-Type" and str(value).startswith(expected + ";")
+        ):
+            raise SystemExit(f"{artifact} metadata {name} is {value!r}, expected {expected!r}")
+    if not str(metadata.get_payload()).strip():
+        raise SystemExit(f"{artifact} metadata lacks the README description")
+    if set(metadata.get_all("Provides-Extra", [])) != set(project.get("optional-dependencies", {})):
+        raise SystemExit(f"{artifact} metadata extras differ from pyproject.toml")
+    if "Typing :: Typed" not in metadata.get_all("Classifier", []):
+        raise SystemExit(f"{artifact} metadata lacks the typed-package classifier")
+    project_urls = {item.split(",", 1)[0] for item in metadata.get_all("Project-URL", [])}
+    if project_urls != set(project.get("urls", {})):
+        raise SystemExit(f"{artifact} metadata project URLs differ from pyproject.toml")
 
 
 def source_manifest() -> set[str]:
@@ -90,8 +120,7 @@ def check_wheel(path: Path) -> None:
             raise SystemExit("wheel metadata is missing")
         if dist_info != f"environment_harness-{version}.dist-info":
             raise SystemExit(f"wheel metadata directory does not match project version {version}")
-        if metadata_version(archive.read(f"{dist_info}/METADATA"), path.name) != version:
-            raise SystemExit(f"wheel embedded version does not match project version {version}")
+        check_metadata(archive.read(f"{dist_info}/METADATA"), path.name)
         metadata = {
             f"{dist_info}/METADATA",
             f"{dist_info}/RECORD",
@@ -144,17 +173,19 @@ def check_sdist(path: Path) -> None:
         if not license_member or license_member.read() != (ROOT / "LICENSE").read_bytes():
             raise SystemExit("sdist MIT license differs from the repository license")
         package_metadata = archive.extractfile(f"{prefix}/PKG-INFO")
-        if not package_metadata or metadata_version(package_metadata.read(), path.name) != version:
-            raise SystemExit(f"sdist embedded version does not match project version {version}")
+        if not package_metadata:
+            raise SystemExit("sdist package metadata is missing")
+        check_metadata(package_metadata.read(), path.name)
 
 
 def check_npm(path: Path) -> None:
     package = json.loads((ROOT / "packages/typescript/package.json").read_text())
-    version = project_version()
+    python_version = project_version()
+    version = npm_version(python_version)
     if package.get("version") != version:
-        raise SystemExit("npm and Python project versions differ")
+        raise SystemExit("npm version does not correspond to the Python project version")
     if path.name != f"environment-harness-client-{version}.tgz":
-        raise SystemExit(f"npm filename does not match project version {version}: {path.name}")
+        raise SystemExit(f"npm filename does not match npm version {version}: {path.name}")
     expected = {"package/package.json"} | {f"package/{name}" for name in package["files"]}
     with tarfile.open(path) as archive:
         members = archive.getmembers()

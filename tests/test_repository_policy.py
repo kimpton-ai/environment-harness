@@ -2,6 +2,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -53,6 +54,13 @@ def test_release_versions_and_tag_are_consistent(tmp_path, monkeypatch):
     monkeypatch.setattr(check_repository, "ROOT", tmp_path)
 
     check_repository.check_version_metadata("v0.2.0")
+
+
+def test_pep440_prerelease_maps_to_npm_semver(tmp_path, monkeypatch):
+    configure_versions(tmp_path, "0.3.0rc2", "0.3.0-rc.2", "0.3.0-rc.2")
+    monkeypatch.setattr(check_repository, "ROOT", tmp_path)
+
+    check_repository.check_version_metadata("v0.3.0rc2")
 
 
 @pytest.mark.parametrize(
@@ -152,9 +160,11 @@ def test_dependabot_routine_update_policy_fails_closed(tmp_path, monkeypatch, co
 @pytest.mark.parametrize(
     ("required", "description"),
     [
-        ('"v[0-9]+.[0-9]+.[0-9]+"', "strict SemVer tag trigger"),
+        ('"v[0-9]+.[0-9]+.[0-9]+"', "final PEP 440 tag trigger"),
+        ('"v[0-9]+.[0-9]+.[0-9]+rc[0-9]+"', "release-candidate tag trigger"),
         ("RELEASE_TAG: ${{ github.ref_name }}", "event tag binding"),
         ('cache: ""', "disabled setup-node package cache"),
+        ("cd dist && sha256sum -- * > SHA256SUMS", "download-friendly checksum paths"),
     ],
 )
 def test_release_workflow_requires_tag_event_binding(tmp_path, monkeypatch, required, description):
@@ -222,6 +232,26 @@ def configure_release_tree(tmp_path):
         destination = tmp_path / name
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(root / name, destination)
+    current_python = re.search(r'(?m)^version = "([^"]+)"$', (tmp_path / "pyproject.toml").read_text()).group(
+        1
+    )
+    current_npm = check_repository._npm_version(current_python)
+    for name in (
+        "README.md",
+        "docs/STATUS.md",
+        "pyproject.toml",
+        "src/environment_harness/__init__.py",
+        "uv.lock",
+    ):
+        path = tmp_path / name
+        path.write_text(path.read_text().replace(current_python, "0.2.2"))
+    for name in (
+        "packages/typescript/README.md",
+        "packages/typescript/package.json",
+        "packages/typescript/package-lock.json",
+    ):
+        path = tmp_path / name
+        path.write_text(path.read_text().replace(current_npm, "0.2.2"))
     changelog = (tmp_path / "CHANGELOG.md").read_text()
     (tmp_path / "CHANGELOG.md").write_text(
         changelog.replace("## Unreleased\n", "## Unreleased\n\n- Added a synthetic release note.\n", 1)
@@ -239,6 +269,9 @@ def test_prepare_release_updates_all_version_surfaces(tmp_path):
     assert 'name = "environment-harness"\nversion = "0.3.0"' in (tmp_path / "uv.lock").read_text()
     assert "--branch v0.3.0" in (tmp_path / "README.md").read_text()
     assert "environment-harness-client-0.3.0.tgz" in (tmp_path / "packages/typescript/README.md").read_text()
+    assert (
+        "environment-harness-client-0.2.2.tgz" not in (tmp_path / "packages/typescript/README.md").read_text()
+    )
     assert "EnvironmentHarness 0.3.0 focuses" in (tmp_path / "docs/STATUS.md").read_text()
     assert (
         "## 0.3.0 - 2026-09-18\n\n- Added a synthetic release note."
@@ -246,11 +279,52 @@ def test_prepare_release_updates_all_version_surfaces(tmp_path):
     )
 
 
+def test_prepare_release_candidate_increment_and_finalization(tmp_path):
+    release_version = load_script("release_version")
+    configure_release_tree(tmp_path)
+
+    first = release_version.prepare_release(
+        tmp_path,
+        "patch",
+        date(2026, 9, 18),
+        prerelease="rc",
+    )
+    assert first == "0.2.3rc1"
+    assert json.loads((tmp_path / "packages/typescript/package.json").read_text())["version"] == (
+        "0.2.3-rc.1"
+    )
+    assert "## 0.2.3rc1" not in (tmp_path / "CHANGELOG.md").read_text()
+    assert "- Added a synthetic release note." in (tmp_path / "CHANGELOG.md").read_text()
+
+    second = release_version.prepare_release(
+        tmp_path,
+        prerelease="rc",
+        released_on=date(2026, 9, 19),
+    )
+    assert second == "0.2.3rc2"
+    assert json.loads((tmp_path / "packages/typescript/package.json").read_text())["version"] == (
+        "0.2.3-rc.2"
+    )
+
+    final = release_version.prepare_release(tmp_path, final=True, released_on=date(2026, 9, 20))
+    assert final == "0.2.3"
+    assert "## 0.2.3 - 2026-09-20" in (tmp_path / "CHANGELOG.md").read_text()
+    assert json.loads((tmp_path / "packages/typescript/package.json").read_text())["version"] == "0.2.3"
+
+
+def test_readme_names_supported_uv_version():
+    root = Path(__file__).resolve().parents[1]
+
+    assert "uv 0.12.0 or later" in (root / "README.md").read_text()
+
+
 def test_prepare_release_requires_unreleased_notes(tmp_path):
     release_version = load_script("release_version")
     configure_release_tree(tmp_path)
     changelog = (tmp_path / "CHANGELOG.md").read_text()
-    (tmp_path / "CHANGELOG.md").write_text(changelog.replace("\n- Added a synthetic release note.\n", "\n"))
+    (tmp_path / "CHANGELOG.md").write_text(
+        re.sub(r"(?s)(## Unreleased\n).*?(?=\n## )", r"\1", changelog, count=1)
+    )
 
     with pytest.raises(release_version.ReleaseError, match="Unreleased section is empty"):
         release_version.prepare_release(tmp_path, "patch", date(2026, 9, 18))
@@ -264,6 +338,15 @@ def test_release_tag_is_created_once_and_never_for_a_downgrade():
     assert release_version.select_release_tag("0.2.0", ["v0.1.0", "v0.2.0"], changelog) is None
     with pytest.raises(release_version.ReleaseError, match="older than existing release"):
         release_version.select_release_tag("0.2.0", ["v0.3.0"], changelog)
+
+
+def test_release_candidate_tags_follow_pep440_ordering():
+    release_version = load_script("release_version")
+    changelog = "# Changelog\n\n## Unreleased\n\n- Candidate changes.\n\n## 0.2.0\n"
+
+    assert release_version.select_release_tag("0.3.0rc2", ["v0.3.0rc1"], changelog) == "v0.3.0rc2"
+    with pytest.raises(release_version.ReleaseError, match="older than existing release"):
+        release_version.select_release_tag("0.3.0rc1", ["v0.3.0rc2"], changelog)
 
 
 def npm_lock(name="example", version="1.0.0"):

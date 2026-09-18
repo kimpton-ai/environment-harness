@@ -140,7 +140,10 @@ def main():
         )
         if login is not None:
             threading.Thread(target=open_when_ready, args=(server, login), daemon=True).start()
-        server.run()
+        try:
+            server.run()
+        except KeyboardInterrupt:
+            pass
         return
     if args.command == "token":
         if args.participant:

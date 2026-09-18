@@ -4,16 +4,30 @@ build-backend = "hatchling.build"
 
 [project]
 name = "environment-harness"
-version = "0.2.2"
+version = "0.2.3rc1"
 description = "Durable sessions and evidence for independently implemented AI environments"
+readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
+keywords = ["ai-agents", "environments", "evaluation", "experiments"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Typing :: Typed",
+]
 dependencies = ["pydantic>=2.12.5,<3", "jsonschema>=4.26,<5"]
 
 [project.urls]
+Homepage = "https://github.com/kimpton-ai/environment-harness"
 Repository = "https://github.com/kimpton-ai/environment-harness"
 Documentation = "https://github.com/kimpton-ai/environment-harness#readme"
+Changelog = "https://github.com/kimpton-ai/environment-harness/blob/main/CHANGELOG.md"
 Issues = "https://github.com/kimpton-ai/environment-harness/issues"
 Security = "https://github.com/kimpton-ai/environment-harness/security/policy"
 

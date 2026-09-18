@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+a[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+b[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+rc[0-9]+"
 
 concurrency:
   group: release-${{ github.ref }}
@@ -20,12 +23,13 @@ jobs:
     outputs:
       artifact-id: ${{ steps.upload.outputs.artifact-id }}
       artifact-digest: ${{ steps.upload.outputs.artifact-digest }}
+      python-artifact-id: ${{ steps.upload-python.outputs.artifact-id }}
     steps:
       - name: Validate release tag
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(a[1-9][0-9]*|b[1-9][0-9]*|rc[1-9][0-9]*)?$ ]]
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.ref }}
@@ -67,13 +71,23 @@ jobs:
       - run: uv export --frozen --all-extras --no-dev --no-emit-project --output-file "$RUNNER_TEMP/release-requirements.txt"
       - run: uv run --no-sync cyclonedx-py requirements "$RUNNER_TEMP/release-requirements.txt" --output-reproducible --output-format JSON --output-file dist/python-sbom.cdx.json
       - run: npm sbom --sbom-format cyclonedx --prefix packages/typescript > dist/npm-sbom.cdx.json
-      - run: sha256sum dist/* > dist/SHA256SUMS
+      - run: cd dist && sha256sum -- * > SHA256SUMS
       - name: Upload reviewed artifacts
         id: upload
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-artifacts
           path: dist/
+          if-no-files-found: error
+          compression-level: 0
+      - name: Upload reviewed Python distributions
+        id: upload-python
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: python-package-distributions
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
           if-no-files-found: error
           compression-level: 0
 
@@ -131,4 +145,27 @@ jobs:
             done
             exit 0
           fi
-          gh release create "$RELEASE_TAG" dist/* --repo "${{ github.repository }}" --verify-tag --generate-notes
+          prerelease=()
+          if [[ "$RELEASE_TAG" =~ (a|b|rc)[0-9]+$ ]]; then
+            prerelease=(--prerelease)
+          fi
+          gh release create "$RELEASE_TAG" dist/* --repo "${{ github.repository }}" --verify-tag --generate-notes "${prerelease[@]}"
+
+  pypi:
+    needs: [build, attest, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/p/environment-harness
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          artifact-ids: ${{ needs.build.outputs.python-artifact-id }}
+          path: dist
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/
