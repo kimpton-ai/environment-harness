@@ -4,7 +4,7 @@ EnvironmentHarness delays adoption of every new Python, npm, and GitHub Actions 
 
 Python resolution uses uv's one-week `exclude-newer` policy from `uv.toml`. npm resolution uses a seven-day minimum release age and disables lifecycle scripts. CI installs reviewed lockfiles only and independently compares changed versions with their registry publication timestamps. Git, URL, arbitrary-registry, and unpinned GitHub Action dependencies are prohibited.
 
-Dependabot may open security updates immediately, but dependency changes are never auto-merged. A young release cannot merge unless `.github/dependency-exceptions.json` contains an exact, unexpired exception with:
+Dependabot groups routine version updates into one monthly pull request per ecosystem, limiting routine review noise to at most three open pull requests. Security scanning and security update pull requests remain immediate and are not grouped with routine updates. Dependency changes are never auto-merged. A young release cannot merge unless `.github/dependency-exceptions.json` contains an exact, unexpired exception with:
 
 - a tracked issue naming the package, version, advisory, and operational impact;
 - an explanation of why waiting is riskier;

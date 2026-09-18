@@ -11,9 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = os.environ.get("REGRESSION_BASE_REF", "origin/main")
-PROOF_TARGETS = (
-    "tests/test_repository_policy.py::test_release_workflows_exclude_long_lived_app_credentials",
-)
+PROOF_TARGETS = ("tests/test_repository_policy.py::test_release_workflow_flattens_artifact_downloads",)
 SAFE_ENV = {
     "COMSPEC",
     "LANG",

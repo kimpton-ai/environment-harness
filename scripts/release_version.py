@@ -30,13 +30,21 @@ def current_version(root: Path = ROOT) -> str:
     package = json.loads((root / "packages/typescript/package.json").read_text())
     package_lock = json.loads((root / "packages/typescript/package-lock.json").read_text())
     package_init = (root / "src/environment_harness/__init__.py").read_text()
+    package_readme = (root / "packages/typescript/README.md").read_text()
+    status = (root / "docs/STATUS.md").read_text()
     exported = re.search(r'^__version__\s*=\s*"([^"]+)"$', package_init, re.MULTILINE)
+    packaged_client = re.search(r"environment-harness-client-([0-9]+\.[0-9]+\.[0-9]+)\.tgz", package_readme)
+    documented_status = re.search(
+        r"^EnvironmentHarness ([0-9]+\.[0-9]+\.[0-9]+) focuses", status, re.MULTILINE
+    )
     versions = {
         project.get("project", {}).get("version"),
         package.get("version"),
         package_lock.get("version"),
         package_lock.get("packages", {}).get("", {}).get("version"),
         exported.group(1) if exported else None,
+        packaged_client.group(1) if packaged_client else None,
+        documented_status.group(1) if documented_status else None,
     }
     if len(versions) != 1:
         raise ReleaseError(f"release versions differ: {sorted(repr(item) for item in versions)}")
@@ -117,6 +125,16 @@ def prepare_release(root: Path, bump: str, released_on: date | None = None) -> s
     _replace_once(
         root / "README.md",
         rf"(--branch v){re.escape(previous)}(\s)",
+        rf"\g<1>{version}\g<2>",
+    )
+    _replace_once(
+        root / "packages/typescript/README.md",
+        rf"(environment-harness-client-){re.escape(previous)}(\.tgz)",
+        rf"\g<1>{version}\g<2>",
+    )
+    _replace_once(
+        root / "docs/STATUS.md",
+        rf"(^EnvironmentHarness ){re.escape(previous)}( focuses)",
         rf"\g<1>{version}\g<2>",
     )
     _update_json_versions(root / "packages/typescript/package.json", version)

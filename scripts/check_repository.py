@@ -287,6 +287,9 @@ def check_release_workflow_binding() -> None:
     missing = [description for snippet, description in release_required.items() if snippet not in release]
     if missing:
         raise PolicyError("release workflow lacks " + ", ".join(missing))
+    artifact_downloads = release.count("artifact-ids: ${{ needs.build.outputs.artifact-id }}")
+    if artifact_downloads == 0 or release.count("merge-multiple: true") < artifact_downloads:
+        raise PolicyError("release workflow lacks flat artifact downloads")
     forbidden = {
         "actions/create-github-app-token@": "GitHub App private-key authentication",
         "private-key:": "private-key input",
@@ -321,8 +324,24 @@ def check_dependency_configuration() -> None:
     dependabot = (ROOT / ".github/dependabot.yml").read_text()
     for ecosystem in ("pip", "npm", "github-actions"):
         block = dependabot.split(f"package-ecosystem: {ecosystem}", 1)
-        if len(block) != 2 or "default-days: 7" not in block[1].split("package-ecosystem:", 1)[0]:
+        if len(block) != 2:
+            raise PolicyError(f"Dependabot {ecosystem} updates are not configured")
+        ecosystem_config = block[1].split("package-ecosystem:", 1)[0]
+        if "default-days: 7" not in ecosystem_config:
             raise PolicyError(f"Dependabot {ecosystem} updates lack a seven-day cooldown")
+        if "interval: monthly" not in ecosystem_config:
+            raise PolicyError(f"Dependabot {ecosystem} routine updates must run monthly")
+        if "open-pull-requests-limit: 1" not in ecosystem_config:
+            raise PolicyError(f"Dependabot {ecosystem} must limit routine update pull requests")
+        if not all(
+            setting in ecosystem_config
+            for setting in (
+                "routine-version-updates:",
+                "applies-to: version-updates",
+                '          - "*"',
+            )
+        ):
+            raise PolicyError(f"Dependabot {ecosystem} routine updates must be grouped")
 
 
 def _uv_dependencies(content: bytes) -> set[Dependency]:
