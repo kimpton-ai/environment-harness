@@ -43,69 +43,80 @@
     </aside>
 
     <section class="content">
-      <div class="panel viewer-guide">
-        <h1>What am I looking at?</h1>
-        <p>This is a read-only evidence viewer for environment sessions stored by EnvironmentHarness. It does not run agents or change the environment.</p>
-        <ol>
-          <li><strong>Select</strong> an original or branched session on the left.</li>
-          <li><strong>Trace</strong> what each participant observed, attempted, and caused in the timeline.</li>
-          <li><strong>Compare</strong> two checked sessions to see their shared history, branch intervention, and recorded results.</li>
-        </ol>
+      <div id="empty-state" class="panel empty-state" hidden>
+        <p class="eyebrow">No environment sessions yet</p>
+        <h1>Run a session, then inspect what happened.</h1>
+        <p>EnvironmentHarness records evidence while your agents run. Create a synthetic session from another terminal, then refresh this page.</p>
+        <pre class="empty-command">environment-harness --store ./environment-sessions quickstart --turns 3</pre>
+        <p class="muted">Use the same <code>--store</code> and <code>--tenant</code> values for <code>quickstart</code> and <code>serve</code>. If you already know an environment ID, attach it on the left.</p>
+        <button id="empty-refresh">Refresh sessions</button>
       </div>
 
-      <div class="panel">
-        <div class="row">
-          <h1 id="environment-title">Select an environment session</h1>
-          <span id="environment-status" class="tag"></span>
+      <div id="session-view" hidden>
+        <div class="panel viewer-guide">
+          <h1>What am I looking at?</h1>
+          <p>This is a read-only evidence viewer for environment sessions stored by EnvironmentHarness. It does not run agents or change the environment.</p>
+          <ol>
+            <li><strong>Select</strong> an original or branched session on the left.</li>
+            <li><strong>Trace</strong> what each participant observed, attempted, and caused in the timeline.</li>
+            <li><strong>Compare</strong> two checked sessions to see their shared history, branch intervention, and recorded results.</li>
+          </ol>
         </div>
-        <p class="identity"><span id="environment-identity"></span><button id="copy-id" class="quiet small">Copy</button></p>
-        <div id="stats" class="stats"></div>
-        <p id="lineage" class="muted"></p>
-        <div class="row actions">
-          <button id="export" class="quiet">Export evidence</button>
+
+        <div class="panel">
+          <div class="row">
+            <h1 id="environment-title">Select an environment session</h1>
+            <span id="environment-status" class="tag"></span>
+          </div>
+          <p class="identity"><span id="environment-identity"></span><button id="copy-id" class="quiet small">Copy</button></p>
+          <div id="stats" class="stats"></div>
+          <p id="lineage" class="muted"></p>
+          <div class="row actions">
+            <button id="export" class="quiet">Export evidence</button>
+          </div>
         </div>
-      </div>
 
-      <div class="panel">
-        <div class="row">
-          <h2>Timeline</h2>
-          <label>Perspective <select id="perspective"><option value="">Everyone</option></select></label>
-          <label>Activity
-            <select id="kind">
-              <option value="">All events</option>
-              <option value="observation">Observations</option>
-              <option value="action">Actions</option>
-              <option value="model">Model calls</option>
-              <option value="operation">Tools and services</option>
-              <option value="checkpoint">Checkpoints</option>
-              <option value="authority">Authority</option>
-              <option value="report">Scores</option>
-            </select>
-          </label>
+        <div class="panel">
+          <div class="row">
+            <h2>Timeline</h2>
+            <label>Perspective <select id="perspective"><option value="">Everyone</option></select></label>
+            <label>Activity
+              <select id="kind">
+                <option value="">All events</option>
+                <option value="observation">Observations</option>
+                <option value="action">Actions</option>
+                <option value="model">Model calls</option>
+                <option value="operation">Tools and services</option>
+                <option value="checkpoint">Checkpoints</option>
+                <option value="authority">Authority</option>
+                <option value="report">Scores</option>
+              </select>
+            </label>
+          </div>
+          <p id="timeline-note" class="muted">The latest 500 authorized events appear here, grouped by revision. Export retrieves the full recorded history.</p>
+          <div id="timeline"></div>
+          <button id="load-more" class="quiet" hidden>Load next page</button>
         </div>
-        <p id="timeline-note" class="muted">The latest 500 authorized events appear here, grouped by revision. Export retrieves the full recorded history.</p>
-        <div id="timeline"></div>
-        <button id="load-more" class="quiet" hidden>Load next page</button>
-      </div>
 
-      <div class="panel">
-        <h2>Scores and findings</h2>
-        <div id="reports"><p class="muted">No environment selected.</p></div>
-      </div>
+        <div class="panel">
+          <h2>Scores and findings</h2>
+          <div id="reports"><p class="muted">No environment selected.</p></div>
+        </div>
 
-      <details class="panel">
-        <summary>Frozen experiment</summary>
-        <pre id="manifest"></pre>
-      </details>
-
-      <div class="panel" id="comparison-panel" hidden>
-        <h2>Environment session comparison</h2>
-        <p class="muted comparison-explanation">The original and branch share history up to the checkpoint. Any declared intervention applies only to the branch; the cards below show each session's later recorded result.</p>
-        <div id="comparison-summary"></div>
-        <details>
-          <summary>Full comparison record</summary>
-          <pre id="comparison"></pre>
+        <details class="panel">
+          <summary>Frozen experiment</summary>
+          <pre id="manifest"></pre>
         </details>
+
+        <div class="panel" id="comparison-panel" hidden>
+          <h2>Environment session comparison</h2>
+          <p class="muted comparison-explanation">The original and branch share history up to the checkpoint. Any declared intervention applies only to the branch; the cards below show each session's later recorded result.</p>
+          <div id="comparison-summary"></div>
+          <details>
+            <summary>Full comparison record</summary>
+            <pre id="comparison"></pre>
+          </details>
+        </div>
       </div>
     </section>
   </div>

@@ -37,6 +37,13 @@ async function list() {
   renderList();
   return catalog;
 }
+async function refresh() {
+  const rows = await list();
+  const current = environment && rows.find(row => row.id === environment!.id);
+  const next = current ?? rows.find(row => !row.parent) ?? rows[0];
+  if (next) await attach(next.id);
+  else {environment = null; showEmptyState();}
+}
 async function attach(id: string) {
   const ticket = ++generation;
   const item = await client.get(id);
@@ -95,9 +102,18 @@ function renderList() {
     button.onclick = () => void attempt(() => attach(item.id));
     row.append(check, button); holder.append(row);
   }
-  if (!catalog.length) holder.append(text('p', 'No environments are recorded in this store yet.', 'muted'));
+  if (!catalog.length) holder.append(text('p', 'No sessions found for this credential.', 'muted'));
+}
+function showEmptyState() {
+  el('empty-state').hidden = false;
+  el('session-view').hidden = true;
+}
+function showSession() {
+  el('empty-state').hidden = true;
+  el('session-view').hidden = false;
 }
 function renderHeader(item: Environment) {
+  showSession();
   el('environment-title').textContent = title(item);
   el('environment-status').textContent = item.status;
   el('environment-identity').textContent = item.id;
@@ -238,11 +254,7 @@ async function connect(token: string, rememberLocal = false) {
     } catch { /* Connection still works when browser storage is disabled. */ }
   }
   el('access').hidden = true; el('workspace').hidden = false; el('connection').textContent = 'Connected';
-  try {
-    const rows = await list();
-    const initial = rows.find(row => !row.parent) ?? rows[0];
-    if (initial) await attach(initial.id);
-  } catch {message('Participant credentials can attach by environment ID.');}
+  try {await refresh();} catch {message('Participant credentials can attach by environment ID.');}
 }
 el<HTMLFormElement>('connect-form').onsubmit = event => {event.preventDefault(); void attempt(() => connect(el<HTMLInputElement>('token').value));};
 
@@ -271,7 +283,8 @@ void connectLocal();
 
 // Wiring
 el('attach').onclick = () => void attempt(() => attach(el<HTMLInputElement>('environment-id').value.trim()));
-el('refresh').onclick = () => void attempt(async () => {await list(); if (environment) await attach(environment.id);});
+el('refresh').onclick = () => void attempt(refresh);
+el('empty-refresh').onclick = () => void attempt(refresh);
 el('load-more').onclick = () => void attempt(loadEvents);
 el('perspective').onchange = renderTimeline; el('kind').onchange = renderTimeline;
 el('export').onclick = () => void attempt(() => download(`/v1/environments/${environment!.id}/export`, `${environment!.id}.jsonl`));

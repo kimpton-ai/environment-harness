@@ -12,6 +12,7 @@
   --border: #d8cfbd;
   --border-soft: #e7e0d1;
   --accent: #2d5f5d;
+  --accent-text: #2d5f5d;
   --accent-soft: #7fb5ae;
   --umber: #b98a4a;
   --positive: #157f3d;
@@ -38,6 +39,7 @@
     --ink-3: #8f887c;
     --border: #2c2823;
     --border-soft: #231f1b;
+    --accent-text: #7fb5ae;
     --positive: #4fb872;
     --negative: #e26b60;
   }
@@ -78,6 +80,12 @@ main { max-width: 1440px; margin: 0 auto; padding: 24px 28px 64px; }
 .viewer-guide p { margin-top: 8px; }
 .viewer-guide ol { margin: 12px 0 0; padding-left: 22px; color: var(--ink-2); }
 .viewer-guide li + li { margin-top: 5px; }
+.empty-state { padding: 40px; }
+.empty-state .eyebrow { color: var(--accent-text); font-size: var(--text-1); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+.empty-state h1 { max-width: 620px; margin-top: 6px; }
+.empty-state > p:not(.eyebrow) { max-width: 720px; margin-top: 10px; }
+.empty-state .empty-command { max-width: 720px; margin: 22px 0 0; color: var(--ink); }
+.empty-state button { min-height: 44px; margin-top: 22px; }
 #access { max-width: 640px; margin: 10vh auto; }
 #access h1 { margin-bottom: 12px; }
 #access form { margin: 16px 0; }
@@ -219,4 +227,5 @@ pre {
   .turn-row { grid-template-columns: 1fr; gap: 4px; }
   .turn-head .shared { margin-left: 0; }
   h1 { font-size: 20px; }
+  .empty-state { padding: 28px 20px; }
 }

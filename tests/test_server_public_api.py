@@ -402,6 +402,8 @@ def test_http_exports_comparison_viewer_and_invalid_requests(tmp_path):
     assert viewer.status_code == 200
     assert "What am I looking at?" in viewer.text
     assert "It does not run agents or change the environment." in viewer.text
+    assert "No environment sessions yet" in viewer.text
+    assert "Use the same <code>--store</code> and <code>--tenant</code> values" in viewer.text
     for asset in ("app.js", "timeline.js", "client.js", "types.js", "style.css"):
         assert client.get(f"/viewer/{asset}").status_code == 200
     assert client.get("/viewer/private.txt").status_code == 404
