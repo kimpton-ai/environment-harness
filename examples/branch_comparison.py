@@ -77,7 +77,9 @@ def experiment(directory):
     (Path(directory) / "demo.json").write_text(json.dumps(result, indent=2) + "\n")
     print("Both sessions advanced two more turns. Original total: 10. Branched total: 24.")
     print(f"Original session: {parent}\nBranched session: {child}\nReport: {Path(directory) / 'demo.json'}")
-    print("The environment sessions share one lineage. Their difference is not independent statistical evidence.")
+    print(
+        "The environment sessions share one lineage. Their difference is not independent statistical evidence."
+    )
     return result
 
 

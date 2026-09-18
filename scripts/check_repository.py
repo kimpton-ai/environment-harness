@@ -25,7 +25,12 @@ REGISTRY = "https://registry.npmjs.org/"
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 ACTION = re.compile(r"\buses:\s*([^\s#]+)(?:\s*#.*)?$")
 CONTAINER_IMAGE = re.compile(r"[A-Za-z0-9._/-]+:[^\s@]+@sha256:[0-9a-f]{64}")
-SEMVER = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
+PEP440_RELEASE = re.compile(
+    r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+    r"(?:(a|b|rc)([1-9][0-9]*))?$"
+)
+STAGE_ORDER = {"a": 0, "b": 1, "rc": 2, None: 3}
+NPM_STAGE_NAMES = {"a": "alpha", "b": "beta", "rc": "rc"}
 APP_CREDENTIAL_NAME = "_".join(("RELEASE", "APP", "PRIVATE", "KEY"))
 SECRET_PATTERNS = {
     "AWS access key": re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"),
@@ -57,6 +62,29 @@ class Dependency:
     ecosystem: str
     name: str
     version: str
+
+
+def _release_version(value: object) -> tuple[int, int, int, str | None, int | None]:
+    if not isinstance(value, str) or not (match := PEP440_RELEASE.fullmatch(value)):
+        raise PolicyError(f"release version is not a supported PEP 440 release: {value!r}")
+    return (
+        int(match.group(1)),
+        int(match.group(2)),
+        int(match.group(3)),
+        match.group(4),
+        int(match.group(5)) if match.group(5) else None,
+    )
+
+
+def _release_key(value: object) -> tuple[int, int, int, int, int]:
+    major, minor, patch, stage, serial = _release_version(value)
+    return major, minor, patch, STAGE_ORDER[stage], serial or 0
+
+
+def _npm_version(value: object) -> str:
+    major, minor, patch, stage, serial = _release_version(value)
+    base = f"{major}.{minor}.{patch}"
+    return base if stage is None else f"{base}-{NPM_STAGE_NAMES[stage]}.{serial}"
 
 
 def _run(*command: str, capture: bool = False) -> str:
@@ -238,19 +266,24 @@ def check_version_metadata(release_tag: str | None = None) -> None:
     package_lock = json.loads((ROOT / "packages/typescript/package-lock.json").read_text())
     package_init = (ROOT / "src/environment_harness/__init__.py").read_text()
     exported = re.search(r'^__version__\s*=\s*"([^"]+)"$', package_init, re.MULTILINE)
-    versions = {
+    python_versions = {
         "Python project": project.get("project", {}).get("version"),
         "Python package": exported.group(1) if exported else None,
+    }
+    if len(set(python_versions.values())) != 1:
+        details = ", ".join(f"{name}={version!r}" for name, version in python_versions.items())
+        raise PolicyError(f"Python release versions differ: {details}")
+    version = next(iter(python_versions.values()))
+    _release_version(version)
+    expected_npm = _npm_version(version)
+    npm_versions = {
         "npm package": package.get("version"),
         "npm lockfile": package_lock.get("version"),
         "npm lockfile root": package_lock.get("packages", {}).get("", {}).get("version"),
     }
-    if len(set(versions.values())) != 1:
-        details = ", ".join(f"{name}={version!r}" for name, version in versions.items())
-        raise PolicyError(f"release versions differ: {details}")
-    version = next(iter(versions.values()))
-    if not isinstance(version, str) or not SEMVER.fullmatch(version):
-        raise PolicyError(f"release version is not strict three-component SemVer: {version!r}")
+    if set(npm_versions.values()) != {expected_npm}:
+        details = ", ".join(f"{name}={value!r}" for name, value in npm_versions.items())
+        raise PolicyError(f"npm release versions differ from {expected_npm!r}: {details}")
     if release_tag is not None and release_tag != f"v{version}":
         raise PolicyError(f"release tag {release_tag!r} does not match metadata version v{version}")
 
@@ -261,10 +294,11 @@ def check_release_commit(release_tag: str) -> None:
         raise PolicyError("release tag lacks a readable first-parent project version")
     parent_version = tomllib.loads(parent.decode()).get("project", {}).get("version")
     current_version = release_tag.removeprefix("v")
-    if not isinstance(parent_version, str) or not SEMVER.fullmatch(parent_version):
-        raise PolicyError("release commit parent has a malformed project version")
-    previous = tuple(int(part) for part in parent_version.split("."))
-    current = tuple(int(part) for part in current_version.split("."))
+    try:
+        previous = _release_key(parent_version)
+        current = _release_key(current_version)
+    except PolicyError as error:
+        raise PolicyError("release commit parent or tag has a malformed project version") from error
     if previous >= current:
         raise PolicyError(
             f"release commit must introduce a version newer than its first parent: "
@@ -275,7 +309,8 @@ def check_release_commit(release_tag: str) -> None:
 def check_release_workflow_binding() -> None:
     release = (ROOT / ".github/workflows/release.yml").read_text()
     release_required = {
-        '"v[0-9]+.[0-9]+.[0-9]+"': "strict SemVer tag trigger",
+        '"v[0-9]+.[0-9]+.[0-9]+"': "final PEP 440 tag trigger",
+        '"v[0-9]+.[0-9]+.[0-9]+rc[0-9]+"': "release-candidate tag trigger",
         "RELEASE_TAG: ${{ github.ref_name }}": "event tag binding",
         'test "$GITHUB_SHA" = "$release_commit"': "attested workflow commit",
         'git merge-base --is-ancestor "$release_commit" origin/main': "main ancestry",
@@ -285,12 +320,21 @@ def check_release_workflow_binding() -> None:
         'cmp "$artifact" "$released/$(basename "$artifact")"': "idempotent artifact comparison",
         'cache: ""': "disabled setup-node package cache",
         "cd dist && sha256sum -- * > SHA256SUMS": "download-friendly checksum paths",
+        "python-artifact-id: ${{ steps.upload-python.outputs.artifact-id }}": "Python-only artifact",
+        "environment:\n      name: pypi": "protected PyPI environment",
+        "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33": "trusted PyPI publisher",
     }
     missing = [description for snippet, description in release_required.items() if snippet not in release]
     if missing:
         raise PolicyError("release workflow lacks " + ", ".join(missing))
-    artifact_downloads = release.count("artifact-ids: ${{ needs.build.outputs.artifact-id }}")
-    if artifact_downloads == 0 or release.count("merge-multiple: true") < artifact_downloads:
+    release_artifact_downloads = release.count("artifact-ids: ${{ needs.build.outputs.artifact-id }}")
+    python_artifact_downloads = release.count("artifact-ids: ${{ needs.build.outputs.python-artifact-id }}")
+    artifact_downloads = release_artifact_downloads + python_artifact_downloads
+    if (
+        release_artifact_downloads < 2
+        or python_artifact_downloads != 1
+        or release.count("merge-multiple: true") < artifact_downloads
+    ):
         raise PolicyError("release workflow lacks flat artifact downloads")
     forbidden = {
         "actions/create-github-app-token@": "GitHub App private-key authentication",

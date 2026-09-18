@@ -3,13 +3,13 @@
 [![CI](https://github.com/kimpton-ai/environment-harness/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/kimpton-ai/environment-harness/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/kimpton-ai/environment-harness/graph/badge.svg?branch=main)](https://app.codecov.io/gh/kimpton-ai/environment-harness)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-2ea44f.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-2ea44f.svg)](https://github.com/kimpton-ai/environment-harness/blob/main/LICENSE)
 
 Run agents in persistent shared environments, then inspect exactly what they observed, attempted, and changed.
 
 EnvironmentHarness is an MIT-licensed SDK for evaluations that unfold over time. It records participant-specific observations, actions, outcomes, checkpoints, score reports, and branch lineage as durable evidence.
 
-[Try it locally](#try-it-locally) · [Connect an agent](docs/AGENT-INTEGRATION.md) · [Implement an environment](docs/AUTHORING.md) · [Protocol](docs/PROTOCOL.md) · [Release scope](docs/STATUS.md)
+[Install](#install) · [Try it locally](#try-it-locally) · [Connect an agent](https://github.com/kimpton-ai/environment-harness/blob/main/docs/AGENT-INTEGRATION.md) · [Implement an environment](https://github.com/kimpton-ai/environment-harness/blob/main/docs/AUTHORING.md) · [Protocol](https://github.com/kimpton-ai/environment-harness/blob/main/docs/PROTOCOL.md) · [Release scope](https://github.com/kimpton-ai/environment-harness/blob/main/docs/STATUS.md)
 
 ## What you can do
 
@@ -33,12 +33,33 @@ Your environment + agents + scorer
               / JSONL
 ```
 
+## Install
+
+Install the stable Python SDK from PyPI:
+
+```sh
+python -m pip install environment-harness
+```
+
+Add the local HTTP service and viewer when you need them:
+
+```sh
+python -m pip install "environment-harness[server]"
+```
+
+Release candidates use PEP 440 versions such as `0.2.3rc1`. Pip excludes prereleases from ordinary installs; test one by requesting its exact version or by opting in:
+
+```sh
+python -m pip install "environment-harness==0.2.3rc1"
+python -m pip install --pre --upgrade environment-harness
+```
+
 ## Try it locally
 
 You need macOS or Linux, Python 3.12 or later, and [uv 0.12.0 or later](https://docs.astral.sh/uv/getting-started/installation/). The demo uses synthetic agents, so it needs no account, model API key, or paid service.
 
 ```sh
-git clone --branch v0.2.2 --depth 1 https://github.com/kimpton-ai/environment-harness.git
+git clone --branch v0.2.3rc1 --depth 1 https://github.com/kimpton-ai/environment-harness.git
 cd environment-harness
 uv sync --extra server
 uv run python examples/branch_comparison.py --store .local/branch-demo
@@ -67,7 +88,7 @@ The totals are values in the synthetic environment's shared state. They are not 
 
 The viewer is an evidence inspector, not a control panel:
 
-![EnvironmentHarness local evidence viewer showing original and branched environment sessions with a participant timeline](docs/assets/environment-session-viewer.png)
+![EnvironmentHarness local evidence viewer showing original and branched environment sessions with a participant timeline](https://raw.githubusercontent.com/kimpton-ai/environment-harness/main/docs/assets/environment-session-viewer.png)
 
 1. The **Environment sessions** list lets you open the original or branched session. Check two boxes to compare them.
 2. **Timeline** groups evidence by state revision. Each participant row shows the observation delivered to that participant, the action it attempted, and the outcome the environment executed.
@@ -87,7 +108,7 @@ uv run environment-harness --store .local/custom-agent serve --open
 
 A Python agent implements `act(observation) -> dict`. An external program can instead read one JSON observation from stdin and write one JSON action to stdout. Your integration keeps ownership of prompts, model providers, tools, credentials, and spending limits.
 
-See [Connect an agent](docs/AGENT-INTEGRATION.md) for the complete contract and [custom_agent.py](examples/custom_agent.py) for a working example.
+See [Connect an agent](https://github.com/kimpton-ai/environment-harness/blob/main/docs/AGENT-INTEGRATION.md) for the complete contract and [custom_agent.py](https://github.com/kimpton-ai/environment-harness/blob/main/examples/custom_agent.py) for a working example.
 
 ## Use the Python API
 
@@ -122,16 +143,16 @@ The local Python API is a trusted embedding interface. A local command subproces
 
 | Goal | Guide |
 | --- | --- |
-| Connect a Python agent, model integration, or JSON program | [Agent integration](docs/AGENT-INTEGRATION.md) |
-| Implement and package environment rules | [Environment authoring](docs/AUTHORING.md) |
-| Understand checkpoints, branches, and coordinated sessions | [Coordinated sessions](docs/coordinated-sessions.md) |
-| Use the authenticated HTTP API | [Protocol](docs/PROTOCOL.md) |
-| Use the TypeScript client | [TypeScript package](packages/typescript/README.md) |
-| Check adapter and isolation boundaries | [Adapters](docs/ADAPTERS.md) |
-| Check compatibility and release limits | [Compatibility](docs/COMPATIBILITY.md) · [Release scope](docs/STATUS.md) |
+| Connect a Python agent, model integration, or JSON program | [Agent integration](https://github.com/kimpton-ai/environment-harness/blob/main/docs/AGENT-INTEGRATION.md) |
+| Implement and package environment rules | [Environment authoring](https://github.com/kimpton-ai/environment-harness/blob/main/docs/AUTHORING.md) |
+| Understand checkpoints, branches, and coordinated sessions | [Coordinated sessions](https://github.com/kimpton-ai/environment-harness/blob/main/docs/coordinated-sessions.md) |
+| Use the authenticated HTTP API | [Protocol](https://github.com/kimpton-ai/environment-harness/blob/main/docs/PROTOCOL.md) |
+| Use the TypeScript client | [TypeScript package](https://github.com/kimpton-ai/environment-harness/blob/main/packages/typescript/README.md) |
+| Check adapter and isolation boundaries | [Adapters](https://github.com/kimpton-ai/environment-harness/blob/main/docs/ADAPTERS.md) |
+| Check compatibility and release limits | [Compatibility](https://github.com/kimpton-ai/environment-harness/blob/main/docs/COMPATIBILITY.md) · [Release scope](https://github.com/kimpton-ai/environment-harness/blob/main/docs/STATUS.md) |
 
 ## Project
 
-[Contributing](CONTRIBUTING.md) · [Support](SUPPORT.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [MIT license](LICENSE)
+[Contributing](https://github.com/kimpton-ai/environment-harness/blob/main/CONTRIBUTING.md) · [Support](https://github.com/kimpton-ai/environment-harness/blob/main/SUPPORT.md) · [Security](https://github.com/kimpton-ai/environment-harness/blob/main/SECURITY.md) · [Changelog](https://github.com/kimpton-ai/environment-harness/blob/main/CHANGELOG.md) · [MIT license](https://github.com/kimpton-ai/environment-harness/blob/main/LICENSE)
 
-Report vulnerabilities privately through [SECURITY.md](SECURITY.md). Do not put credentials or private environment sessions in a public issue.
+Report vulnerabilities privately through [SECURITY.md](https://github.com/kimpton-ai/environment-harness/blob/main/SECURITY.md). Do not put credentials or private environment sessions in a public issue.
