@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling==1.27.0"]
+requires = ["hatchling==1.32.0"]
 build-backend = "hatchling.build"
 
 [project]
@@ -37,7 +37,7 @@ postgres = ["psycopg[binary]>=3.3.3,<4"]
 modal = ["modal>=1.5.4,<2"]
 pettingzoo = ["pettingzoo>=1.25,<2", "pygame>=2.6.1,<3"]
 signatures = ["cryptography>=50.0.1,<51"]
-mcp = ["mcp>=1.30.0,<2"]
+mcp = ["mcp>=1.30.0,<3"]
 verifiers = ["verifiers>=0.3.1,<0.4", "datasets>=5.0.1,<6"]
 
 [project.scripts]
@@ -49,14 +49,14 @@ dev = [
   "cryptography>=50.0.1,<51",
   "cyclonedx-bom>=7,<8",
   "detect-secrets>=1.5,<2",
-  "diff-cover>=9.7,<10",
-  "hatchling==1.27.0",
+  "diff-cover>=9.7,<11",
+  "hatchling==1.32.0",
   "httpx>=0.28.1,<1",
   "pip-audit>=2.10,<3",
   "pyright>=1.1.405,<2",
   "pytest>=9.0.3,<10",
   "pytest-cov>=7,<8",
-  "ruff>=0.15.6,<0.16",
+  "ruff>=0.15.6,<0.17",
 ]
 
 [tool.hatch.build.targets.wheel]
