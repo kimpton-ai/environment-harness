@@ -283,6 +283,7 @@ def check_release_workflow_binding() -> None:
         "uv build --no-build-isolation": "frozen build environment",
         'gh attestation verify "$artifact"': "per-artifact provenance verification",
         'cmp "$artifact" "$released/$(basename "$artifact")"': "idempotent artifact comparison",
+        'cache: ""': "disabled setup-node package cache",
     }
     missing = [description for snippet, description in release_required.items() if snippet not in release]
     if missing:

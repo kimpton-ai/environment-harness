@@ -4,7 +4,7 @@
 
 ## 0.2.2 - 2026-09-18
 
-Release publishing now extracts immutable-ID artifacts directly into the verified distribution directory before checking attestations. Routine Dependabot version updates are grouped into one monthly pull request per ecosystem, while security updates remain immediate.
+Release publishing now extracts immutable-ID artifacts directly into the verified distribution directory before checking attestations and explicitly disables dependency caching during the tag build. Routine Dependabot version updates are grouped into one monthly pull request per ecosystem, while security updates remain immediate.
 
 ## 0.2.1 - 2026-09-17
 
