@@ -10,6 +10,8 @@ from .contracts import Action, Principal
 from .errors import Conflict
 from .store import digest, encode, uid
 
+_monotonic = time.monotonic
+
 
 @contextmanager
 def writer(session, environment, researcher, owner):
@@ -173,7 +175,7 @@ def phase_guard(session, environment, researcher, lease, failures, signals, dead
     def monitor():
         while not stop.wait(0.2):
             try:
-                if time.monotonic() >= deadline:
+                if _monotonic() >= deadline:
                     raise TimeoutError(
                         "agent phase deadline exceeded; unresolved work requires reconciliation"
                     )
@@ -219,7 +221,7 @@ def run(session, environment, researcher, agents, *, turns=10, owner=None, phase
                     )
                 }
             signals = {p: threading.Event() for p in members}
-            deadline = time.monotonic() + phase_timeout
+            deadline = _monotonic() + phase_timeout
             with phase_guard(session, environment, researcher, lease, failures, signals, deadline):
                 pool = ThreadPoolExecutor(max_workers=min(32, len(members)))
                 pending = {}
@@ -265,14 +267,14 @@ def run(session, environment, researcher, agents, *, turns=10, owner=None, phase
                     while pending:
                         if failures:
                             raise failures[0]
-                        if time.monotonic() >= deadline:
+                        if _monotonic() >= deadline:
                             raise TimeoutError(
                                 "agent phase deadline exceeded; unresolved work requires reconciliation"
                             )
                         if session.get(environment, researcher)["status"] != "running":
                             raise Conflict("environment stopped during agent work")
                         done, _ = wait(pending, timeout=0.2, return_when=FIRST_COMPLETED)
-                        if time.monotonic() >= deadline:
+                        if _monotonic() >= deadline:
                             raise TimeoutError(
                                 "agent phase deadline exceeded; unresolved work requires reconciliation"
                             )
