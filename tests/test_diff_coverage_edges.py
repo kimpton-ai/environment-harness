@@ -300,7 +300,7 @@ def test_phase_guard_and_main_loop_deadlines_are_independent(tmp_path, monkeypat
 
     clock = iter((0, 2, 2, 2))
     monkeypatch.setattr(runner, "phase_guard", no_monitor)
-    monkeypatch.setattr(runner, "time", types.SimpleNamespace(monotonic=lambda: next(clock)))
+    monkeypatch.setattr(runner, "_monotonic", lambda: next(clock))
 
     class WaitingAgent:
         implementation = "synthetic-agent@1"

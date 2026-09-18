@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from fastapi.testclient import TestClient
 
+import environment_harness.runner as runner_module
 from environment_harness import AgentSpec, EnvironmentSession, EvidenceStore, ExperimentSpec, Principal
 from environment_harness.conformance import check
 from environment_harness.contracts import Capabilities, RunPolicy
@@ -274,9 +275,15 @@ def test_cli_releases_checkpoint_and_resume_leases(tmp_path):
         session.release(environment, who, lease)
 
 
-def test_phase_timeout_does_not_commit_a_late_action(tmp_path):
+def test_phase_timeout_does_not_commit_a_late_action(tmp_path, monkeypatch):
     session, who, environment, _, _ = setup(tmp_path)
-    started, release, finished = threading.Event(), threading.Event(), threading.Event()
+    started, expire, release, finished = (
+        threading.Event(),
+        threading.Event(),
+        threading.Event(),
+        threading.Event(),
+    )
+    monkeypatch.setattr(runner_module, "_monotonic", lambda: 1.0 if expire.is_set() else 0.0)
 
     class Slow(SyntheticAgent):
         def act(self, observation):
@@ -286,8 +293,9 @@ def test_phase_timeout_does_not_commit_a_late_action(tmp_path):
             return {"value": 1}
 
     with ThreadPoolExecutor() as pool:
-        future = pool.submit(run, session, environment, who, {"a": Slow()}, turns=1, phase_timeout=0.05)
-        assert started.wait(2)
+        future = pool.submit(run, session, environment, who, {"a": Slow()}, turns=1, phase_timeout=0.5)
+        assert started.wait(5)
+        expire.set()
         try:
             with pytest.raises(TimeoutError, match="agent phase deadline exceeded"):
                 future.result(timeout=5)

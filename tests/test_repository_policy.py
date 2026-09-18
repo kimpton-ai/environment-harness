@@ -99,11 +99,62 @@ def test_release_workflow_requires_commit_binding(tmp_path, monkeypatch):
         check_repository.check_release_workflow_binding()
 
 
+def test_release_workflow_flattens_artifact_downloads(tmp_path, monkeypatch):
+    workflows = configure_release_workflows(tmp_path)
+    release = workflows / "release.yml"
+    release.write_text(release.read_text().replace("          merge-multiple: true\n", "", 1))
+    monkeypatch.setattr(check_repository, "ROOT", tmp_path)
+
+    with pytest.raises(check_repository.PolicyError, match="flat artifact downloads"):
+        check_repository.check_release_workflow_binding()
+
+
+def test_release_workflow_requires_artifact_downloads(tmp_path, monkeypatch):
+    workflows = configure_release_workflows(tmp_path)
+    release = workflows / "release.yml"
+    release.write_text(
+        release.read_text().replace(
+            "artifact-ids: ${{ needs.build.outputs.artifact-id }}",
+            "name: release-artifacts",
+        )
+    )
+    monkeypatch.setattr(check_repository, "ROOT", tmp_path)
+
+    with pytest.raises(check_repository.PolicyError, match="flat artifact downloads"):
+        check_repository.check_release_workflow_binding()
+
+
+@pytest.mark.parametrize(
+    ("configured", "invalid", "message"),
+    [
+        ("interval: monthly", "interval: weekly", "must run monthly"),
+        ("open-pull-requests-limit: 1", "open-pull-requests-limit: 5", "must limit"),
+        ("routine-version-updates:", "unscoped-updates:", "must be grouped"),
+    ],
+)
+def test_dependabot_routine_update_policy_fails_closed(tmp_path, monkeypatch, configured, invalid, message):
+    root = Path(__file__).resolve().parents[1]
+    github = tmp_path / ".github"
+    github.mkdir()
+    package = tmp_path / "packages/typescript"
+    package.mkdir(parents=True)
+    shutil.copyfile(root / "uv.toml", tmp_path / "uv.toml")
+    shutil.copyfile(root / ".npmrc", tmp_path / ".npmrc")
+    shutil.copyfile(root / "packages/typescript/package.json", package / "package.json")
+    source = root / ".github/dependabot.yml"
+    (github / "dependabot.yml").write_text(source.read_text().replace(configured, invalid, 1))
+    monkeypatch.setattr(check_repository, "ROOT", tmp_path)
+
+    with pytest.raises(check_repository.PolicyError, match=message):
+        check_repository.check_dependency_configuration()
+
+
 @pytest.mark.parametrize(
     ("required", "description"),
     [
         ('"v[0-9]+.[0-9]+.[0-9]+"', "strict SemVer tag trigger"),
         ("RELEASE_TAG: ${{ github.ref_name }}", "event tag binding"),
+        ('cache: ""', "disabled setup-node package cache"),
     ],
 )
 def test_release_workflow_requires_tag_event_binding(tmp_path, monkeypatch, required, description):
@@ -160,7 +211,9 @@ def configure_release_tree(tmp_path):
     for name in (
         "CHANGELOG.md",
         "README.md",
+        "docs/STATUS.md",
         "pyproject.toml",
+        "packages/typescript/README.md",
         "uv.lock",
         "packages/typescript/package.json",
         "packages/typescript/package-lock.json",
@@ -185,6 +238,8 @@ def test_prepare_release_updates_all_version_surfaces(tmp_path):
     assert release_version.current_version(tmp_path) == version
     assert 'name = "environment-harness"\nversion = "0.3.0"' in (tmp_path / "uv.lock").read_text()
     assert "--branch v0.3.0" in (tmp_path / "README.md").read_text()
+    assert "environment-harness-client-0.3.0.tgz" in (tmp_path / "packages/typescript/README.md").read_text()
+    assert "EnvironmentHarness 0.3.0 focuses" in (tmp_path / "docs/STATUS.md").read_text()
     assert (
         "## 0.3.0 - 2026-09-18\n\n- Added a synthetic release note."
         in (tmp_path / "CHANGELOG.md").read_text()
