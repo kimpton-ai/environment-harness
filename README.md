@@ -1,5 +1,10 @@
 # EnvironmentHarness
 
+[![CI](https://github.com/kimpton-ai/environment-harness/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/kimpton-ai/environment-harness/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/kimpton-ai/environment-harness/graph/badge.svg?branch=main)](https://app.codecov.io/gh/kimpton-ai/environment-harness)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-2ea44f.svg)](LICENSE)
+
 Run agents in persistent shared environments, then inspect exactly what they observed, attempted, and changed.
 
 EnvironmentHarness is an MIT-licensed SDK for evaluations that unfold over time. It records participant-specific observations, actions, outcomes, checkpoints, score reports, and branch lineage as durable evidence.
