@@ -33,3 +33,5 @@ The README's local startup now uses `serve --open` to open and connect the viewe
 EnvironmentHarness provides persistent shared environments, participant-specific observations, checkpoints, isolated branches and recorded evidence. The local viewer supports inspection, comparison and JSONL export.
 
 The release includes Python and TypeScript clients, an authenticated HTTP service, and runnable synthetic examples. The examples require no account or model API key. Their results demonstrate the SDK workflow and do not measure model intelligence or safety.
+
+Unreleased hosted storage additions: aggregate payload admission and explicit tenant erasure with confirmed object deletion.

@@ -190,7 +190,7 @@ def test_worker_boundary_and_receipt_identity():
     "endpoint",
     [
         "http://example.com",
-        "https://user:secret@example.com",
+        "https://user:secret@example.com",  # pragma: allowlist secret (synthetic rejection fixture)
         "https://example.com#fragment",
         "https://example.com?a=b",
         "https://",

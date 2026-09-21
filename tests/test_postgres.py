@@ -34,3 +34,74 @@ def test_postgres_schema_migrations_are_idempotent():
     finally:
         with psycopg.connect(dsn, autocommit=True) as connection:
             connection.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(schema)))
+
+
+@pytest.mark.skipif(
+    not os.environ.get("ENVIRONMENT_HARNESS_POSTGRES_URL"),
+    reason="ephemeral PostgreSQL service is not configured",
+)
+def test_explicit_tenant_erasure_preserves_other_tenants_and_refuses_active_writer():
+    import psycopg
+    from psycopg import sql
+
+    from environment_harness.contracts import AgentSpec, ExperimentSpec, Principal
+    from environment_harness.errors import Conflict
+    from environment_harness.fixtures import SyntheticEnvironment
+    from environment_harness.hosted import PostgresEvidenceStore
+    from environment_harness.runtime import EnvironmentSession
+
+    class Objects:
+        def __init__(self):
+            self.values = {}
+
+        def put(self, key, data):
+            self.values[key] = data
+
+        def purge_prefix(self, prefix):
+            keys = [key for key in self.values if key.startswith(prefix)]
+            for key in keys:
+                del self.values[key]
+            return len(keys)
+
+    dsn = os.environ["ENVIRONMENT_HARNESS_POSTGRES_URL"]
+    schema = "environment_harness_test_" + uuid4().hex
+    objects = Objects()
+    store = PostgresEvidenceStore(dsn, objects, schema=schema)
+    try:
+        store.initialize()
+        env = SyntheticEnvironment()
+        session = EnvironmentSession(store, env)
+        experiment = ExperimentSpec(
+            environment=env.spec,
+            participants=(AgentSpec(id="a", implementation="external", policy_version="1"),),
+        )
+        first = Principal(tenant="first", subject="owner", role="researcher")
+        other = Principal(tenant="other", subject="owner", role="researcher")
+        a, b = session.create(experiment, first)["id"], session.create(experiment, other)["id"]
+        store.artifact(a, first, b"private-first")
+        store.artifact(b, other, b"private-other")
+        with pytest.raises(psycopg.Error, match="immutable"):
+            with store.transaction() as db:
+                db.execute("DELETE FROM events WHERE environment=?", (a,))
+        with pytest.raises(ValueError):
+            store.purge_tenant("first", confirm="wrong")
+        lease = session.lease(a, first, "writer")
+        with pytest.raises(Conflict, match="active writer"):
+            store.purge_tenant("first", confirm="permanently-delete:first")
+        session.release(a, first, lease)
+        with store.transaction() as db:
+            retained = store.retained_bytes(db, a)
+        store.max_retained_bytes = retained + 1
+        with pytest.raises(Conflict, match="storage allowance"):
+            store.artifact(a, first, b"not-written-over-budget")
+        assert len(objects.values) == 2
+        store.max_retained_bytes = None
+        result = store.purge_tenant("first", confirm="permanently-delete:first")
+        assert result["environments"] == result["objects_deleted"] == 1
+        assert not any(key.startswith(a) for key in objects.values)
+        assert any(key.startswith(b) for key in objects.values)
+        assert store.events(b, other)
+        assert store.purge_tenant("first", confirm="permanently-delete:first")["environments"] == 0
+    finally:
+        with psycopg.connect(dsn, autocommit=True) as connection:
+            connection.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(schema)))

@@ -40,3 +40,15 @@ sizes and timeouts, redact upstream errors, and perform no implicit retries.
 They assume the host supplies a trusted endpoint. Supplier-selected URLs require
 host-side admission and network isolation. Test fixtures are protocol checks,
 not evidence of hosted capacity or supplier measurement quality.
+
+
+Trusted PostgreSQL hosts may set `max_retained_bytes` to cap aggregate environment
+payload storage. State, evidence, checkpoints and artifact bytes count toward the
+allowance. The host must qualify the storage-query cost for its workload.
+
+`PostgresEvidenceStore.purge_tenant` is a privileged retention method, not a session
+HTTP operation. The caller must stop admission and confirm that every tenant
+worker has stopped. It refuses active writer leases, erases exact environment
+artifact prefixes, and deletes tenant records only after object deletion succeeds.
+Ordinary evidence remains immutable. The default S3 retention adapter refuses
+versioned buckets because deleting current keys would not erase older versions.
