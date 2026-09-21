@@ -132,7 +132,8 @@ def main() -> None:
             try:
                 request(origin + "/health", origin="https://attacker.invalid")
             except urllib.error.HTTPError as error:
-                if error.code != 403 or error.read() != b'{"error":"cross_origin_denied"}':
+                payload = json.load(error)
+                if error.code != 403 or payload.get("error", {}).get("code") != "cross_origin_denied":
                     raise RuntimeError("cross-origin browser request did not fail closed") from error
             else:
                 raise RuntimeError("cross-origin browser request was accepted")
