@@ -1,6 +1,11 @@
+import os
+
+import pytest
 from test_motor import setup as make_setup
 
 from environment_harness.motor_contracts import MotorSelection
+
+pytestmark = pytest.mark.skipif(os.name == "nt", reason="MotorExecutor uses POSIX application locking")
 
 
 class OneCandidateSelector:

@@ -1,3 +1,4 @@
+import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
@@ -8,6 +9,8 @@ from test_motor import setup as make_setup
 
 from environment_harness.errors import Conflict, Forbidden
 from environment_harness.motor import MotorOutcomeUnknown
+
+pytestmark = pytest.mark.skipif(os.name == "nt", reason="MotorExecutor uses POSIX application locking")
 
 
 class UnknownSelector:
