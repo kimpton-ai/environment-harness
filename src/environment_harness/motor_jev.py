@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import threading
 import time
@@ -143,7 +144,9 @@ class JevSelector:
     ) -> MotorSelection:
         try:
             body = self._body(state, candidates)
-            reservation = ceil(len(body) * self.token_bound_multiplier * self.price_micros_per_million / 1_000_000)
+            reservation = ceil(
+                len(body) * self.token_bound_multiplier * self.price_micros_per_million / 1_000_000
+            )
         except (TypeError, ValueError):
             return _abstain(self.model)
         if reservation > maximum_cost_micros:
@@ -175,45 +178,85 @@ class JevSelector:
             )
         return selection
 
-    def _parse(self, response: Any, candidates: tuple[MotorCandidate, ...], reservation: int) -> MotorSelection:
+    def _parse(
+        self, response: Any, candidates: tuple[MotorCandidate, ...], reservation: int
+    ) -> MotorSelection:
         if not isinstance(response, dict) or not isinstance(response.get("model"), str):
             raise JevOutcomeUnknown("Jev response omitted its model")
         if response["model"] != self.model:
             raise JevOutcomeUnknown("Jev response model did not match the pinned model")
-        usage = response.get("usage")
-        if not isinstance(usage, dict) or any(
-            isinstance(usage.get(key), bool) or not isinstance(usage.get(key), int) or usage.get(key) < 0
-            for key in ("input_tokens", "output_tokens")
+        usage_value = response.get("usage")
+        if not isinstance(usage_value, dict):
+            raise JevOutcomeUnknown("Jev response omitted valid usage")
+        input_tokens = usage_value.get("input_tokens")
+        output_tokens = usage_value.get("output_tokens")
+        if (
+            isinstance(input_tokens, bool)
+            or not isinstance(input_tokens, int)
+            or input_tokens < 0
+            or isinstance(output_tokens, bool)
+            or not isinstance(output_tokens, int)
+            or output_tokens < 0
         ):
             raise JevOutcomeUnknown("Jev response omitted valid usage")
+        usage: dict[str, Any] = {str(key): value for key, value in usage_value.items()}
         answers = response.get("answers")
         answer = answers.get("motor") if isinstance(answers, dict) else None
         ids = {candidate.id for candidate in candidates} | {ABSTAIN_ID}
-        probabilities = answer.get("probabilities") if isinstance(answer, dict) else None
+        probabilities_value = answer.get("probabilities") if isinstance(answer, dict) else None
         choice = answer.get("choice") if isinstance(answer, dict) else None
         confidence = answer.get("confidence") if isinstance(answer, dict) else None
-        valid_probs = (
-            isinstance(probabilities, dict)
-            and set(probabilities) == ids
-            and all(isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 1
-                    for value in probabilities.values())
-            and abs(sum(probabilities.values()) - 1.0) <= 1e-5
-        )
-        valid_confidence = isinstance(confidence, (int, float)) and not isinstance(confidence, bool) and 0 <= confidence <= 1
+        probabilities: dict[str, float] = {}
+        if isinstance(probabilities_value, dict):
+            parsed_probabilities: dict[str, float] = {}
+            for key, value in probabilities_value.items():
+                if (
+                    not isinstance(key, str)
+                    or isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not math.isfinite(value)
+                    or not 0 <= value <= 1
+                ):
+                    break
+                parsed_probabilities[key] = float(value)
+            else:
+                probabilities = parsed_probabilities
+        valid_probs = set(probabilities) == ids and abs(sum(probabilities.values()) - 1.0) <= 1e-5
+        confidence_value: float | None = None
+        if (
+            isinstance(confidence, (int, float))
+            and not isinstance(confidence, bool)
+            and math.isfinite(confidence)
+            and 0 <= confidence <= 1
+        ):
+            confidence_value = float(confidence)
+        valid_confidence = confidence_value is not None
         cost = ceil(usage["input_tokens"] * self.price_micros_per_million / 1_000_000)
         if cost > reservation:
             raise JevBudgetExceeded("Jev usage exceeded the reserved budget")
         if not isinstance(choice, str) or choice not in ids or not valid_probs or not valid_confidence:
-            return _abstain(response["model"], usage=usage, probabilities=probabilities if isinstance(probabilities, dict) else {}, confidence=confidence if valid_confidence else None, cost=cost)
+            return _abstain(
+                response["model"],
+                usage=usage,
+                probabilities=probabilities,
+                confidence=confidence_value,
+                cost=cost,
+            )
         if choice == ABSTAIN_ID:
-            return _abstain(response["model"], usage=usage, probabilities=probabilities, confidence=confidence, cost=cost)
+            return _abstain(
+                response["model"],
+                usage=usage,
+                probabilities=probabilities,
+                confidence=confidence_value,
+                cost=cost,
+            )
         return MotorSelection(
             candidate_id=choice,
             model=response["model"],
             cost_micros=cost,
             usage=dict(usage),
             probabilities=dict(probabilities),
-            confidence=float(confidence),
+            confidence=confidence_value,
         )
 
     @staticmethod
