@@ -27,7 +27,7 @@ jobs:
           version: "0.12.0"
           enable-cache: false
       - run: uv sync --frozen --extra server
-      - run: uv run --no-sync pytest --cov --cov-branch --cov-report=xml
+      - run: uv run --no-sync pytest --cov --cov-branch --cov-report=json --cov-report=xml
       - run: uv run --no-sync python scripts/check_coverage.py
       - name: Publish coverage to Codecov
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
