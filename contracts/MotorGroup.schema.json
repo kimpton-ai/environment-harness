@@ -17,21 +17,10 @@
           "type": "object"
         },
         "owner": {
-          "anyOf": [
-            {
-              "enum": [
-                "direct",
-                "baritone"
-              ],
-              "type": "string"
-            },
-            {
-              "type": "string"
-            }
-          ],
           "maxLength": 200,
           "minLength": 1,
-          "title": "Owner"
+          "title": "Owner",
+          "type": "string"
         },
         "owner_namespace": {
           "maxLength": 200,

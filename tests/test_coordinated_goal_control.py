@@ -161,3 +161,21 @@ def test_legacy_adapter_must_advertise_group_capability(tmp_path):
                 "policy": {"allowed_endpoints": ["motor"], "allowed_operations": ["motor.execute"]},
             },
         )
+
+
+def test_direct_execute_rechecks_group_contract(tmp_path):
+    _, motor, prepare, dispatch, *_ = setup(tmp_path, adapter_class=GroupBrowserMotor)
+    grouped = dispatched_group()
+    motor.stop()
+    with pytest.raises(Conflict, match="stop epoch"):
+        motor.execute(
+            "direct-group",
+            {
+                "endpoint": "motor",
+                "operation": "motor.execute",
+                "payload": grouped.model_dump(mode="json"),
+                "write": True,
+            },
+            0,
+            authority=lambda _: None,
+        )

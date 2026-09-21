@@ -44,7 +44,7 @@ class ControlClaim(MotorRecord):
     """A channel and its resources, owned by a direct or adapter-backed controller."""
 
     channel: str = Field(min_length=1, max_length=200)
-    owner: Literal["direct", "baritone"] | str = Field(min_length=1, max_length=200)
+    owner: str = Field(min_length=1, max_length=200)
     owner_namespace: str = Field(min_length=1, max_length=200)
     controls: dict[str, Any] = Field(min_length=1)
     resources: tuple[ResourceOwnership, ...] = ()

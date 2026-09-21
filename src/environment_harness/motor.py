@@ -204,10 +204,15 @@ class MotorExecutor:
         """Validate a coordinated contract before a runtime plans dispatch."""
         if not isinstance(group, MotorGroup):
             group = MotorGroup.model_validate(group)
-        if "coordinated-control.v1" not in getattr(self.adapter, "group_capabilities", ()):
-            raise Forbidden("motor adapter does not advertise coordinated-control.v1")
+        self._validate_group_contract(group, request)
         if manifest.get("motor") != self.profile.model_dump(mode="json"):
             raise Forbidden("motor assistance differs from the frozen experiment")
+        return group
+
+    def _validate_group_contract(self, group: MotorGroup, request: MotorRequest):
+        """Recheck runtime-owned group invariants at the effect boundary."""
+        if "coordinated-control.v1" not in getattr(self.adapter, "group_capabilities", ()):
+            raise Forbidden("motor adapter does not advertise coordinated-control.v1")
         if group.stop_epoch != self.stop_epoch:
             raise Conflict("motor group stop epoch is stale")
         if request.goal_context != group.goal_context:
@@ -237,6 +242,8 @@ class MotorExecutor:
         if authority is None:
             raise Forbidden("dispatch motors through Operations to supply live authority")
         payload = MotorRequest.model_validate(request["payload"])
+        if payload.group is not None:
+            self._validate_group_contract(payload.group, payload)
         if not self._lock.acquire(blocking=False):
             raise Conflict("motor already has an input owner")
         try:
