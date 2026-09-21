@@ -26,6 +26,7 @@ from .motor_contracts import (
     MotorProfile,
     MotorReceipt,
     MotorRequest,
+    MotorSelection,
     PreparedSuccessorAdmission,
     PreparedSuccessorIntent,
     UnsupportedPreparation,
@@ -127,6 +128,17 @@ class MotorExecutor:
             db.execute("INSERT OR IGNORE INTO control VALUES (1,0)")
             db.execute(
                 "CREATE TABLE IF NOT EXISTS motor_successors (id TEXT PRIMARY KEY, predecessor TEXT NOT NULL, intent TEXT NOT NULL, status TEXT NOT NULL, admission TEXT)"
+            )
+            columns = {row[1] for row in db.execute("PRAGMA table_info(motor_successors)")}
+            for name in ("request", "selection"):
+                if name not in columns:
+                    db.execute(f"ALTER TABLE motor_successors ADD COLUMN {name} TEXT")
+            # A restart must never replay an intent that was waiting for the
+            # native boundary. Keep the record for audit and reconciliation.
+            db.execute("UPDATE motor_successors SET status='discarded' WHERE status='prepared'")
+            db.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS one_prepared_successor "
+                "ON motor_successors((1)) WHERE status='prepared'"
             )
 
     @contextmanager
@@ -239,31 +251,121 @@ class MotorExecutor:
             row = db.execute("SELECT receipt FROM motor WHERE id=?", (operation_id,)).fetchone()
         return json.loads(row["receipt"]) if row and row["receipt"] else None
 
-    def prepare_successor(self, intent):
-        """Persist a successor intent without applying native controls."""
+    def _authorize_successor(self, intent, request, selection, authority):
+        if not isinstance(request, MotorRequest):
+            raise TypeError("request must be MotorRequest")
+        if not isinstance(selection, MotorSelection) or selection.candidate_id != intent.candidate_id:
+            raise Forbidden("prepared successor selection does not identify its candidate")
+        if self.selector is not None and selection.model != self.profile.selector_model:
+            raise Forbidden("prepared successor selector model is not authorized")
+        if request.goal_revision != intent.metadata.goal_revision:
+            raise Conflict("prepared successor goal revision differs from request")
+        if request.observation_revision != intent.metadata.observation_revision:
+            raise Conflict("prepared successor observation revision differs from request")
+        if request.stop_epoch != intent.metadata.stop_epoch or request.stop_epoch != self.stop_epoch:
+            raise Conflict("prepared successor stop epoch is stale")
+        if not callable(authority):
+            raise Forbidden("prepared successor requires live authority")
+        try:
+            live = authority(request)
+        except Exception as exc:
+            raise MotorOutcomeUnknown("live successor authority could not be checked") from exc
+        if not isinstance(live, dict):
+            raise Forbidden("live successor authority must return ownership context")
+        for key, expected in (
+            ("owner", intent.metadata.owner),
+            ("goal_revision", intent.metadata.goal_revision),
+            ("observation_revision", intent.metadata.observation_revision),
+            ("stop_epoch", intent.metadata.stop_epoch),
+        ):
+            if live.get(key) != expected:
+                raise Conflict(f"prepared successor {key} changed")
+        for key in ("observation_frame_id", "camera_revision", "ui_revision"):
+            expected = getattr(intent.metadata, key)
+            if expected is not None and live.get(key) != expected:
+                raise Conflict(f"prepared successor {key} changed")
+        if intent.expires_tick is not None:
+            native_tick = live.get("native_tick")
+            if not isinstance(native_tick, int) or native_tick > intent.expires_tick:
+                raise Conflict("prepared successor native tick window expired")
+        if intent.prepared_at_ms + intent.freshness_ms < time.time() * 1000:
+            raise Conflict("prepared successor freshness window expired")
+        before = self.adapter.observe()
+        if str(before.get("revision", "")) != request.observation_revision:
+            raise Conflict("prepared successor observation is stale")
+        try:
+            candidates = tuple(self.adapter.plan(request, before))
+        except (MotorError, ValueError) as exc:
+            raise Forbidden("prepared successor plan is no longer legal") from exc
+        candidate = next((item for item in candidates if item.id == intent.candidate_id), None)
+        if candidate is None or intent.step not in candidate.steps:
+            raise Forbidden("prepared successor step is not the selected plan")
+        invalid = _validate_candidate(request, candidate, before)
+        if invalid:
+            raise Forbidden(f"prepared successor violates request authority: {invalid}")
+        return live
+
+    def prepare_successor(self, intent, *, request, selection, authority):
+        """Persist one authorized successor intent without applying controls."""
         if not isinstance(intent, PreparedSuccessorIntent):
             raise TypeError("intent must be PreparedSuccessorIntent")
         if not getattr(self.adapter, "supports_prepared_successors", False):
             raise UnsupportedPreparation(f"{self.profile.adapter} does not support prepared successors")
-        if intent.metadata.stop_epoch != self.stop_epoch:
-            raise Conflict("prepared successor stop epoch is stale")
+        self._authorize_successor(intent, request, selection, authority)
         encoded = encode(intent.model_dump(mode="json"))
+        request_encoded = encode(request.model_dump(mode="json"))
+        selection_encoded = encode(selection.model_dump(mode="json"))
         with self._db() as db:
             prior = db.execute("SELECT * FROM motor_successors WHERE id=?", (intent.intent_id,)).fetchone()
             if prior:
                 if prior["intent"] != encoded:
                     raise Conflict("prepared successor ID reused with different input")
-                return intent
-            db.execute(
-                "INSERT INTO motor_successors VALUES (?,?,?,?,NULL)",
-                (intent.intent_id, intent.predecessor_operation_id, encoded, "prepared"),
-            )
-        prepared = self.adapter.prepare_successor(intent)
+                if prior["request"] != request_encoded or prior["selection"] != selection_encoded:
+                    raise Conflict("prepared successor authorization changed")
+                if prior["status"] == "prepared":
+                    return intent
+                raise MotorOutcomeUnknown("prepared successor was already settled or discarded")
+            try:
+                db.execute(
+                    "INSERT INTO motor_successors(id,predecessor,intent,status,admission,request,selection) "
+                    "VALUES (?,?,?,?,NULL,?,?)",
+                    (
+                        intent.intent_id,
+                        intent.predecessor_operation_id,
+                        encoded,
+                        "prepared",
+                        request_encoded,
+                        selection_encoded,
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise Conflict("another prepared successor already owns the one-slot boundary") from exc
+        try:
+            prepared = self.adapter.prepare_successor(intent)
+        except UnsupportedPreparation:
+            with self._db() as db:
+                db.execute(
+                    "UPDATE motor_successors SET status='rejected',admission=? WHERE id=?",
+                    (encode({"reason_code": "unsupported_preparation"}), intent.intent_id),
+                )
+            raise
+        except Exception as exc:
+            with self._db() as db:
+                db.execute(
+                    "UPDATE motor_successors SET status='unknown',admission=? WHERE id=?",
+                    (encode({"reason_code": "preparation_unknown"}), intent.intent_id),
+                )
+            raise MotorOutcomeUnknown("successor preparation outcome is unknown") from exc
         if not isinstance(prepared, PreparedSuccessorIntent):
+            with self._db() as db:
+                db.execute(
+                    "UPDATE motor_successors SET status='unknown',admission=? WHERE id=?",
+                    (encode({"reason_code": "preparation_unknown"}), intent.intent_id),
+                )
             raise MotorOutcomeUnknown("adapter did not return the prepared successor intent")
         return prepared
 
-    def admit_successor(self, intent_id, *, predecessor=None):
+    def admit_successor(self, intent_id, *, request, selection, authority, predecessor=None):
         """Admit one prepared successor at the adapter boundary."""
         if not getattr(self.adapter, "supports_prepared_successors", False):
             raise UnsupportedPreparation(f"{self.profile.adapter} does not support prepared successors")
@@ -271,7 +373,43 @@ class MotorExecutor:
             row = db.execute("SELECT * FROM motor_successors WHERE id=?", (intent_id,)).fetchone()
         if row is None:
             raise Conflict("unknown prepared successor")
+        if row["status"] != "prepared":
+            if row["status"] in {"admitted", "rejected"} and row["admission"]:
+                value = json.loads(row["admission"])
+                if value.get("intent_id") == intent_id:
+                    return PreparedSuccessorAdmission.model_validate(value)
+            raise MotorOutcomeUnknown("prepared successor is no longer retryable")
         intent = PreparedSuccessorIntent.model_validate(json.loads(row["intent"]))
+        if row["request"] != encode(request.model_dump(mode="json")) or row["selection"] != encode(
+            selection.model_dump(mode="json")
+        ):
+            raise Conflict("prepared successor authorization differs from the prepared request")
+        try:
+            self._authorize_successor(intent, request, selection, authority)
+        except MotorOutcomeUnknown as exc:
+            with self._db() as db:
+                db.execute(
+                    "UPDATE motor_successors SET status='unknown',admission=? WHERE id=? AND status='prepared'",
+                    (encode({"reason_code": "authority_unknown"}), intent_id),
+                )
+            raise exc
+        except (Conflict, Forbidden):
+            rejected = PreparedSuccessorAdmission(
+                intent_id=intent.intent_id,
+                predecessor_operation_id=intent.predecessor_operation_id,
+                operation_id=intent.operation_id,
+                metadata=intent.metadata,
+                status="rejected",
+                reason_code="admission_rejected",
+            )
+            with self._db() as db:
+                db.execute(
+                    "UPDATE motor_successors SET status='rejected',admission=? WHERE id=? AND status='prepared'",
+                    (encode(rejected.model_dump(mode="json")), intent_id),
+                )
+            return rejected
+        if predecessor is not None and predecessor.get("operation_id") != intent.predecessor_operation_id:
+            raise Conflict("predecessor receipt identity does not match intent")
         prior = predecessor or self.lookup(intent.predecessor_operation_id)
         if prior is None:
             admission = PreparedSuccessorAdmission(
@@ -301,12 +439,30 @@ class MotorExecutor:
                 reason_code="stop_epoch_changed",
             )
         else:
-            admission = self.adapter.admit_successor(intent, predecessor=MotorReceipt.model_validate(prior))
+            try:
+                admission = self.adapter.admit_successor(
+                    intent, predecessor=MotorReceipt.model_validate(prior)
+                )
+            except Exception as exc:
+                unknown = PreparedSuccessorAdmission(
+                    intent_id=intent.intent_id,
+                    predecessor_operation_id=intent.predecessor_operation_id,
+                    operation_id=intent.operation_id,
+                    metadata=intent.metadata,
+                    status="unknown",
+                    reason_code="admission_unknown",
+                )
+                with self._db() as db:
+                    db.execute(
+                        "UPDATE motor_successors SET status='unknown',admission=? WHERE id=? AND status='prepared'",
+                        (encode(unknown.model_dump(mode="json")), intent_id),
+                    )
+                raise MotorOutcomeUnknown("successor admission outcome is unknown") from exc
             if not isinstance(admission, PreparedSuccessorAdmission):
                 raise MotorOutcomeUnknown("adapter did not return a successor admission")
         with self._db() as db:
             db.execute(
-                "UPDATE motor_successors SET status=?, admission=? WHERE id=?",
+                "UPDATE motor_successors SET status=?, admission=? WHERE id=? AND status='prepared'",
                 (admission.status, encode(admission.model_dump(mode="json")), intent_id),
             )
         return admission
@@ -318,6 +474,50 @@ class MotorExecutor:
 
     def reconcile(self, operation_id):
         return self.adapter.reconcile(operation_id)
+
+    def reconcile_successor(self, intent_id):
+        """Resolve an unknown successor through the adapter ledger only.
+
+        Reconciliation may settle an unknown record, but it never resends the
+        prepared intent or calls native admission a second time.
+        """
+        with self._db() as db:
+            row = db.execute("SELECT * FROM motor_successors WHERE id=?", (intent_id,)).fetchone()
+        if row is None:
+            raise Conflict("unknown prepared successor")
+        if row["status"] != "unknown":
+            if row["admission"]:
+                value = json.loads(row["admission"])
+                if value.get("intent_id") == intent_id:
+                    return PreparedSuccessorAdmission.model_validate(value)
+            raise Conflict("successor is not awaiting reconciliation")
+        intent = PreparedSuccessorIntent.model_validate(json.loads(row["intent"]))
+        result = self.adapter.reconcile(intent.operation_id)
+        if not isinstance(result, dict) or result.get("operation_id") != intent.operation_id:
+            raise MotorOutcomeUnknown("native reconciliation did not identify the successor")
+        status = result.get("status")
+        if status in {"completed", "admitted"}:
+            settled = "admitted"
+            reason = "reconciled"
+        elif status in {"rejected", "cancelled", "blocked"}:
+            settled = "rejected"
+            reason = "reconciled_rejected"
+        else:
+            raise MotorOutcomeUnknown("native reconciliation remains unknown")
+        admission = PreparedSuccessorAdmission(
+            intent_id=intent.intent_id,
+            predecessor_operation_id=intent.predecessor_operation_id,
+            operation_id=intent.operation_id,
+            metadata=intent.metadata,
+            status=settled,
+            reason_code=reason,
+        )
+        with self._db() as db:
+            db.execute(
+                "UPDATE motor_successors SET status=?,admission=? WHERE id=? AND status='unknown'",
+                (settled, encode(admission.model_dump(mode="json")), intent_id),
+            )
+        return admission
 
     def progress(self, operation_id):
         with self._db() as db:
@@ -407,7 +607,15 @@ class MotorExecutor:
                 "blocked": "rejected",
                 "cancelled": "cancelled",
             }.get(status, "unknown")
-            effect = "applied" if status == "completed" else "none"
+            effect = (
+                "applied"
+                if status == "completed"
+                else (
+                    "possible"
+                    if any(item.get("status") in {"dispatching", "completed"} for item in steps)
+                    else "none"
+                )
+            )
             receipt = MotorReceipt(
                 operation_id=operation_id,
                 status=status,

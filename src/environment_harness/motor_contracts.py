@@ -5,7 +5,7 @@ from __future__ import annotations
 from threading import Event
 from typing import Any, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 
 class MotorRecord(BaseModel):
@@ -36,7 +36,11 @@ class ResourceOwnership(MotorRecord):
     """A resource lease claimed by one named channel owner."""
 
     resource: str = Field(min_length=1, max_length=200)
-    owner: str = Field(min_length=1, max_length=200)
+    owner: str = Field(
+        min_length=1,
+        max_length=200,
+        validation_alias=AliasChoices("owner", "owner_id"),
+    )
     namespace: str = Field(min_length=1, max_length=200)
 
 
@@ -79,6 +83,8 @@ class MotorExecutionMetadata(MotorRecord):
     stop_epoch: int = Field(default=0, ge=0, strict=True)
     interface_revision: str | None = Field(default=None, min_length=1)
     ui_revision: str | None = Field(default=None, min_length=1)
+    observation_frame_id: str | None = Field(default=None, min_length=1, max_length=200)
+    camera_revision: str | None = Field(default=None, min_length=1, max_length=200)
 
 
 class PreparedSuccessorIntent(MotorRecord):
@@ -91,10 +97,12 @@ class PreparedSuccessorIntent(MotorRecord):
     intent_id: str = Field(min_length=1, max_length=160)
     operation_id: str = Field(min_length=1, max_length=160)
     predecessor_operation_id: str = Field(min_length=1, max_length=160)
+    candidate_id: str = Field(min_length=1, max_length=80)
     metadata: MotorExecutionMetadata
     step: "MotorStep"
     prepared_at_ms: float = Field(ge=0)
     freshness_ms: int = Field(default=1000, ge=1, le=120000, strict=True)
+    expires_tick: int | None = Field(default=None, ge=0, strict=True)
     phase: Literal["prepared"] = "prepared"
 
 

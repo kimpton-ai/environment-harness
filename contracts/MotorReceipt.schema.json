@@ -11,7 +11,6 @@
           "type": "string"
         },
         "controls": {
-          "additionalProperties": true,
           "minProperties": 1,
           "title": "Controls",
           "type": "object"
@@ -82,7 +81,6 @@
       "description": "One exact, environment-issued permission for bounded control inputs.",
       "properties": {
         "controls": {
-          "additionalProperties": true,
           "title": "Controls",
           "type": "object"
         },
@@ -102,7 +100,7 @@
         "max_travel": {
           "anyOf": [
             {
-              "minimum": 0,
+              "minimum": 0.0,
               "type": "number"
             },
             {
@@ -193,6 +191,9 @@
         "executor": {
           "const": "motor.v1",
           "default": "motor.v1",
+          "enum": [
+            "motor.v1"
+          ],
           "title": "Executor",
           "type": "string"
         },
@@ -228,7 +229,6 @@
       "additionalProperties": false,
       "properties": {
         "arguments": {
-          "additionalProperties": true,
           "title": "Arguments",
           "type": "object"
         },
@@ -241,7 +241,6 @@
           "type": "array"
         },
         "expected": {
-          "additionalProperties": true,
           "minProperties": 1,
           "title": "Expected",
           "type": "object"
@@ -305,7 +304,6 @@
           "type": "integer"
         },
         "target": {
-          "additionalProperties": true,
           "title": "Target",
           "type": "object"
         },
@@ -345,8 +343,8 @@
         "confidence": {
           "anyOf": [
             {
-              "maximum": 1,
-              "minimum": 0,
+              "maximum": 1.0,
+              "minimum": 0.0,
               "type": "number"
             },
             {
@@ -374,7 +372,6 @@
           "type": "object"
         },
         "usage": {
-          "additionalProperties": true,
           "title": "Usage",
           "type": "object"
         }
@@ -422,12 +419,10 @@
   "additionalProperties": false,
   "properties": {
     "after": {
-      "additionalProperties": true,
       "title": "After",
       "type": "object"
     },
     "before": {
-      "additionalProperties": true,
       "title": "Before",
       "type": "object"
     },
@@ -448,7 +443,7 @@
       "type": "string"
     },
     "elapsed_ms": {
-      "minimum": 0,
+      "minimum": 0.0,
       "title": "Elapsed Ms",
       "type": "number"
     },
@@ -524,7 +519,6 @@
     "steps": {
       "default": [],
       "items": {
-        "additionalProperties": true,
         "type": "object"
       },
       "title": "Steps",

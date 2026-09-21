@@ -96,7 +96,7 @@
       "type": "integer"
     },
     "elapsed_ms": {
-      "minimum": 0,
+      "minimum": 0.0,
       "title": "Elapsed Ms",
       "type": "number"
     },

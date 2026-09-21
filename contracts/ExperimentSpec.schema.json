@@ -9,7 +9,6 @@
           "type": "boolean"
         },
         "config": {
-          "additionalProperties": true,
           "title": "Config",
           "type": "object"
         },
@@ -98,7 +97,6 @@
       "additionalProperties": false,
       "properties": {
         "action_schema": {
-          "additionalProperties": true,
           "title": "Action Schema",
           "type": "object"
         },
@@ -145,7 +143,6 @@
           "type": "array"
         },
         "observation_schema": {
-          "additionalProperties": true,
           "title": "Observation Schema",
           "type": "object"
         },
@@ -160,14 +157,17 @@
         },
         "phase_seconds": {
           "default": 60,
-          "exclusiveMinimum": 0,
-          "maximum": 86400,
+          "exclusiveMinimum": 0.0,
+          "maximum": 86400.0,
           "title": "Phase Seconds",
           "type": "number"
         },
         "protocol": {
           "const": "environment-session.v1",
           "default": "environment-session.v1",
+          "enum": [
+            "environment-session.v1"
+          ],
           "title": "Protocol",
           "type": "string"
         },
@@ -197,6 +197,9 @@
         "stale_action": {
           "const": "reject",
           "default": "reject",
+          "enum": [
+            "reject"
+          ],
           "title": "Stale Action",
           "type": "string"
         },
@@ -226,6 +229,9 @@
         "executor": {
           "const": "motor.v1",
           "default": "motor.v1",
+          "enum": [
+            "motor.v1"
+          ],
           "title": "Executor",
           "type": "string"
         },
@@ -325,7 +331,6 @@
       "$ref": "#/$defs/EnvironmentSpec"
     },
     "interventions": {
-      "additionalProperties": true,
       "title": "Interventions",
       "type": "object"
     },

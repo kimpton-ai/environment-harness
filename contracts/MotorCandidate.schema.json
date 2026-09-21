@@ -4,12 +4,10 @@
       "additionalProperties": false,
       "properties": {
         "arguments": {
-          "additionalProperties": true,
           "title": "Arguments",
           "type": "object"
         },
         "controls": {
-          "additionalProperties": true,
           "title": "Controls",
           "type": "object"
         },
@@ -19,7 +17,6 @@
           "type": "string"
         },
         "target": {
-          "additionalProperties": true,
           "title": "Target",
           "type": "object"
         }

@@ -4,9 +4,26 @@
   "additionalProperties": false,
   "description": "The fencing values that make a motor operation admissible.",
   "properties": {
+    "camera_revision": {
+      "anyOf": [
+        {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Camera Revision"
+    },
     "contract_version": {
       "const": "motor.execution.v1",
       "default": "motor.execution.v1",
+      "enum": [
+        "motor.execution.v1"
+      ],
       "title": "Contract Version",
       "type": "string"
     },
@@ -33,6 +50,20 @@
       ],
       "default": null,
       "title": "Interface Revision"
+    },
+    "observation_frame_id": {
+      "anyOf": [
+        {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Observation Frame Id"
     },
     "observation_revision": {
       "minLength": 1,
