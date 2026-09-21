@@ -907,7 +907,7 @@ pre {
   .comparison-report-warnings strong { grid-row: auto; }
 }
 
-@media (max-width: 300px) {
+@media (max-width: 420px) {
   .app-navbar { grid-template-columns: 0 minmax(40px, 1fr) auto; }
   .sidebar-brand { visibility: hidden; padding: 0; border-right: 0; }
 }
