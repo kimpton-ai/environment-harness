@@ -30,6 +30,8 @@ export class EnvironmentClient {
     events(environment, after = 0) { return this.request('GET', `/v1/environments/${encodeURIComponent(environment)}/events?after=${after}`); }
     agentWork(environment) { return this.request('GET', `/v1/environments/${encodeURIComponent(environment)}/agent-work`); }
     cancel(environment) { return this.command(environment, 'cancel'); }
+    advance(environment) { return this.command(environment, 'advance'); }
+    credentials(environment, participant, ttl = 3600) { return this.request('POST', `/v1/environments/${encodeURIComponent(environment)}/credentials`, { participant, ttl }); }
     reports(environment) { return this.request('GET', `/v1/environments/${encodeURIComponent(environment)}/reports`); }
     compare(environments) { return this.request('POST', '/v1/compare', { environments }); }
     async *replay(environment) {

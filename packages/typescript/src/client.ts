@@ -28,6 +28,8 @@ export class EnvironmentClient {
   events(environment: string, after = 0) {return this.request<{events:EvidenceEvent[];cursor:number}>('GET', `/v1/environments/${encodeURIComponent(environment)}/events?after=${after}`);}
   agentWork(environment: string) {return this.request<{work: Array<{id: string; revision: number; participant: string; generation: number; status: string}>}>('GET', `/v1/environments/${encodeURIComponent(environment)}/agent-work`);}
   cancel(environment: string) {return this.command<{status: 'cancelled'; unresolved_agent_work: string[]; unresolved_operations: string[]}>(environment, 'cancel');}
+  advance(environment: string) {return this.command<{status: string; revision: number}>(environment, 'advance');}
+  credentials(environment: string, participant: string, ttl = 3600) {return this.request<{token: string}>('POST', `/v1/environments/${encodeURIComponent(environment)}/credentials`, {participant, ttl});}
   reports(environment: string) {return this.request<Json[]>('GET', `/v1/environments/${encodeURIComponent(environment)}/reports`);}
   compare(environments: string[]) {return this.request<Comparison & Json>('POST', '/v1/compare', {environments});}
   async *replay(environment: string): AsyncGenerator<EvidenceEvent> {

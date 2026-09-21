@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from pydantic import BaseModel, ConfigDict, Field
 
 from .contracts import Action, ExperimentSpec, ScoreReport
+from .coordinator import advance
 from .errors import BudgetExceeded, Conflict, Forbidden, HarnessError, Unsupported
 from .evaluation import compare, rollouts
 from .operations import Operations
@@ -146,6 +147,7 @@ def create_app(session, *, local_login=None):
     def command(environment: str, cmd: Command, who=Depends(actor)):
         a = cmd.arguments
         allowed = {
+            "advance": lambda environment, who, **arguments: advance(session, environment, who, **arguments),
             "lease": session.lease,
             "release": session.release,
             "cancel": session.cancel,

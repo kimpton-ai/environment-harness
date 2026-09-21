@@ -1,6 +1,6 @@
 {
   "name": "@environment-harness/client",
-  "version": "0.2.3-rc.1",
+  "version": "0.2.3-rc.2",
   "type": "module",
   "exports": {
     ".": {

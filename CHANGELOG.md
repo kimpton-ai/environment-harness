@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+Native implementations can run behind authenticated HTTP workers while a trusted
+supervisor retains the evidence store. External participants can advance ready
+phases through the fenced coordinator. A versioned legacy adapter preserves old
+records, and an ORS HTTP/SSE client retains original task receipts without implicit
+write retries. See [remote workers](docs/REMOTE-WORKERS.md).
+
 Production PyPI publishing now uses short-lived Trusted Publishing credentials and publishes only the reviewed Python wheel and source distribution. Releases support PEP 440 alpha, beta, and release-candidate versions while mapping those versions to npm-compatible SemVer prereleases. Package metadata now includes the rendered README, classifiers, project links, and the `py.typed` marker.
 
 ## 0.2.2 - 2026-09-18

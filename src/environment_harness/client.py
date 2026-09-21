@@ -31,7 +31,7 @@ class EnvironmentClient:
         ):
             raise ValueError("HTTPS endpoint required, with no embedded credentials")
         self.endpoint, self.token, self.timeout = endpoint.rstrip("/"), token, timeout
-        self.opener = urllib.request.build_opener(NoRedirect())
+        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
 
     def request(self, method, path, body=None, *, operation_id=None):
         headers = {"Authorization": "Bearer " + self.token, "Accept": "application/json"}
@@ -83,6 +83,19 @@ class EnvironmentClient:
 
     def cancel(self, environment):
         return self.command(environment, "cancel")
+
+    def advance(self, environment):
+        return self.command(environment, "advance")
+
+    def credentials(self, environment, participant, *, ttl=3600):
+        return self.request(
+            "POST",
+            f"/v1/environments/{urllib.parse.quote(environment, safe='')}/credentials",
+            {"participant": participant, "ttl": ttl},
+        )
+
+    def reports(self, environment):
+        return self.request("GET", f"/v1/environments/{urllib.parse.quote(environment, safe='')}/reports")
 
     def events(self, environment, after=0):
         return self.request(

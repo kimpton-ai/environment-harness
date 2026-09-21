@@ -74,6 +74,9 @@ def test_remote_client_validates_transport_and_builds_public_requests(monkeypatc
     assert client.command("env", "cancel", reason="test")[2]["arguments"] == {"reason": "test"}
     assert client.agent_work("env")[1].endswith("/agent-work")
     assert client.cancel("env")[2]["operation"] == "cancel"
+    assert client.advance("env")[2]["operation"] == "advance"
+    assert client.credentials("env", "a", ttl=30)[2] == {"participant": "a", "ttl": 30}
+    assert client.reports("env")[1].endswith("/reports")
     assert client.events("env", 7)[1].endswith("events?after=7")
 
 
