@@ -20,7 +20,12 @@ pytestmark = pytest.mark.skipif(os.name == "nt", reason="MotorExecutor uses POSI
 def direct(motor, req, *, operation_id="direct", write=True, budget=100, authority=None):
     return motor.execute(
         operation_id,
-        {"endpoint": "motor", "operation": "motor.execute", "payload": req.model_dump(mode="json"), "write": write},
+        {
+            "endpoint": "motor",
+            "operation": "motor.execute",
+            "payload": req.model_dump(mode="json"),
+            "write": write,
+        },
         budget,
         authority=authority or (lambda _: None),
     )
@@ -31,11 +36,25 @@ def test_constructor_and_lookup_guards(tmp_path):
     with pytest.raises(ValueError, match="adapter"):
         MotorExecutor(motor.adapter, MotorProfile(adapter="other"), journal=tmp_path / "bad.sqlite")
     with pytest.raises(ValueError, match="Jev"):
-        MotorExecutor(motor.adapter, MotorProfile(adapter=motor.adapter.implementation, mode="jev", selector_model="m"), journal=tmp_path / "bad2.sqlite")
+        MotorExecutor(
+            motor.adapter,
+            MotorProfile(adapter=motor.adapter.implementation, mode="jev", selector_model="m"),
+            journal=tmp_path / "bad2.sqlite",
+        )
     with pytest.raises(ValueError, match="pinned"):
-        MotorExecutor(motor.adapter, MotorProfile(adapter=motor.adapter.implementation, selector_model="m"), journal=tmp_path / "bad3.sqlite", selector=type("S", (), {"model": "other"})())
+        MotorExecutor(
+            motor.adapter,
+            MotorProfile(adapter=motor.adapter.implementation, selector_model="m"),
+            journal=tmp_path / "bad3.sqlite",
+            selector=type("S", (), {"model": "other"})(),
+        )
     with pytest.raises(ValueError, match="pinned"):
-        MotorExecutor(motor.adapter, MotorProfile(adapter=motor.adapter.implementation, mode="jev", selector_model="m"), journal=tmp_path / "bad4.sqlite", selector=type("S", (), {"model": "other"})())
+        MotorExecutor(
+            motor.adapter,
+            MotorProfile(adapter=motor.adapter.implementation, mode="jev", selector_model="m"),
+            journal=tmp_path / "bad4.sqlite",
+            selector=type("S", (), {"model": "other"})(),
+        )
     real_import = builtins.__import__
 
     def no_fcntl(name, *args, **kwargs):
@@ -63,14 +82,26 @@ def test_constructor_and_lookup_guards(tmp_path):
 
 def test_validate_rejects_unfrozen_requests_and_selector_policy(tmp_path):
     _, motor, *_ = setup(tmp_path)
-    manifest = {"motor": motor.profile.model_dump(mode="json"), "environment": {"motor_skills": ["fill"]}, "policy": {"allowed_endpoints": [], "allowed_operations": []}}
-    base = {"endpoint": "motor", "operation": "motor.execute", "payload": request().model_dump(mode="json"), "write": True}
+    manifest = {
+        "motor": motor.profile.model_dump(mode="json"),
+        "environment": {"motor_skills": ["fill"]},
+        "policy": {"allowed_endpoints": [], "allowed_operations": []},
+    }
+    base = {
+        "endpoint": "motor",
+        "operation": "motor.execute",
+        "payload": request().model_dump(mode="json"),
+        "write": True,
+    }
     with pytest.raises(Forbidden, match="motor.execute"):
         motor.validate({**base, "operation": "other"}, manifest)
     with pytest.raises(Forbidden, match="frozen"):
         motor.validate(base, {**manifest, "motor": {}})
     with pytest.raises(Forbidden, match="declared"):
-        motor.validate({**base, "payload": request().model_copy(update={"skill": "read"}).model_dump(mode="json")}, manifest)
+        motor.validate(
+            {**base, "payload": request().model_copy(update={"skill": "read"}).model_dump(mode="json")},
+            manifest,
+        )
     with pytest.raises(Forbidden, match="write"):
         motor.validate({**base, "write": False}, manifest)
 
@@ -120,17 +151,30 @@ def test_candidate_authority_and_revalidation_fail_closed(tmp_path):
 
     class Protected(Alternatives):
         def plan(self, req, observation):
-            return (MotorCandidate(
-                id="protected",
-                description="protected",
-                steps=(MotorStep(operation="fill", target=req.target, arguments=req.arguments, controls={"travel": 1}),),
-            ),)
+            return (
+                MotorCandidate(
+                    id="protected",
+                    description="protected",
+                    steps=(
+                        MotorStep(
+                            operation="fill",
+                            target=req.target,
+                            arguments=req.arguments,
+                            controls={"travel": 1},
+                        ),
+                    ),
+                ),
+            )
 
         def revalidate(self, req, observation, selected, index=0):
             observation["protected_region_revision"] = "changed"
             return (selected,)
 
-    protected = request(control_permissions=(MotorControlPermission(id="p", controls={"travel": 1}, protected_region_revision="ok"),))
+    protected = request(
+        control_permissions=(
+            MotorControlPermission(id="p", controls={"travel": 1}, protected_region_revision="ok"),
+        )
+    )
     driver, _, prepare, dispatch, *_ = setup(tmp_path / "protected", adapter_class=Protected)
     driver.state["protected_region_revision"] = "ok"
     prepare(protected)
@@ -157,7 +201,10 @@ def test_invalid_plan_and_candidate_shapes_are_blocked(tmp_path):
     class Duplicate(Alternatives):
         def plan(self, req, observation):
             step = MotorStep(operation="fill", target=req.target, arguments=req.arguments)
-            return (MotorCandidate(id="same", description="one", steps=(step,)), MotorCandidate(id="same", description="two", steps=(step,)))
+            return (
+                MotorCandidate(id="same", description="one", steps=(step,)),
+                MotorCandidate(id="same", description="two", steps=(step,)),
+            )
 
     _, _, prepare, dispatch, *_ = setup(tmp_path / "duplicate", adapter_class=Duplicate)
     prepare()
@@ -167,7 +214,9 @@ def test_invalid_plan_and_candidate_shapes_are_blocked(tmp_path):
 def test_control_bounds_and_protected_region_are_enforced(tmp_path):
     class Controlled(Alternatives):
         def plan(self, req, observation):
-            step = MotorStep(operation="fill", target=req.target, arguments=req.arguments, controls={"travel": 1})
+            step = MotorStep(
+                operation="fill", target=req.target, arguments=req.arguments, controls={"travel": 1}
+            )
             return (MotorCandidate(id="controlled", description="bounded", steps=(step,)),)
 
     permission = MotorControlPermission(
@@ -179,7 +228,9 @@ def test_control_bounds_and_protected_region_are_enforced(tmp_path):
 
     class Limited(Controlled):
         def plan(self, req, observation):
-            step = MotorStep(operation="fill", target=req.target, arguments=req.arguments, controls={"travel": 1})
+            step = MotorStep(
+                operation="fill", target=req.target, arguments=req.arguments, controls={"travel": 1}
+            )
             return (MotorCandidate(id="limited", description="two steps", steps=(step, step)),)
 
     permission = MotorControlPermission(id="p", controls={"travel": 1}, max_steps=1)
@@ -189,7 +240,9 @@ def test_control_bounds_and_protected_region_are_enforced(tmp_path):
 
     class NoTravel(Controlled):
         def plan(self, req, observation):
-            step = MotorStep(operation="fill", target=req.target, arguments=req.arguments, controls={"travel": 1})
+            step = MotorStep(
+                operation="fill", target=req.target, arguments=req.arguments, controls={"travel": 1}
+            )
             return (MotorCandidate(id="no-travel", description="no travel cap", steps=(step,)),)
 
     driver, _, prepare, dispatch, *_ = setup(tmp_path / "no-travel", adapter_class=NoTravel)
@@ -237,10 +290,19 @@ def test_direct_execution_guards_and_authority_fences(tmp_path):
 
     class ReadOnly(Alternatives):
         def plan(self, req, observation):
-            return (MotorCandidate(id="effect", description="effect", steps=(MotorStep(operation="click", target=req.target),)),)
+            return (
+                MotorCandidate(
+                    id="effect",
+                    description="effect",
+                    steps=(MotorStep(operation="click", target=req.target),),
+                ),
+            )
 
     _, read_motor, *_ = setup(tmp_path / "readonly", adapter_class=ReadOnly)
-    assert direct(read_motor, request(), operation_id="readonly", write=False)["reason_code"] == "write_authority_required"
+    assert (
+        direct(read_motor, request(), operation_id="readonly", write=False)["reason_code"]
+        == "write_authority_required"
+    )
 
     _, duplicate, *_ = setup(tmp_path / "duplicate-step")
     duplicate._step_recorded = lambda steps, step_id: True
@@ -283,7 +345,10 @@ def test_selector_budget_and_model_guards(tmp_path):
         if calls >= 2:
             raise Forbidden("expired")
 
-    assert direct(expires, request(), operation_id="before-selection", authority=authority)["reason_code"] == "authority_expired"
+    assert (
+        direct(expires, request(), operation_id="before-selection", authority=authority)["reason_code"]
+        == "authority_expired"
+    )
 
 
 def test_authority_expiry_is_recorded_at_each_boundary(tmp_path):
@@ -296,7 +361,10 @@ def test_authority_expiry_is_recorded_at_each_boundary(tmp_path):
         if calls >= 2:
             raise Forbidden("expired")
 
-    assert direct(motor, request(), operation_id="before-step", authority=expires)["reason_code"] == "authority_expired"
+    assert (
+        direct(motor, request(), operation_id="before-step", authority=expires)["reason_code"]
+        == "authority_expired"
+    )
 
     _, after_motor, *_ = setup(tmp_path / "after", adapter_class=Alternatives)
     calls = 0
@@ -307,7 +375,10 @@ def test_authority_expiry_is_recorded_at_each_boundary(tmp_path):
         if calls >= 4:
             raise Forbidden("expired")
 
-    assert direct(after_motor, request(), operation_id="after-step", authority=expires_after)["reason_code"] == "authority_expired"
+    assert (
+        direct(after_motor, request(), operation_id="after-step", authority=expires_after)["reason_code"]
+        == "authority_expired"
+    )
 
     _, before_effect, *_ = setup(tmp_path / "before-effect", adapter_class=Alternatives)
     calls = 0
@@ -318,7 +389,12 @@ def test_authority_expiry_is_recorded_at_each_boundary(tmp_path):
         if calls >= 3:
             raise Forbidden("expired")
 
-    assert direct(before_effect, request(), operation_id="before-effect", authority=expires_before_effect)["reason_code"] == "authority_expired"
+    assert (
+        direct(before_effect, request(), operation_id="before-effect", authority=expires_before_effect)[
+            "reason_code"
+        ]
+        == "authority_expired"
+    )
 
     _, slow_motor, *_ = setup(tmp_path / "slow")
     original_execute = slow_motor.adapter.driver.execute

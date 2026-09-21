@@ -174,7 +174,12 @@ def test_revalidate_preserves_frozen_plan_and_rejects_changes():
 
 
 def test_minecraft_rejects_stale_invalid_and_unsafe_requests():
-    state = {"revision": "r1", "walkable_positions": [{"x": 1, "y": 2, "z": 3}], "blocks": [{"x": 1, "y": 2, "z": 3, "name": "stone"}], "recipes": ["torch"]}
+    state = {
+        "revision": "r1",
+        "walkable_positions": [{"x": 1, "y": 2, "z": 3}],
+        "blocks": [{"x": 1, "y": 2, "z": 3, "name": "stone"}],
+        "recipes": ["torch"],
+    }
     motor = MinecraftMotor(Driver(state))
     with pytest.raises(MotorError, match="stale"):
         motor.plan(request("move", {"x": 1, "y": 2, "z": 3}, revision="r2"), state)
@@ -197,11 +202,17 @@ def test_minecraft_rejects_stale_invalid_and_unsafe_requests():
         motor.plan(request("craft", {"recipe": "torch"}, {"count": True}), state)
     with pytest.raises(MotorError, match="between 1 and 64"):
         motor.plan(request("craft", {"recipe": "torch"}, {"count": 65}), state)
-    assert motor.plan(request("craft", {"recipe": "torch"}, {"count": 2}), state)[0].steps[0].operation == "craft"
+    assert (
+        motor.plan(request("craft", {"recipe": "torch"}, {"count": 2}), state)[0].steps[0].operation
+        == "craft"
+    )
 
 
 def test_browser_and_desktop_validate_operations_targets_and_text():
-    browser_state = {"revision": "r1", "elements": [{"element_id": "a", "selector": "#a", "supported_operations": []}, "noise"]}
+    browser_state = {
+        "revision": "r1",
+        "elements": [{"element_id": "a", "selector": "#a", "supported_operations": []}, "noise"],
+    }
     browser = BrowserMotor(Driver(browser_state))
     with pytest.raises(MotorError, match="stale"):
         browser.plan(request("read", {"element_id": "a"}, revision="r2"), browser_state)
@@ -215,19 +226,46 @@ def test_browser_and_desktop_validate_operations_targets_and_text():
         browser.plan(request("fill", {"element_id": "a"}, {"text": 1}), browser_state)
     assert browser.plan(request("read", {"element_id": "a"}), browser_state)[0].steps[0].arguments == {}
     selector_state = {"revision": "r1", "elements": [{"selector": "#other"}, {"selector": "#only"}]}
-    assert browser.plan(request("click", {"selector": "#only"}), selector_state)[0].steps[0].target == {"selector": "#only"}
+    assert browser.plan(request("click", {"selector": "#only"}), selector_state)[0].steps[0].target == {
+        "selector": "#only"
+    }
     with pytest.raises(MotorError, match="missing or ambiguous"):
         browser.plan(request("read", {"selector": "#missing"}), selector_state)
-    desktop_state = {"revision": "r1", "windows": ["noise", {"app": "Wrong", "window": "Main"}, {"app": "App", "window": "Other", "elements": []}, {"app": "App", "window": "Main", "elements": {}}, {"app": "App", "window": "Main", "elements": ["noise", {"element": "other"}, {"element": "field"}]}]}
+    desktop_state = {
+        "revision": "r1",
+        "windows": [
+            "noise",
+            {"app": "Wrong", "window": "Main"},
+            {"app": "App", "window": "Other", "elements": []},
+            {"app": "App", "window": "Main", "elements": {}},
+            {
+                "app": "App",
+                "window": "Main",
+                "elements": ["noise", {"element": "other"}, {"element": "field"}],
+            },
+        ],
+    }
     desktop = DesktopMotor(Driver(desktop_state))
     with pytest.raises(MotorError, match="stale"):
-        desktop.plan(request("read", {"app": "App", "window": "Main", "element": "field"}, revision="r2"), desktop_state)
+        desktop.plan(
+            request("read", {"app": "App", "window": "Main", "element": "field"}, revision="r2"),
+            desktop_state,
+        )
     with pytest.raises(MotorError, match="unsupported"):
         desktop.plan(request("submit", {"app": "App", "window": "Main", "element": "field"}), desktop_state)
     with pytest.raises(MotorError, match="invalid"):
-        desktop.plan(request("type", {"app": "App", "window": "Main", "element": "field"}, {"text": 2}), desktop_state)
+        desktop.plan(
+            request("type", {"app": "App", "window": "Main", "element": "field"}, {"text": 2}), desktop_state
+        )
     with pytest.raises(MotorError, match="no windows"):
-        desktop.plan(request("read", {"app": "App", "window": "Main", "element": "field"}), {"revision": "r1"})
+        desktop.plan(
+            request("read", {"app": "App", "window": "Main", "element": "field"}), {"revision": "r1"}
+        )
     with pytest.raises(MotorError, match="missing or ambiguous"):
         desktop.plan(request("read", {"app": "Other", "window": "Main", "element": "field"}), desktop_state)
-    assert desktop.plan(request("read", {"app": "App", "window": "Main", "element": "field"}), desktop_state)[0].steps[0].target["element"] == "field"
+    assert (
+        desktop.plan(request("read", {"app": "App", "window": "Main", "element": "field"}), desktop_state)[0]
+        .steps[0]
+        .target["element"]
+        == "field"
+    )
