@@ -94,6 +94,35 @@ def test_group_receipt_identity_and_goal_context_are_frozen():
         )
 
 
+def test_goal_context_and_claim_validation_are_generic():
+    goal = context()
+    assert goal.milestone.goal_id == goal.goal_id
+    with pytest.raises(ValueError, match="ownership"):
+        ControlClaim(
+            channel="a",
+            owner="direct",
+            owner_namespace="minecraft",
+            controls={"channel": "a"},
+            resources=(ResourceOwnership(resource="hand", owner="other", namespace="minecraft"),),
+        )
+    with pytest.raises(ValueError, match="one owner"):
+        MotorGroup(group_id="g", goal_context=goal, claims=(claim("a"), claim("a", resource="pickaxe")))
+    with pytest.raises(ValueError, match="does not belong"):
+        MotorGroupReceipt(
+            group_id="g",
+            status="completed",
+            goal_context=goal,
+            stop_epoch=0,
+            operation_id="env:g",
+            elapsed_ms=1,
+            progress=(
+                ProgressReceipt(
+                    group_id="other", tick=0, channel="a", status="completed", operation_id="x", stop_epoch=0
+                ),
+            ),
+        )
+
+
 class LegacyAdapter:
     implementation = "legacy@1"
     skills = ("fill",)
@@ -161,6 +190,28 @@ def test_legacy_adapter_must_advertise_group_capability(tmp_path):
                 "policy": {"allowed_endpoints": ["motor"], "allowed_operations": ["motor.execute"]},
             },
         )
+
+
+def test_group_validation_rejects_stale_context_deadline_and_claims(tmp_path):
+    _, executor, *_ = setup(tmp_path, adapter_class=GroupBrowserMotor)
+    base = dispatched_group()
+    manifest = {"motor": executor.profile.model_dump(mode="json")}
+    with pytest.raises(Forbidden, match="frozen experiment"):
+        executor.validate_group(base.group, base, {"motor": {}})
+    with pytest.raises(Conflict, match="goal contexts"):
+        executor.validate_group(
+            base.group,
+            base.model_copy(
+                update={"goal_context": GoalContext(goal_id="other", revision="7", milestone_id="place")}
+            ),
+            manifest,
+        )
+    with pytest.raises(Conflict, match="request and group stop"):
+        executor.validate_group(base.group, base.model_copy(update={"stop_epoch": 1}), manifest)
+    with pytest.raises(Conflict, match="deadline"):
+        executor.validate_group(base.group.model_copy(update={"deadline_ms": 1}), base, manifest)
+    with pytest.raises(Forbidden, match="backed"):
+        executor.validate_group(base.group, base.model_copy(update={"control_permissions": ()}), manifest)
 
 
 def test_direct_execute_rechecks_group_contract(tmp_path):
