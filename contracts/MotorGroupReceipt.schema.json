@@ -1,0 +1,151 @@
+{
+  "$defs": {
+    "GoalContext": {
+      "additionalProperties": false,
+      "description": "Versioned, immutable authority context shared by coordinated controls.",
+      "properties": {
+        "goal_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Goal Id",
+          "type": "string"
+        },
+        "milestone_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Milestone Id",
+          "type": "string"
+        },
+        "revision": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Revision",
+          "type": "string"
+        }
+      },
+      "required": [
+        "goal_id",
+        "revision",
+        "milestone_id"
+      ],
+      "title": "GoalContext",
+      "type": "object"
+    },
+    "ProgressReceipt": {
+      "additionalProperties": false,
+      "description": "Durable progress for one coordinated group tick.",
+      "properties": {
+        "channel": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Channel",
+          "type": "string"
+        },
+        "group_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Group Id",
+          "type": "string"
+        },
+        "operation_id": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Operation Id",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "completed",
+            "blocked",
+            "cancelled"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "stop_epoch": {
+          "minimum": 0,
+          "title": "Stop Epoch",
+          "type": "integer"
+        },
+        "tick": {
+          "minimum": 0,
+          "title": "Tick",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "group_id",
+        "tick",
+        "channel",
+        "status",
+        "operation_id",
+        "stop_epoch"
+      ],
+      "title": "ProgressReceipt",
+      "type": "object"
+    }
+  },
+  "$id": "urn:environment-harness:v1:MotorGroupReceipt",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "cost_micros": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Cost Micros",
+      "type": "integer"
+    },
+    "elapsed_ms": {
+      "minimum": 0,
+      "title": "Elapsed Ms",
+      "type": "number"
+    },
+    "goal_context": {
+      "$ref": "#/$defs/GoalContext"
+    },
+    "group_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Group Id",
+      "type": "string"
+    },
+    "operation_id": {
+      "maxLength": 300,
+      "minLength": 1,
+      "title": "Operation Id",
+      "type": "string"
+    },
+    "progress": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ProgressReceipt"
+      },
+      "title": "Progress",
+      "type": "array"
+    },
+    "status": {
+      "enum": [
+        "completed",
+        "blocked",
+        "cancelled"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "stop_epoch": {
+      "minimum": 0,
+      "title": "Stop Epoch",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "group_id",
+    "status",
+    "goal_context",
+    "stop_epoch",
+    "operation_id",
+    "elapsed_ms"
+  ],
+  "title": "MotorGroupReceipt",
+  "type": "object"
+}

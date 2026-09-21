@@ -37,3 +37,24 @@ def test_motor_profile_rejects_unpinned_or_unexpected_selector(profile):
 
     with pytest.raises(ValidationError, match="pinned selector"):
         MotorProfile.model_validate(profile)
+
+
+def test_motor_request_accepts_optional_group_contract():
+    from environment_harness import ControlClaim, GoalContext, MotorGroup, MotorRequest
+
+    context = GoalContext(goal_id="g", revision="user-1", milestone_id="m")
+    group = MotorGroup(
+        group_id="group-1",
+        goal_context=context,
+        claims=(ControlClaim(channel="a", owner="direct", owner_namespace="test", controls={"x": 1}),),
+    )
+    request = MotorRequest(
+        skill="read",
+        target={"x": 1},
+        expected={"x": 1},
+        observation_revision="0",
+        goal_revision="0",
+        goal_context=context,
+        group=group,
+    )
+    assert request.group.group_id == "group-1"

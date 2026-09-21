@@ -10,6 +10,24 @@ Findings can identify omissions with a null `action_id`, a delivered observation
 
 These additions are generic. Supplier mechanics, private datasets, domain graders, and visualization plugins remain outside this repository.
 
+## Coordinated motor goals
+
+The motor contracts also support a bounded group of controls that share one
+immutable `GoalContext` (`goal_id`, `revision`, and `milestone_id`). A
+`MotorGroup` names each channel, its controller, and any resources it owns.
+Construction rejects duplicate channels and resource collisions. Dispatch
+requires the adapter capability `coordinated-control.v1`, matching
+environment-issued control permissions, the current stop epoch, and a request
+with the same goal context and deadline. The executor rechecks these claims at
+the effect boundary, so a stale stop epoch or changed authority cannot start a
+group operation. `MotorGroupReceipt` and `ProgressReceipt` preserve stable
+operation identities and per-tick status for replay and audit.
+
+These contracts coordinate execution and record evidence. They do not provide
+domain-specific controllers, resource semantics, graders, or guarantees about
+task success. Adapters and suppliers must define those details and inject any
+native driver behind the public SDK boundary.
+
 ## Dispatch and transition recovery
 
 The built-in runner records prepared agent work before dispatch, then persists

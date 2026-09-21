@@ -11,7 +11,14 @@ import time
 from abc import ABC, abstractmethod
 from copy import deepcopy
 
-from .motor_contracts import MotorCandidate, MotorRequest, MotorStep
+from .motor_contracts import (
+    MotorCandidate,
+    MotorRequest,
+    MotorStep,
+    PreparedSuccessorAdmission,
+    PreparedSuccessorIntent,
+    UnsupportedPreparation,
+)
 
 
 class MotorError(Exception):
@@ -36,6 +43,10 @@ def _target_point(value, label="target"):
 
 
 class _Adapter(ABC):
+    implementation: str
+    supports_prepared_successors = False
+    native_admits_prepared_successors = False
+
     def __init__(self, driver, *, max_steps=128):
         if not all(
             callable(getattr(driver, name, None)) for name in ("observe", "execute", "stop", "lookup")
@@ -94,6 +105,42 @@ class _Adapter(ABC):
 
     def lookup(self, operation_id):
         return self.driver.lookup(operation_id)
+
+    def prepare_successor(self, intent):
+        if not self.supports_prepared_successors:
+            raise UnsupportedPreparation(f"{self.implementation} does not support prepared successors")
+        if not isinstance(intent, PreparedSuccessorIntent):
+            raise TypeError("intent must be PreparedSuccessorIntent")
+        return intent
+
+    def admit_successor(self, intent, *, predecessor):
+        if not self.supports_prepared_successors:
+            raise UnsupportedPreparation(f"{self.implementation} does not support prepared successors")
+        raise NotImplementedError("prepared successor admission must be implemented by the native adapter")
+
+    def reconcile_prepared_successor(self, intent):
+        """Convert the native operation ledger proof into an admission."""
+        result = self.reconcile(intent.operation_id)
+        if not isinstance(result, dict) or result.get("operation_id") != intent.operation_id:
+            return None
+        status = result.get("status")
+        if status in {"completed", "admitted", "accepted"}:
+            admission_status = "admitted"
+        elif status in {"rejected", "cancelled", "blocked"}:
+            admission_status = "rejected"
+        else:
+            admission_status = "unknown"
+        return PreparedSuccessorAdmission(
+            intent_id=intent.intent_id,
+            predecessor_operation_id=intent.predecessor_operation_id,
+            operation_id=intent.operation_id,
+            metadata=intent.metadata,
+            status=admission_status,
+            reason_code="native_reconciled",
+        )
+
+    def reconcile(self, operation_id):
+        return self.lookup(operation_id)
 
 
 class MinecraftMotor(_Adapter):
