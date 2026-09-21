@@ -230,7 +230,7 @@ class MotorExecutor:
             if not envelope.get("write") and any(step.operation != "read" for c in candidates for step in c.steps):
                 return finish("blocked", "read-only request cannot execute motor effects")
             chosen = candidates[0]
-            if self.selector is not None and len(candidates) > 1:
+            if self.selector is not None:
                 state = {"observation": before, "request": request.model_dump(mode="json")}
                 if self.selector.maximum_cost(state, candidates) > budget:
                     return finish("blocked", "selector reservation exceeds operation budget")

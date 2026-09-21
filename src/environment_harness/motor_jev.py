@@ -17,6 +17,7 @@ DEFAULT_MODEL = "jev-1.13.0"
 DEFAULT_PRICE_MICROS_PER_MILLION = 42_000
 DEFAULT_MAX_INPUT_BYTES = 262_144
 DEFAULT_TOKEN_BOUND_MULTIPLIER = 4
+ABSTAIN_ID = "__abstain__"
 
 Transport = Callable[[str, dict[str, str], bytes, float], bytes | dict[str, Any]]
 
@@ -70,6 +71,8 @@ class JevSelector:
         if not isinstance(token_bound_multiplier, int) or token_bound_multiplier < 1:
             raise ValueError("token_bound_multiplier must be positive")
         self.api_key = api_key if api_key is not None else os.environ.get("TYPESAFE_API_KEY")
+        if not self.api_key:
+            raise ValueError("JevSelector requires TYPESAFE_API_KEY or an explicit api_key")
         self.model = model
         self.endpoint = endpoint
         self.max_input_bytes = max_input_bytes
@@ -88,6 +91,8 @@ class JevSelector:
                 raise ValueError("candidates must contain MotorCandidate values")
             if candidate.id in seen or not candidate.id:
                 raise ValueError("candidate IDs must be unique and nonempty")
+            if candidate.id == ABSTAIN_ID:
+                raise ValueError(f"candidate ID {ABSTAIN_ID!r} is reserved")
             if not isinstance(candidate.description, str) or not candidate.description:
                 raise ValueError("candidate descriptions must be nonempty")
             seen.add(candidate.id)
@@ -104,8 +109,11 @@ class JevSelector:
             "questions": {
                 "motor": {
                     "type": "choice",
-                    "instructions": "Which supplied motor candidate should execute next? Choose only a candidate ID.",
-                    "criteria": {candidate.id: candidate.description for candidate in candidates},
+                    "instructions": "Which supplied motor candidate should execute next? Choose a candidate ID, or abstain if none should execute.",
+                    "criteria": {
+                        **{candidate.id: candidate.description for candidate in candidates},
+                        ABSTAIN_ID: "Do not execute a motor candidate; defer to the planner.",
+                    },
                 }
             },
         }
@@ -140,8 +148,6 @@ class JevSelector:
             return _abstain(self.model)
         if reservation > maximum_cost_micros:
             raise JevBudgetExceeded("Jev reservation exceeds maximum_cost_micros")
-        if not self.api_key:
-            return _abstain(self.model)
         if cancel.is_set() or time.monotonic() >= deadline:
             return _abstain(self.model)
         try:
@@ -182,7 +188,7 @@ class JevSelector:
             raise JevOutcomeUnknown("Jev response omitted valid usage")
         answers = response.get("answers")
         answer = answers.get("motor") if isinstance(answers, dict) else None
-        ids = {candidate.id for candidate in candidates}
+        ids = {candidate.id for candidate in candidates} | {ABSTAIN_ID}
         probabilities = answer.get("probabilities") if isinstance(answer, dict) else None
         choice = answer.get("choice") if isinstance(answer, dict) else None
         confidence = answer.get("confidence") if isinstance(answer, dict) else None
@@ -199,6 +205,8 @@ class JevSelector:
             raise JevBudgetExceeded("Jev usage exceeded the reserved budget")
         if not isinstance(choice, str) or choice not in ids or not valid_probs or not valid_confidence:
             return _abstain(response["model"], usage=usage, probabilities=probabilities if isinstance(probabilities, dict) else {}, confidence=confidence if valid_confidence else None, cost=cost)
+        if choice == ABSTAIN_ID:
+            return _abstain(response["model"], usage=usage, probabilities=probabilities, confidence=confidence, cost=cost)
         return MotorSelection(
             candidate_id=choice,
             model=response["model"],

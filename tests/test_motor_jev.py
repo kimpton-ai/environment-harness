@@ -5,7 +5,7 @@ import time
 import pytest
 
 from environment_harness.motor_contracts import MotorCandidate, MotorStep
-from environment_harness.motor_jev import JevBudgetExceeded, JevOutcomeUnknown, JevSelector
+from environment_harness.motor_jev import ABSTAIN_ID, JevBudgetExceeded, JevOutcomeUnknown, JevSelector
 
 
 def candidates():
@@ -20,7 +20,7 @@ def response(choice="mine", model="jev-1.13.0"):
     return {
         "model": model,
         "answers": {"motor": {"type": "choice", "choice": choice, "confidence": 0.8,
-                                "probabilities": {"move": 0.2, "mine": 0.8}}},
+                                "probabilities": {"move": 0.1, "mine": 0.8, ABSTAIN_ID: 0.1}}},
         "usage": {"input_tokens": 100, "output_tokens": 10},
     }
 
@@ -35,7 +35,7 @@ def test_selector_sends_choice_and_returns_existing_candidate():
     selector = JevSelector("secret", transport=transport)
     result = selector.select({"position": {"x": 1}}, candidates(), maximum_cost_micros=100, cancel=threading.Event(), deadline=time.monotonic() + 1)
     assert result.candidate_id == "mine"
-    assert calls[0][2]["questions"]["motor"]["criteria"] == {"move": "Move to the supplied target", "mine": "Mine the supplied block"}
+    assert calls[0][2]["questions"]["motor"]["criteria"][ABSTAIN_ID]
     assert calls[0][1]["Authorization"] == "Bearer secret"
 
 
@@ -62,6 +62,21 @@ def test_maximum_cost_is_conservative_and_duplicate_candidates_are_rejected():
     assert selector.maximum_cost({}, candidates()) >= 1
     duplicate = (candidates()[0], candidates()[0])
     assert selector.select({}, duplicate, maximum_cost_micros=100, cancel=threading.Event(), deadline=time.monotonic() + 1).candidate_id is None
+
+
+def test_reserved_abstain_is_valid_and_candidate_collision_is_rejected():
+    selector = JevSelector("secret", transport=lambda *_: response(ABSTAIN_ID))
+    result = selector.select({}, candidates(), maximum_cost_micros=100, cancel=threading.Event(), deadline=time.monotonic() + 1)
+    assert result.candidate_id is None
+    assert set(result.probabilities) == {"move", "mine", ABSTAIN_ID}
+    colliding = (MotorCandidate(id=ABSTAIN_ID, description="bad", steps=candidates()[0].steps),)
+    assert selector.select({}, colliding, maximum_cost_micros=100, cancel=threading.Event(), deadline=time.monotonic() + 1).candidate_id is None
+
+
+def test_missing_credentials_fail_at_construction(monkeypatch):
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="TYPESAFE_API_KEY"):
+        JevSelector(None)
 
 
 def test_post_dispatch_failure_is_unknown_and_never_zero_cost():
