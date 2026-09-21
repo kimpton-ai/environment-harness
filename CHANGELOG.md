@@ -24,6 +24,8 @@ scenario, environment-session and activity metadata introduced by this release.
 
 Production PyPI publishing now uses short-lived Trusted Publishing credentials and publishes only the reviewed Python wheel and source distribution. Releases support PEP 440 alpha, beta, and release-candidate versions while mapping those versions to npm-compatible SemVer prereleases. Package metadata now includes the rendered README, classifiers, project links, and the `py.typed` marker.
 
+Deployment, release, and viewer-maintenance guides now define the supported local topology, hosted-service qualification boundary, prerelease workflow, generated browser assets, required checks, and documentation triggers for future contributors.
+
 ## 0.2.2 - 2026-09-18
 
 Release publishing now extracts immutable-ID artifacts directly into the verified distribution directory before checking attestations and explicitly disables dependency caching during the tag build. Routine Dependabot version updates are grouped into one monthly pull request per ecosystem, while security updates remain immediate.

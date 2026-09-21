@@ -151,6 +151,9 @@ Use `experiment.start()`, `wait()`, `stop()`, and explicit `resume()` for lifecy
 | Use the TypeScript client | [TypeScript package](https://github.com/kimpton-ai/environment-harness/blob/main/packages/typescript/README.md) |
 | Check adapter and isolation boundaries | [Adapters](https://github.com/kimpton-ai/environment-harness/blob/main/docs/ADAPTERS.md) |
 | Check compatibility and release limits | [Compatibility](https://github.com/kimpton-ai/environment-harness/blob/main/docs/COMPATIBILITY.md) · [Release scope](https://github.com/kimpton-ai/environment-harness/blob/main/docs/STATUS.md) |
+| Install, run, and evaluate deployment options | [Deployment](https://github.com/kimpton-ai/environment-harness/blob/main/docs/DEPLOYMENT.md) |
+| Maintain the packaged browser UI | [Viewer maintenance](https://github.com/kimpton-ai/environment-harness/blob/main/docs/VIEWER-MAINTENANCE.md) |
+| Prepare and publish a release | [Release process](https://github.com/kimpton-ai/environment-harness/blob/main/docs/RELEASING.md) |
 
 ## Project
 
