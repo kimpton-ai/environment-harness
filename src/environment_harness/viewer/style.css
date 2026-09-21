@@ -807,6 +807,7 @@ pre {
   header { padding: 0 16px; }
   main { padding: 16px; }
   .app-navbar { grid-template-columns: 160px minmax(44px, 1fr) auto; }
+  .sidebar-brand .brand { font-size: 12px; }
   .home-view { padding: 28px 22px 42px; }
   .home-toolbar { grid-template-columns: 1fr 1fr auto; }
   .home-toolbar input { grid-column: 1 / -1; }
