@@ -63,7 +63,7 @@ dev = [
 packages = ["src/environment_harness"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src", "contracts", "docs", "examples", "README.md", "CONTRIBUTING.md", "SECURITY.md", "SUPPORT.md", "CODE_OF_CONDUCT.md", "CHANGELOG.md", "LICENSE", "pyproject.toml", "uv.toml"]
+include = ["src", "contracts", "contracts/*.schema.json", "docs", "examples", "README.md", "CONTRIBUTING.md", "SECURITY.md", "SUPPORT.md", "CODE_OF_CONDUCT.md", "CHANGELOG.md", "LICENSE", "pyproject.toml", "uv.toml"]
 exclude = ["**/.gitignore", "packages/typescript"]
 
 [tool.pytest.ini_options]

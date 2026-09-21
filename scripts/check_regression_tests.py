@@ -11,7 +11,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = os.environ.get("REGRESSION_BASE_REF", "origin/main")
-PROOF_TARGETS = ("tests/test_motor_contract_regression.py::test_experiment_freezes_declared_motor_profile",)
+PROOF_TARGETS = (
+    "tests/test_motor_contract_regression.py::test_motor_request_accepts_optional_group_contract",
+)
 SAFE_ENV = {
     "COMSPEC",
     "LANG",

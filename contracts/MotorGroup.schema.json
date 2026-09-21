@@ -1,0 +1,174 @@
+{
+  "$defs": {
+    "ControlClaim": {
+      "additionalProperties": false,
+      "description": "A channel and its resources, owned by a direct or adapter-backed controller.",
+      "properties": {
+        "channel": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Channel",
+          "type": "string"
+        },
+        "controls": {
+          "additionalProperties": true,
+          "minProperties": 1,
+          "title": "Controls",
+          "type": "object"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "enum": [
+                "direct",
+                "baritone"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Owner"
+        },
+        "owner_namespace": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Owner Namespace",
+          "type": "string"
+        },
+        "resources": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ResourceOwnership"
+          },
+          "title": "Resources",
+          "type": "array"
+        }
+      },
+      "required": [
+        "channel",
+        "owner",
+        "owner_namespace",
+        "controls"
+      ],
+      "title": "ControlClaim",
+      "type": "object"
+    },
+    "GoalContext": {
+      "additionalProperties": false,
+      "description": "Versioned, immutable authority context shared by coordinated controls.",
+      "properties": {
+        "goal_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Goal Id",
+          "type": "string"
+        },
+        "milestone_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Milestone Id",
+          "type": "string"
+        },
+        "revision": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Revision",
+          "type": "string"
+        }
+      },
+      "required": [
+        "goal_id",
+        "revision",
+        "milestone_id"
+      ],
+      "title": "GoalContext",
+      "type": "object"
+    },
+    "ResourceOwnership": {
+      "additionalProperties": false,
+      "description": "A resource lease claimed by one named channel owner.",
+      "properties": {
+        "namespace": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Namespace",
+          "type": "string"
+        },
+        "owner": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Owner",
+          "type": "string"
+        },
+        "resource": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Resource",
+          "type": "string"
+        }
+      },
+      "required": [
+        "resource",
+        "owner",
+        "namespace"
+      ],
+      "title": "ResourceOwnership",
+      "type": "object"
+    }
+  },
+  "$id": "urn:environment-harness:v1:MotorGroup",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Bounded coordinated control contract; execution is owned by the runtime.",
+  "properties": {
+    "claims": {
+      "items": {
+        "$ref": "#/$defs/ControlClaim"
+      },
+      "maxItems": 64,
+      "minItems": 1,
+      "title": "Claims",
+      "type": "array"
+    },
+    "deadline_ms": {
+      "default": 10000,
+      "maximum": 120000,
+      "minimum": 1,
+      "title": "Deadline Ms",
+      "type": "integer"
+    },
+    "goal_context": {
+      "$ref": "#/$defs/GoalContext"
+    },
+    "group_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Group Id",
+      "type": "string"
+    },
+    "max_ticks": {
+      "default": 32,
+      "maximum": 128,
+      "minimum": 1,
+      "title": "Max Ticks",
+      "type": "integer"
+    },
+    "stop_epoch": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Stop Epoch",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "group_id",
+    "goal_context",
+    "claims"
+  ],
+  "title": "MotorGroup",
+  "type": "object"
+}

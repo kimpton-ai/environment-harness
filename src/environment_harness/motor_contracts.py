@@ -12,6 +12,62 @@ class MotorRecord(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+class MilestoneIdentity(MotorRecord):
+    """Stable identity for a milestone inside a goal revision."""
+
+    goal_id: str = Field(min_length=1, max_length=200)
+    milestone_id: str = Field(min_length=1, max_length=200)
+    revision: str = Field(min_length=1, max_length=200)
+
+
+class GoalContext(MotorRecord):
+    """Versioned, immutable authority context shared by coordinated controls."""
+
+    goal_id: str = Field(min_length=1, max_length=200)
+    revision: str = Field(min_length=1, max_length=200)
+    milestone_id: str = Field(min_length=1, max_length=200)
+
+    @property
+    def milestone(self) -> MilestoneIdentity:
+        return MilestoneIdentity(goal_id=self.goal_id, milestone_id=self.milestone_id, revision=self.revision)
+
+
+class ResourceOwnership(MotorRecord):
+    """A resource lease claimed by one named channel owner."""
+
+    resource: str = Field(min_length=1, max_length=200)
+    owner: str = Field(min_length=1, max_length=200)
+    namespace: str = Field(min_length=1, max_length=200)
+
+
+class ControlClaim(MotorRecord):
+    """A channel and its resources, owned by a direct or adapter-backed controller."""
+
+    channel: str = Field(min_length=1, max_length=200)
+    owner: Literal["direct", "baritone"] | str = Field(min_length=1, max_length=200)
+    owner_namespace: str = Field(min_length=1, max_length=200)
+    controls: dict[str, Any] = Field(min_length=1)
+    resources: tuple[ResourceOwnership, ...] = ()
+
+    @model_validator(mode="after")
+    def ownership_matches(self):
+        for resource in self.resources:
+            if resource.owner != self.owner or resource.namespace != self.owner_namespace:
+                raise ValueError("resource ownership must match its channel claim")
+        return self
+
+
+class ProgressReceipt(MotorRecord):
+    """Durable progress for one coordinated group tick."""
+
+    group_id: str = Field(min_length=1, max_length=200)
+    tick: int = Field(ge=0, strict=True)
+    channel: str = Field(min_length=1, max_length=200)
+    status: Literal["completed", "blocked", "cancelled"]
+    operation_id: str = Field(min_length=1, max_length=300)
+    stop_epoch: int = Field(ge=0, strict=True)
+
+
 class MotorProfile(MotorRecord):
     mode: Literal["deterministic", "jev"] = "deterministic"
     executor: Literal["motor.v1"] = "motor.v1"
@@ -47,6 +103,8 @@ class MotorRequest(MotorRecord):
     timeout_ms: int = Field(default=10000, ge=1, le=120000, strict=True)
     control_permissions: tuple[MotorControlPermission, ...] = Field(default_factory=tuple, max_length=128)
     max_recovery_attempts: int = Field(default=0, ge=0, le=128, strict=True)
+    goal_context: GoalContext | None = None
+    group: "MotorGroup | None" = None
 
 
 class MotorStep(MotorRecord):
@@ -86,9 +144,61 @@ class MotorReceipt(MotorRecord):
     elapsed_ms: float = Field(ge=0)
 
 
+class MotorGroup(MotorRecord):
+    """Bounded coordinated control contract; execution is owned by the runtime."""
+
+    group_id: str = Field(min_length=1, max_length=200)
+    goal_context: GoalContext
+    claims: tuple[ControlClaim, ...] = Field(min_length=1, max_length=64)
+    max_ticks: int = Field(default=32, ge=1, le=128, strict=True)
+    deadline_ms: int = Field(default=10000, ge=1, le=120000, strict=True)
+    stop_epoch: int = Field(default=0, ge=0, strict=True)
+
+    @model_validator(mode="after")
+    def validate_compatible_channel_claims(self):
+        channels = [claim.channel for claim in self.claims]
+        if len(channels) != len(set(channels)):
+            raise ValueError("each channel may have only one owner")
+        resources: dict[str, ControlClaim] = {}
+        for claim in self.claims:
+            for ownership in claim.resources:
+                key = ownership.resource
+                if key in resources:
+                    raise ValueError("conflicting resource ownership")
+                resources[key] = claim
+        return self
+
+
+class MotorGroupReceipt(MotorRecord):
+    group_id: str = Field(min_length=1, max_length=200)
+    status: Literal["completed", "blocked", "cancelled"]
+    goal_context: GoalContext
+    stop_epoch: int = Field(ge=0, strict=True)
+    progress: tuple[ProgressReceipt, ...] = ()
+    operation_id: str = Field(min_length=1, max_length=300)
+    cost_micros: int = Field(default=0, ge=0, strict=True)
+    elapsed_ms: float = Field(ge=0)
+
+    @model_validator(mode="after")
+    def unique_progress_effects(self):
+        identities = [(item.tick, item.channel) for item in self.progress]
+        operation_ids = [item.operation_id for item in self.progress]
+        if len(identities) != len(set(identities)) or len(operation_ids) != len(set(operation_ids)):
+            raise ValueError("duplicate group effect receipt identity")
+        if any(
+            item.group_id != self.group_id or item.stop_epoch != self.stop_epoch for item in self.progress
+        ):
+            raise ValueError("progress receipt does not belong to this group")
+        return self
+
+
+MotorRequest.model_rebuild()
+
+
 class MotorAdapter(Protocol):
     implementation: str
     skills: tuple[str, ...]
+    group_capabilities: tuple[str, ...]
 
     def observe(self) -> dict[str, Any]: ...
     def plan(self, request: MotorRequest, observation: dict[str, Any]) -> tuple[MotorCandidate, ...]: ...

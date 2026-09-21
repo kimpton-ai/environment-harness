@@ -22,6 +22,7 @@ from .motor_contracts import (
     MotorAdapter,
     MotorCandidate,
     MotorControlPermission,
+    MotorGroup,
     MotorProfile,
     MotorReceipt,
     MotorRequest,
@@ -195,7 +196,31 @@ class MotorExecutor:
                 or "motor.select" not in policy["allowed_operations"]
             ):
                 raise Forbidden("Jev endpoint and selection require frozen permission")
+        if payload.group is not None:
+            self.validate_group(payload.group, payload, manifest)
         return payload
+
+    def validate_group(self, group: MotorGroup, request: MotorRequest, manifest):
+        """Validate a coordinated contract before a runtime plans dispatch."""
+        if not isinstance(group, MotorGroup):
+            group = MotorGroup.model_validate(group)
+        if "coordinated-control.v1" not in getattr(self.adapter, "group_capabilities", ()):
+            raise Forbidden("motor adapter does not advertise coordinated-control.v1")
+        if manifest.get("motor") != self.profile.model_dump(mode="json"):
+            raise Forbidden("motor assistance differs from the frozen experiment")
+        if group.stop_epoch != self.stop_epoch:
+            raise Conflict("motor group stop epoch is stale")
+        if request.goal_context != group.goal_context:
+            raise Conflict("motor request and group goal contexts differ")
+        if request.stop_epoch != group.stop_epoch:
+            raise Conflict("motor request and group stop epochs differ")
+        if request.timeout_ms > group.deadline_ms:
+            raise Conflict("motor request exceeds group deadline")
+        permissions = {encode(permission.controls): permission for permission in request.control_permissions}
+        for claim in group.claims:
+            if encode(claim.controls) not in permissions:
+                raise Forbidden("group claim is not backed by a motor control permission")
+        return group
 
     def lookup(self, operation_id):
         """Return only a durable final receipt. Never replay missing effects."""
