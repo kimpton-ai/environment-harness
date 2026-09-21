@@ -31,7 +31,7 @@ The session, principals, writer lease, adapter and profile above come from the a
 
 Use the experiment's `motor` profile to freeze the adapter and mode. `motor_skills` on an environment declares the skills it can expose. A Jev profile must pin `mode="jev"` and `selector_model`; the selector endpoint must be allowlisted in the experiment policy. Jev may choose only among the bounded candidates returned by the adapter. Freeze assistance at the experiment level so replay and comparison retain the same configuration.
 
-The motor endpoint is `motor` and the operation is `motor.execute`. A worker prepares it through `Operations.prepare` with the request payload, `endpoint="motor"`, `operation="motor.execute"`, and `write=True` when the request can change the outside world. The endpoint and operation must be present in the frozen allowlist. The request payload is `MotorRequest.model_dump()`.
+The motor endpoint is `motor` and the operation is `motor.execute`. An authorized agent prepares it through `Operations.prepare`; a fenced worker dispatches it with the request payload, `endpoint="motor"`, `operation="motor.execute"`, and `write=True` when the request can change the outside world. The endpoint and operation must be present in the frozen allowlist. The request payload is `MotorRequest.model_dump()`.
 
 Motor control does not claim a measured speed, success rate or general capability. Receipts establish only the recorded operation, observations, postconditions and driver result for that run. Direct execution remains unchanged when no motor profile is configured.
 

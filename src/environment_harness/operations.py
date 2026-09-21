@@ -119,17 +119,20 @@ class Operations:
         # No transaction during IO. Never auto-repeat a dispatch with an uncertain outcome.
         try:
             if isinstance(provider, MotorExecutor):
+
                 def authority(payload):
                     with self.store.transaction() as db:
                         current = self.store.environment(db, environment, who, ("worker", "researcher"))
                         session._fence(current, lease)
                         actor = json.loads(current["participants"])[op["participant"]]
                         if (
-                            current["status"] != "running" or not actor["active"]
+                            current["status"] != "running"
+                            or not actor["active"]
                             or actor["generation"] != op["generation"]
                             or str(current["revision"]) != payload.goal_revision
                         ):
                             raise Forbidden("motor dispatch authority expired")
+
                 receipt = provider.execute(
                     f"{environment}:{operation_id}", request, op["reservation"], authority=authority
                 )
