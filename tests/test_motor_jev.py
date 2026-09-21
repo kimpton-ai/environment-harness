@@ -2,14 +2,17 @@ import json
 import threading
 import time
 
-from environment_harness.motor_contracts import MotorCandidate
-from environment_harness.motor_jev import JevSelector
+import pytest
+
+from environment_harness.motor_contracts import MotorCandidate, MotorStep
+from environment_harness.motor_jev import JevBudgetExceeded, JevOutcomeUnknown, JevSelector
 
 
 def candidates():
+    step = MotorStep(operation="noop", target={}, arguments={})
     return (
-        MotorCandidate(id="move", description="Move to the supplied target", steps=()),
-        MotorCandidate(id="mine", description="Mine the supplied block", steps=()),
+        MotorCandidate(id="move", description="Move to the supplied target", steps=(step,)),
+        MotorCandidate(id="mine", description="Mine the supplied block", steps=(step,)),
     )
 
 
@@ -46,9 +49,11 @@ def test_budget_cancellation_deadline_and_size_fail_closed_without_transport():
     calls = []
     selector = JevSelector("secret", max_input_bytes=1024, transport=lambda *args: calls.append(args))
     assert selector.select({"x": "a" * 2000}, candidates(), maximum_cost_micros=100, cancel=threading.Event(), deadline=time.monotonic() + 1).candidate_id is None
-    event = threading.Event(); event.set()
+    event = threading.Event()
+    event.set()
     assert selector.select({}, candidates(), maximum_cost_micros=100, cancel=event, deadline=time.monotonic() + 1).candidate_id is None
-    assert selector.select({}, candidates(), maximum_cost_micros=0, cancel=threading.Event(), deadline=time.monotonic() + 1).candidate_id is None
+    with pytest.raises(JevBudgetExceeded):
+        selector.select({}, candidates(), maximum_cost_micros=0, cancel=threading.Event(), deadline=time.monotonic() + 1)
     assert not calls
 
 
@@ -57,3 +62,38 @@ def test_maximum_cost_is_conservative_and_duplicate_candidates_are_rejected():
     assert selector.maximum_cost({}, candidates()) >= 1
     duplicate = (candidates()[0], candidates()[0])
     assert selector.select({}, duplicate, maximum_cost_micros=100, cancel=threading.Event(), deadline=time.monotonic() + 1).candidate_id is None
+
+
+def test_post_dispatch_failure_is_unknown_and_never_zero_cost():
+    selector = JevSelector("secret", transport=lambda *_: (_ for _ in ()).throw(TimeoutError()))
+    with pytest.raises(JevOutcomeUnknown):
+        selector.select({}, candidates(), maximum_cost_micros=100, cancel=threading.Event(), deadline=time.monotonic() + 1)
+
+    malformed = JevSelector("secret", transport=lambda *_: {"model": "jev-1.13.0", "answers": {}})
+    with pytest.raises(JevOutcomeUnknown):
+        malformed.select({}, candidates(), maximum_cost_micros=100, cancel=threading.Event(), deadline=time.monotonic() + 1)
+
+
+def test_model_mismatch_and_usage_over_reservation_are_unknown():
+    mismatch = JevSelector("secret", transport=lambda *_: response(model="jev-preview"))
+    with pytest.raises(JevOutcomeUnknown):
+        mismatch.select({}, candidates(), maximum_cost_micros=100, cancel=threading.Event(), deadline=time.monotonic() + 1)
+
+    over = JevSelector("secret", transport=lambda *_: {**response(), "usage": {"input_tokens": 10_000, "output_tokens": 10}})
+    with pytest.raises(JevBudgetExceeded):
+        over.select({}, candidates(), maximum_cost_micros=100, cancel=threading.Event(), deadline=time.monotonic() + 1,
+                    )
+
+
+def test_cancellation_after_dispatch_preserves_valid_usage_cost():
+    cancel = threading.Event()
+
+    def transport(*_):
+        cancel.set()
+        return response()
+
+    selector = JevSelector("secret", transport=transport)
+    result = selector.select({}, candidates(), maximum_cost_micros=100, cancel=cancel, deadline=time.monotonic() + 1)
+    assert result.candidate_id is None
+    assert result.usage["input_tokens"] == 100
+    assert result.cost_micros == 5
