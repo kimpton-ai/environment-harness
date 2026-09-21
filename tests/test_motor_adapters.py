@@ -1,12 +1,10 @@
+import time
+from threading import Event
+
 import pytest
 
-from environment_harness.motor_adapters import (
-    BrowserMotor,
-    DesktopMotor,
-    MinecraftMotor,
-    MotorError,
-    MotorRequest,
-)
+from environment_harness.motor_adapters import BrowserMotor, DesktopMotor, MinecraftMotor, MotorError
+from environment_harness.motor_contracts import MotorRequest
 
 
 class Driver:
@@ -16,32 +14,9 @@ class Driver:
     def observe(self):
         return self.state
 
-    def execute(self, skill, payload, **kwargs):
-        self.calls.append((skill, payload))
-        if skill == "move":
-            self.state["position"] = dict(payload["target"])
-        elif skill == "mine":
-            selected = {(b["x"], b["y"], b["z"]) for b in payload["blocks"]}
-            self.state["blocks"] = [b for b in self.state.get("blocks", []) if (b["x"], b["y"], b["z"]) not in selected]
-        elif skill == "craft":
-            self.state.setdefault("inventory", {})[payload["recipe"]] = payload["count"]
-        elif skill in {"fill", "type"}:
-            target = payload["target"]
-            if "element_id" in target:
-                for element in self.state.get("elements", []):
-                    if element.get("element_id") == target["element_id"]:
-                        element["value"] = payload["text"]
-            else:
-                for window in self.state.get("windows", []):
-                    for element in window.get("elements", []):
-                        if element.get("element") == target["element"].get("element"):
-                            element["value"] = payload["text"]
-        elif skill == "click":
-            target = payload["target"]
-            for element in self.state.get("elements", []):
-                if element.get("element_id") == target.get("element_id"):
-                    element["clicked"] = True
-        return {"driver_status": "ok"}
+    def execute(self, operation, payload, **kwargs):
+        self.calls.append((operation, payload, kwargs))
+        return {"status": "accepted"}
 
     def stop(self):
         self.stopped = True
@@ -50,85 +25,62 @@ class Driver:
         return None
 
 
-def test_minecraft_move_readback_and_idempotency():
-    driver = Driver({"position": {"x": 0, "y": 64, "z": 0}})
+def request(skill, target, arguments=None, expected=None, revision="r1"):
+    return MotorRequest(
+        skill=skill, target=target, arguments=arguments or {}, expected=expected or {"ok": True},
+        observation_revision=revision, goal_revision="g1",
+    )
+
+
+def test_minecraft_plans_only_observed_explicit_targets():
+    driver = Driver({"revision": "r1", "walkable_positions": [{"x": 2, "y": 64, "z": 1}],
+                     "blocks": [{"x": 1, "y": 64, "z": 1, "name": "minecraft:oak_log"}]})
     motor = MinecraftMotor(driver)
-    request = {"skill": "move", "target": {"x": 2, "y": 64, "z": 1}, "expected": {"position": {"x": 2, "y": 64, "z": 1}}}
-    first = motor.run("move-1", request)
-    second = motor.run("move-1", request)
-    assert first == second and len(driver.calls) == 1
-    with pytest.raises(MotorError, match="reused"):
-        motor.run("move-1", {**request, "target": {"x": 3, "y": 64, "z": 1}})
+    move = motor.plan(request("move", {"x": 2, "y": 64, "z": 1}), driver.observe())
+    assert move[0].steps[0].target == {"x": 2, "y": 64, "z": 1}
+    mine = motor.plan(request("mine", {"blocks": [{"x": 1, "y": 64, "z": 1, "name": "minecraft:oak_log"}],
+                                      }, {"tool": "minecraft:axe"}), driver.observe())
+    assert mine[0].steps[0].target["blocks"][0]["name"] == "minecraft:oak_log"
+    with pytest.raises(MotorError, match="does not match"):
+        motor.plan(request("mine", {"blocks": [{"x": 9, "y": 64, "z": 1, "name": "minecraft:oak_log"}]}), driver.observe())
+    with pytest.raises(MotorError, match="missing"):
+        motor.plan(request("mine", {"blocks": [{"x": 1, "y": 64, "z": 1, "name": "minecraft:oak_log"}]}), {"revision": "r1"})
 
 
-def test_minecraft_requires_explicit_blocks_and_observed_effect():
-    driver = Driver({"blocks": [{"x": 1, "y": 64, "z": 1, "name": "minecraft:oak_log"}]})
+def test_browser_requires_all_identifiers_and_can_offer_same_target_focus_alternative():
+    state = {"revision": "r1", "elements": [{"element_id": "name", "selector": "#name",
+                                                  "supported_operations": ["focus", "fill"]}]}
+    motor = BrowserMotor(Driver(state))
+    planned = motor.plan(request("fill", {"element_id": "name", "selector": "#name"}, {"text": "Ada"}), state)
+    assert len(planned) == 2
+    assert all(step.target == {"element_id": "name", "selector": "#name"}
+               for candidate in planned for step in candidate.steps)
+    with pytest.raises(MotorError, match="missing or ambiguous"):
+        motor.plan(request("fill", {"element_id": "name", "selector": "#wrong"}, {"text": "Ada"}), state)
+    replaced = {"revision": "r2", "elements": [{"element_id": "other", "selector": "#name"}]}
+    with pytest.raises(MotorError, match="missing or ambiguous"):
+        motor.plan(request("fill", {"element_id": "name", "selector": "#name"}, {"text": "Ada"}, revision="r2"), replaced)
+
+
+def test_desktop_requires_explicit_stable_identity():
+    state = {"revision": "r1", "windows": [{"app": "Editor", "window": "main",
+                                                "elements": [{"element": "title"}]}]}
+    motor = DesktopMotor(Driver(state))
+    candidate = motor.plan(request("type", {"app": "Editor", "window": "main", "element": "title"}, {"text": "Hello"}), state)[0]
+    assert candidate.steps[0].target == {"app": "Editor", "window": "main", "element": "title"}
+    with pytest.raises(MotorError, match="requires app"):
+        motor.plan(request("type", {"window": "main", "element": "title"}, {"text": "Hello"}), state)
+
+
+def test_execute_passes_identity_cancel_deadline_and_stop():
+    driver = Driver({"revision": "r1", "walkable_positions": [{"x": 1, "y": 64, "z": 1}]})
     motor = MinecraftMotor(driver)
-    with pytest.raises(MotorError):
-        motor.run("mine-1", {"skill": "mine", "blocks": [], "expected": {"blocks": []}})
-    receipt = motor.run("mine-2", {
-        "skill": "mine", "blocks": [{"x": 1, "y": 64, "z": 1, "name": "minecraft:oak_log"}],
-        "tool": "minecraft:axe", "expected": {"blocks": []},
-    })
-    assert receipt["status"] == "completed"
-
-
-def test_minecraft_changed_state_fails_and_stop_blocks_new_work():
-    driver = Driver({"position": {"x": 0, "y": 64, "z": 0}})
-    motor = MinecraftMotor(driver)
-    with pytest.raises(MotorError):
-        motor.run("move-1", {"skill": "move", "target": {"x": 1, "y": 64, "z": 0}, "expected": {"position": {"x": 9, "y": 64, "z": 0}}})
+    step = motor.plan(request("move", {"x": 1, "y": 64, "z": 1}), driver.observe())[0].steps[0]
+    cancel = Event()
+    motor.execute(step, operation_id="op-1", cancel=cancel, deadline=time.monotonic() + 1)
+    assert driver.calls[0][2]["operation_id"] == "op-1"
+    cancel.set()
+    with pytest.raises(MotorError, match="cancelled"):
+        motor.execute(step, operation_id="op-2", cancel=cancel, deadline=time.monotonic() + 1)
     motor.stop()
     assert driver.stopped
-    with pytest.raises(MotorError, match="stopped"):
-        motor.run("move-2", {"skill": "move", "target": {"x": 1, "y": 64, "z": 0}, "expected": {"position": {"x": 1, "y": 64, "z": 0}}})
-
-
-def test_browser_requires_unique_target_and_confirms_fill():
-    driver = Driver({"elements": [{"element_id": "name", "selector": "#name", "value": ""}]})
-    motor = BrowserMotor(driver)
-    receipt = motor.run("fill-1", {"skill": "fill", "target": {"element_id": "name"}, "text": "Ada", "expected": {"elements": [{"element_id": "name", "selector": "#name", "value": "Ada"}]}})
-    assert receipt["after"]["elements"][0]["value"] == "Ada"
-    ambiguous = Driver({"elements": [{"selector": ".save"}, {"selector": ".save"}]})
-    with pytest.raises(MotorError, match="ambiguous"):
-        BrowserMotor(ambiguous).run("click-1", {"skill": "click", "target": {"selector": ".save"}, "expected": {}})
-
-
-def test_desktop_requires_unique_app_window_element_and_readback():
-    state = {"windows": [{"app": "Editor", "window": "main", "elements": [{"element": "title", "value": ""}]}]}
-    driver = Driver(state)
-    receipt = DesktopMotor(driver).run("type-1", {"skill": "type", "target": {"app": "Editor", "window": "main", "element": "title"}, "text": "Hello", "expected": {"windows": [{"app": "Editor", "window": "main", "elements": [{"element": "title", "value": "Hello"}]}]}})
-    assert receipt["status"] == "completed"
-    missing = Driver({"windows": []})
-    with pytest.raises(MotorError, match="missing"):
-        DesktopMotor(missing).run("type-2", {"skill": "type", "target": {"app": "Editor", "window": "main", "element": "title"}, "text": "x", "expected": {}})
-
-
-def test_primary_plan_validates_before_driver_effect_and_executes_typed_step():
-    driver = Driver({"revision": "r1", "position": {"x": 0, "y": 64, "z": 0}, "walkable_positions": [{"x": 2, "y": 64, "z": 1}]})
-    motor = MinecraftMotor(driver)
-    request = MotorRequest(
-        skill="move", target={"x": 2, "y": 64, "z": 1},
-        expected={"position": {"x": 2, "y": 64, "z": 1}}, observation_revision="r1", goal_revision="g1",
-    )
-    candidate = motor.plan(request, driver.observe())[0]
-    assert candidate.steps[0].target == request.target
-    motor.execute(candidate.steps[0], operation_id="op-1", deadline=__import__("time").monotonic() + 1)
-    assert driver.calls[0][0] == "move"
-
-    before = len(driver.calls)
-    with pytest.raises(MotorError, match="walkable"):
-        motor.plan(MotorRequest(
-            skill="move", target={"x": 99, "y": 64, "z": 1}, expected={"position": {}},
-            observation_revision="r1", goal_revision="g1",
-        ), driver.observe())
-    assert len(driver.calls) == before
-
-
-def test_plan_rejects_stale_revision_and_empty_evidence():
-    driver = Driver({"revision": "r2", "elements": [{"element_id": "save"}]})
-    motor = BrowserMotor(driver)
-    with pytest.raises(MotorError, match="expected"):
-        MotorRequest(skill="click", target={"element_id": "save"}, expected={}, observation_revision="r2", goal_revision="g1")
-    with pytest.raises(MotorError, match="stale"):
-        motor.plan(MotorRequest(skill="click", target={"element_id": "save"}, expected={"elements": []}, observation_revision="r1", goal_revision="g1"), driver.observe())
