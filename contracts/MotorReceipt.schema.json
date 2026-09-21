@@ -1,0 +1,339 @@
+{
+  "$defs": {
+    "MotorControlPermission": {
+      "additionalProperties": false,
+      "description": "One exact, environment-issued permission for bounded control inputs.",
+      "properties": {
+        "controls": {
+          "additionalProperties": true,
+          "title": "Controls",
+          "type": "object"
+        },
+        "id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "max_steps": {
+          "default": 1,
+          "maximum": 128,
+          "minimum": 1,
+          "title": "Max Steps",
+          "type": "integer"
+        },
+        "max_travel": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Travel"
+        },
+        "protected_region_revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Protected Region Revision"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "MotorControlPermission",
+      "type": "object"
+    },
+    "MotorProfile": {
+      "additionalProperties": false,
+      "properties": {
+        "adapter": {
+          "minLength": 1,
+          "title": "Adapter",
+          "type": "string"
+        },
+        "executor": {
+          "const": "motor.v1",
+          "default": "motor.v1",
+          "title": "Executor",
+          "type": "string"
+        },
+        "mode": {
+          "default": "deterministic",
+          "enum": [
+            "deterministic",
+            "jev"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "selector_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Selector Model"
+        }
+      },
+      "required": [
+        "adapter"
+      ],
+      "title": "MotorProfile",
+      "type": "object"
+    },
+    "MotorRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "arguments": {
+          "additionalProperties": true,
+          "title": "Arguments",
+          "type": "object"
+        },
+        "control_permissions": {
+          "items": {
+            "$ref": "#/$defs/MotorControlPermission"
+          },
+          "maxItems": 128,
+          "title": "Control Permissions",
+          "type": "array"
+        },
+        "expected": {
+          "additionalProperties": true,
+          "minProperties": 1,
+          "title": "Expected",
+          "type": "object"
+        },
+        "goal_revision": {
+          "minLength": 1,
+          "title": "Goal Revision",
+          "type": "string"
+        },
+        "max_recovery_attempts": {
+          "default": 0,
+          "maximum": 128,
+          "minimum": 0,
+          "title": "Max Recovery Attempts",
+          "type": "integer"
+        },
+        "max_steps": {
+          "default": 32,
+          "maximum": 128,
+          "minimum": 1,
+          "title": "Max Steps",
+          "type": "integer"
+        },
+        "observation_revision": {
+          "minLength": 1,
+          "title": "Observation Revision",
+          "type": "string"
+        },
+        "skill": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Skill",
+          "type": "string"
+        },
+        "stop_epoch": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Stop Epoch",
+          "type": "integer"
+        },
+        "target": {
+          "additionalProperties": true,
+          "title": "Target",
+          "type": "object"
+        },
+        "timeout_ms": {
+          "default": 10000,
+          "maximum": 120000,
+          "minimum": 1,
+          "title": "Timeout Ms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "skill",
+        "target",
+        "expected",
+        "observation_revision",
+        "goal_revision"
+      ],
+      "title": "MotorRequest",
+      "type": "object"
+    },
+    "MotorSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Candidate Id"
+        },
+        "confidence": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confidence"
+        },
+        "cost_micros": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Cost Micros",
+          "type": "integer"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "probabilities": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Probabilities",
+          "type": "object"
+        },
+        "usage": {
+          "additionalProperties": true,
+          "title": "Usage",
+          "type": "object"
+        }
+      },
+      "required": [
+        "model"
+      ],
+      "title": "MotorSelection",
+      "type": "object"
+    }
+  },
+  "$id": "urn:environment-harness:v1:MotorReceipt",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "after": {
+      "additionalProperties": true,
+      "title": "After",
+      "type": "object"
+    },
+    "before": {
+      "additionalProperties": true,
+      "title": "Before",
+      "type": "object"
+    },
+    "cost_micros": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Cost Micros",
+      "type": "integer"
+    },
+    "elapsed_ms": {
+      "minimum": 0,
+      "title": "Elapsed Ms",
+      "type": "number"
+    },
+    "operation_id": {
+      "title": "Operation Id",
+      "type": "string"
+    },
+    "profile": {
+      "$ref": "#/$defs/MotorProfile"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reason"
+    },
+    "reason_code": {
+      "anyOf": [
+        {
+          "maxLength": 80,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reason Code"
+    },
+    "request": {
+      "$ref": "#/$defs/MotorRequest"
+    },
+    "selection": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MotorSelection"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "status": {
+      "enum": [
+        "completed",
+        "blocked",
+        "cancelled"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "steps": {
+      "default": [],
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Steps",
+      "type": "array"
+    }
+  },
+  "required": [
+    "operation_id",
+    "status",
+    "profile",
+    "request",
+    "elapsed_ms"
+  ],
+  "title": "MotorReceipt",
+  "type": "object"
+}

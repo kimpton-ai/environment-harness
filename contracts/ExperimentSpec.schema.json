@@ -136,6 +136,14 @@
           "title": "Modalities",
           "type": "array"
         },
+        "motor_skills": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Motor Skills",
+          "type": "array"
+        },
         "observation_schema": {
           "additionalProperties": true,
           "title": "Observation Schema",
@@ -205,6 +213,48 @@
         "scheduling"
       ],
       "title": "EnvironmentSpec",
+      "type": "object"
+    },
+    "MotorProfile": {
+      "additionalProperties": false,
+      "properties": {
+        "adapter": {
+          "minLength": 1,
+          "title": "Adapter",
+          "type": "string"
+        },
+        "executor": {
+          "const": "motor.v1",
+          "default": "motor.v1",
+          "title": "Executor",
+          "type": "string"
+        },
+        "mode": {
+          "default": "deterministic",
+          "enum": [
+            "deterministic",
+            "jev"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "selector_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Selector Model"
+        }
+      },
+      "required": [
+        "adapter"
+      ],
+      "title": "MotorProfile",
       "type": "object"
     },
     "RunPolicy": {
@@ -278,6 +328,17 @@
       "additionalProperties": true,
       "title": "Interventions",
       "type": "object"
+    },
+    "motor": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MotorProfile"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "participants": {
       "items": {
