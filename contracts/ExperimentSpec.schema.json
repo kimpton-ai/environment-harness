@@ -185,6 +185,11 @@
           "title": "Purposes",
           "type": "array"
         },
+        "scenario_schema": {
+          "additionalProperties": true,
+          "title": "Scenario Schema",
+          "type": "object"
+        },
         "scheduling": {
           "enum": [
             "sequential",
@@ -364,6 +369,24 @@
       "default": "synthetic",
       "title": "Scenario",
       "type": "string"
+    },
+    "scenario_input": {
+      "title": "Scenario Input"
+    },
+    "scenario_metadata": {
+      "additionalProperties": true,
+      "title": "Scenario Metadata",
+      "type": "object"
+    },
+    "scenario_reference": {
+      "anyOf": [
+        {},
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Scenario Reference"
     },
     "scoring_versions": {
       "default": [],

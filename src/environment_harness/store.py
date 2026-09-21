@@ -9,6 +9,7 @@ import secrets
 import sqlite3
 import time
 import uuid
+from collections import Counter
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -81,6 +82,25 @@ CREATE TABLE IF NOT EXISTS agent_work (
  generation INTEGER NOT NULL, id TEXT NOT NULL, observation TEXT NOT NULL,
  status TEXT NOT NULL, response TEXT, agent_state TEXT,
  PRIMARY KEY(environment,revision,participant,generation));
+CREATE TABLE IF NOT EXISTS experiments (
+ id TEXT PRIMARY KEY, tenant TEXT NOT NULL, name TEXT NOT NULL, status TEXT NOT NULL,
+ seed INTEGER NOT NULL, trials INTEGER NOT NULL, total INTEGER NOT NULL,
+ completed INTEGER NOT NULL DEFAULT 0, running INTEGER NOT NULL DEFAULT 0,
+ queued INTEGER NOT NULL DEFAULT 0, failed INTEGER NOT NULL DEFAULT 0,
+ config TEXT NOT NULL, error TEXT, created REAL NOT NULL, updated REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS scenario_snapshots (
+ experiment TEXT NOT NULL, scenario TEXT NOT NULL, position INTEGER NOT NULL, body TEXT NOT NULL,
+ PRIMARY KEY(experiment,scenario));
+CREATE TABLE IF NOT EXISTS session_runs (
+ environment TEXT PRIMARY KEY, tenant TEXT NOT NULL, experiment TEXT, scenario TEXT NOT NULL,
+ trial INTEGER NOT NULL, seed INTEGER NOT NULL, status TEXT NOT NULL, error TEXT,
+ turns INTEGER NOT NULL DEFAULT 0, target_turns INTEGER NOT NULL,
+ latest_activity TEXT, scenario_body TEXT NOT NULL, created REAL NOT NULL, updated REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS session_runs_experiment ON session_runs(experiment,status,scenario,trial);
+CREATE TABLE IF NOT EXISTS event_outbox (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, tenant TEXT NOT NULL, topic TEXT NOT NULL,
+ experiment TEXT, environment TEXT, kind TEXT NOT NULL, body TEXT NOT NULL, created REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS event_outbox_scope ON event_outbox(tenant,id);
 CREATE TRIGGER IF NOT EXISTS events_no_update BEFORE UPDATE ON events BEGIN SELECT RAISE(ABORT,'immutable'); END;
 CREATE TRIGGER IF NOT EXISTS events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT,'immutable'); END;
 CREATE TRIGGER IF NOT EXISTS reports_no_update BEFORE UPDATE ON reports BEGIN SELECT RAISE(ABORT,'immutable'); END;
@@ -186,6 +206,23 @@ class EvidenceStore:
                 event["hash"],
             ),
         )
+        relation = db.execute(
+            "SELECT tenant,experiment FROM session_runs WHERE environment=?", (environment,)
+        ).fetchone()
+        if relation:
+            db.execute(
+                "INSERT INTO event_outbox (tenant,topic,experiment,environment,kind,body,created) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (
+                    relation["tenant"],
+                    "environment_session",
+                    relation["experiment"],
+                    environment,
+                    kind,
+                    raw,
+                    time.time(),
+                ),
+            )
         return event
 
     def events(self, environment, who, after=0, limit=200):
@@ -234,6 +271,175 @@ class EvidenceStore:
             yield from page
             cursor = page[-1]["seq"]
 
+    def activity(self, who, after=0, limit=200, *, experiment=None, environment=None):
+        from .activity import events
+
+        return events(
+            self,
+            who,
+            after,
+            limit,
+            experiment=experiment,
+            environment=environment,
+        )
+
+    def activity_snapshot(self, who):
+        if who.role not in ("researcher", "worker"):
+            raise Forbidden("researcher activity authority required")
+
+        def session_record(row):
+            participants = list(json.loads(row["participants_json"])) if row["participants_json"] else []
+            manifest = json.loads(row["manifest_json"]) if row["manifest_json"] else {}
+            return {
+                "kind": "session",
+                "id": row["environment"],
+                "scenario_id": row["scenario"],
+                "trial": row["trial"] + 1,
+                "status": row["status"],
+                "current_turn": row["revision"] or 0,
+                "target_turns": row["target_turns"],
+                "participants": participants,
+                "latest_activity": row["latest_activity"],
+                "failure": row["error"],
+                "environment": manifest.get("environment", {}),
+                "frozen": manifest,
+                "updated": row["updated"],
+            }
+
+        def aggregate_status(children):
+            priority = {
+                "succeeded": 0,
+                "failed": 1,
+                "stopped": 2,
+                "interrupted": 3,
+                "queued": 4,
+                "running": 5,
+            }
+            return max(children, key=lambda child: priority[child["status"]])["status"]
+
+        with self.transaction() as db:
+            run_rows = db.execute(
+                "SELECT r.*,e.revision,e.participants AS participants_json,e.manifest AS manifest_json "
+                "FROM session_runs r LEFT JOIN environments e ON e.id=r.environment "
+                "WHERE r.tenant=? ORDER BY r.created,r.scenario,r.trial",
+                (who.tenant,),
+            ).fetchall()
+            records = {row["environment"]: session_record(row) for row in run_rows}
+            experiments = []
+            for experiment in db.execute(
+                "SELECT * FROM experiments WHERE tenant=? ORDER BY created DESC", (who.tenant,)
+            ):
+                children = [
+                    records[row["environment"]] for row in run_rows if row["experiment"] == experiment["id"]
+                ]
+                metric_values: dict[str, list[float]] = {}
+                for child in children:
+                    latest = db.execute(
+                        "SELECT body FROM reports WHERE environment=? ORDER BY revision DESC LIMIT 1",
+                        (child["id"],),
+                    ).fetchone()
+                    if latest:
+                        for key, value in json.loads(latest["body"]).get("metrics", {}).items():
+                            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                                metric_values.setdefault(key, []).append(float(value))
+                scores = {key: sum(values) / len(values) for key, values in sorted(metric_values.items())}
+                latest = max(children, key=lambda child: child["updated"], default=None)
+                scenarios = []
+                for snapshot in db.execute(
+                    "SELECT * FROM scenario_snapshots WHERE experiment=? ORDER BY position",
+                    (experiment["id"],),
+                ):
+                    body = json.loads(snapshot["body"])
+                    scenario_sessions = [
+                        child for child in children if child["scenario_id"] == snapshot["scenario"]
+                    ]
+                    scenario_latest = max(scenario_sessions, key=lambda child: child["updated"], default=None)
+                    scenario_counts = Counter(child["status"] for child in scenario_sessions)
+                    scenario_status = aggregate_status(scenario_sessions)
+                    scenarios.append(
+                        {
+                            "kind": "scenario",
+                            "id": snapshot["scenario"],
+                            "input": body["input"],
+                            "reference": body.get("reference"),
+                            "metadata": body.get("metadata", {}),
+                            "status": scenario_status,
+                            "completed": sum(
+                                scenario_counts[status]
+                                for status in ("succeeded", "failed", "stopped", "interrupted")
+                            ),
+                            "total": len(scenario_sessions),
+                            "running": scenario_counts["running"],
+                            "queued": scenario_counts["queued"],
+                            "failed": scenario_counts["failed"],
+                            "latest_activity": (
+                                scenario_latest["latest_activity"] if scenario_latest else None
+                            ),
+                            "sessions": scenario_sessions,
+                            "updated": scenario_latest["updated"] if scenario_latest else 0,
+                        }
+                    )
+                experiments.append(
+                    {
+                        "kind": "experiment",
+                        "id": experiment["id"],
+                        "name": experiment["name"],
+                        "status": experiment["status"],
+                        "progress": {
+                            "completed": experiment["completed"],
+                            "total": experiment["total"],
+                        },
+                        "running": experiment["running"],
+                        "queued": experiment["queued"],
+                        "failed": experiment["failed"],
+                        "latest_activity": latest["latest_activity"] if latest else None,
+                        "score_summary": scores,
+                        "scenarios": scenarios,
+                        "sessions": children,
+                        "updated": experiment["updated"],
+                    }
+                )
+            standalone = [records[row["environment"]] for row in run_rows if row["experiment"] is None]
+            # Older advanced-runtime sessions predate orchestration records and remain top-level.
+            for row in db.execute(
+                "SELECT * FROM environments e WHERE tenant=? AND NOT EXISTS "
+                "(SELECT 1 FROM session_runs r WHERE r.environment=e.id) ORDER BY id DESC",
+                (who.tenant,),
+            ):
+                manifest = json.loads(row["manifest"])
+                standalone.append(
+                    {
+                        "kind": "session",
+                        "id": row["id"],
+                        "scenario_id": manifest.get("scenario", "synthetic"),
+                        "trial": 1,
+                        "status": row["status"],
+                        "current_turn": row["revision"],
+                        # Advanced-runtime sessions have a safety cap, not a scheduled turn target.
+                        "target_turns": None,
+                        "participants": list(json.loads(row["participants"])),
+                        "latest_activity": None,
+                        "failure": None,
+                        "environment": manifest.get("environment", {}),
+                        "frozen": manifest,
+                        "updated": 0,
+                    }
+                )
+            summary = {
+                "running": sum(row["status"] == "running" for row in records.values()),
+                "queued": sum(row["status"] == "queued" for row in records.values()),
+                "failed": sum(row["status"] == "failed" for row in records.values()),
+            }
+            cursor = db.execute(
+                "SELECT coalesce(max(id),0) FROM event_outbox WHERE tenant=?", (who.tenant,)
+            ).fetchone()[0]
+            return {
+                "summary": summary,
+                "experiments": experiments,
+                "standalone": standalone,
+                "cursor": cursor,
+            }
+
     def verify(self, environment, who):
         if who.role not in ("researcher", "scorer"):
             raise Forbidden("full evidence authority required")
@@ -279,6 +485,7 @@ class EvidenceStore:
             elif any(p not in participants and p != "*" for p in audience):
                 raise ValueError("unknown artifact audience")
             key = uid()
+            self._check_artifact_budget(db, environment, len(data))
             self._write_artifact(environment, key, data)
             sha = hashlib.sha256(data).hexdigest()
             db.execute(
@@ -294,6 +501,10 @@ class EvidenceStore:
                 audience,
             )
             return {"id": key, "sha256": sha, "size": len(data), "media_type": media_type}
+
+    def _check_artifact_budget(self, db, environment, size):
+        """Optional hosted aggregate storage admission under the environment lock."""
+        return None
 
     def _write_artifact(self, environment, key, data):
         folder = self.root / "artifacts" / environment

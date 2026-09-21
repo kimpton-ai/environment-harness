@@ -169,6 +169,13 @@ def test_api_and_viewer(setup):
     client = TestClient(create_app(session))
     headers = {"Authorization": "Bearer " + token}
     assert client.get("/").status_code == 200
+    assert client.get("/home").status_code == 200
+    assert client.get(f"/session/{environment}/overview").status_code == 200
+    assert client.get(f"/session/{environment}/turns").status_code == 200
+    assert client.get(f"/session/{environment}/progression").status_code == 200
+    assert client.get(f"/session/{environment}/reports").status_code == 200
+    assert client.get(f"/session/{environment}/compare-turns").status_code == 404
+    assert client.get(f"/session/{environment}/unknown").status_code == 404
     assert client.get("/viewer/app.js").status_code == 200
     assert client.get("/viewer/timeline.js").status_code == 200
     page = client.get("/").text

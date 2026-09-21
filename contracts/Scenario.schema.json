@@ -1,0 +1,38 @@
+{
+  "$id": "urn:environment-harness:v1:Scenario",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A stable, serializable input snapshot for an environment session.",
+  "properties": {
+    "id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Id",
+      "type": "string"
+    },
+    "input": {
+      "title": "Input"
+    },
+    "metadata": {
+      "additionalProperties": true,
+      "title": "Metadata",
+      "type": "object"
+    },
+    "reference": {
+      "anyOf": [
+        {},
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reference"
+    }
+  },
+  "required": [
+    "id",
+    "input"
+  ],
+  "title": "Scenario",
+  "type": "object"
+}

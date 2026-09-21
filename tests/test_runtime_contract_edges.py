@@ -73,6 +73,20 @@ def test_session_creation_is_scoped_idempotent_and_split_safe(tmp_path):
         session.create(spec.model_copy(update={"seed": 2}), researcher, environment_id=identifier)
     with pytest.raises(Forbidden, match="researcher required"):
         session.list(agent)
+    for invalid_limit in (0, 1001):
+        with pytest.raises(ValueError, match="page size"):
+            session.list_page(researcher, invalid_limit)
+    for invalid_cursor in ("short", "g" * 32):
+        with pytest.raises(ValueError, match="cursor"):
+            session.list_page(researcher, cursor=invalid_cursor)
+    session.create(spec, researcher, environment_id="b" * 32)
+    session.create(spec, researcher, environment_id="c" * 32)
+    page, cursor = session.list_page(researcher, limit=2)
+    assert [row["id"] for row in page] == ["c" * 32, "b" * 32]
+    assert cursor == "b" * 32
+    final_page, final_cursor = session.list_page(researcher, limit=2, cursor=cursor)
+    assert [row["id"] for row in final_page] == [identifier]
+    assert final_cursor is None
     scoped_agent = agent.model_copy(update={"environment": identifier})
     assert "experiment" not in session.get(identifier, scoped_agent)
 

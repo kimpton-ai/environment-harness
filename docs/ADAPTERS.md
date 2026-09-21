@@ -5,6 +5,9 @@
 | Python client | Authenticated commands, observations, actions, event replay | Supplier capabilities are authoritative. No automatic write retry. |
 | TypeScript client | Typed session reads, commands, replay and live polling | Same remote contract. Token held in memory. |
 | JSON environment process | Separate supplier process; typed state, observations and transitions | Supplier serializes state. Process handles are disposable. |
+| HTTP environment worker | Authenticated remote execution of the same serialized environment contract | Supervisor retains evidence and credentials. No implicit write retry; supplier methods must be pure over serialized inputs. |
+| ORS HTTP/SSE | Explicit session, task discovery, tool calls and original task receipts | Session handles are not checkpoints. Interrupted writes remain outcome-unknown until reconciled with the recorded task ID. |
+| Legacy environment | Adapts a `world-session.v1` implementation into a distinct native version | Creates new environment sessions only; historical manifests and evidence still require their original reader. |
 | Command agent | Bounded JSON stdin/stdout, timeout, clean environment and workspace | No process-memory recovery. Trusted local execution only. |
 | HTTP agent | Authenticated `/act` request | Opaque internals; no implied checkpoint hook. |
 | Instrumented model | Rendered requests, responses and compaction metadata | Supplied generation callback owns provider transport and spending controls. |
@@ -16,7 +19,7 @@
 | Verifiers | Existing 0.1.14 rollout invocation and authorized training projection | The bridge accepts 0.1.14, while the locked optional dependency is 0.3.1, so it currently fails closed as unsupported. No v1 taskset assumptions or Prime package are claimed. |
 | Docker | Digest-pinned isolated workers with no network, non-root user and resource bounds | Container handles can be inspected/stopped. No arbitrary process checkpoint. |
 | Modal | Direct Sandbox SDK start/status/stop with network blocked | Requires an operator-supplied app/image. No cloud execution was performed. |
-| PostgreSQL/S3 | Dedicated metadata schema and protected object backend | Implementation supplied; hosted recovery and durability qualification remain open. |
+| PostgreSQL/S3 | Dedicated metadata schema, aggregate environment payload admission and receipt-checked tenant erasure | Production workload, backup/restore and durability qualification remain open. Erasure requires stopped workers and an unversioned runtime bucket. |
 
 Adapters are optional. Their existence does not mean their upstream dependencies are installed, that a private simulator exists, or that hosted execution is qualified. Browser and terminal agents are programs running inside isolated workers. The harness does not itself implement a browser engine or terminal emulator.
 

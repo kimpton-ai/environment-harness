@@ -10,6 +10,23 @@ from .runtime import tuples
 from .store import encode
 
 
+def dispatch(env, method, args):
+    if method == "spec":
+        return env.spec.model_dump(mode="json")
+    if method == "initialize":
+        return env.initialize(ExperimentSpec.model_validate(args["experiment"]))
+    if method == "observe":
+        return env.observe(args["state"], args["participant"])
+    if method == "intervene":
+        return env.intervene(args["state"], args["changes"])
+    if method == "resolve":
+        rng = random.Random()
+        rng.setstate(tuples(args["rng"]))
+        transition = env.resolve(args["state"], args["actions"], rng, args["events"])
+        return {"transition": transition.model_dump(mode="json"), "rng": rng.getstate()}
+    raise ValueError("unknown worker method")
+
+
 def main():
     env = environment(sys.argv[1] if len(sys.argv) > 1 else "synthetic-protocol")
     while raw := sys.stdin.buffer.readline(16777217):
@@ -17,22 +34,7 @@ def main():
             if len(raw) > 16777216 or not raw.endswith(b"\n"):
                 raise ValueError("request framing")
             request = json.loads(raw)
-            method, args = request["method"], request["arguments"]
-            if method == "spec":
-                result = env.spec.model_dump(mode="json")
-            elif method == "initialize":
-                result = env.initialize(ExperimentSpec.model_validate(args["experiment"]))
-            elif method == "observe":
-                result = env.observe(args["state"], args["participant"])
-            elif method == "intervene":
-                result = env.intervene(args["state"], args["changes"])
-            elif method == "resolve":
-                rng = random.Random()
-                rng.setstate(tuples(args["rng"]))
-                transition = env.resolve(args["state"], args["actions"], rng, args["events"])
-                result = {"transition": transition.model_dump(mode="json"), "rng": rng.getstate()}
-            else:
-                raise ValueError("unknown worker method")
+            result = dispatch(env, request["method"], request["arguments"])
             print(encode({"result": result}), flush=True)
         except Exception:
             print(encode({"error": "worker_failure"}), flush=True)

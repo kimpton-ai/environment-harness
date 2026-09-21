@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
 from threading import Event
-from typing import Any, Literal, Protocol
+from typing import Any, Generic, Literal, Protocol, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -9,10 +10,25 @@ from .motor_contracts import MotorProfile
 
 Json = dict[str, Any]
 Mode = Literal["sequential", "simultaneous", "event"]
+InputT = TypeVar("InputT")
 
 
 class Record(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class Scenario(Record, Generic[InputT]):
+    """A stable, serializable input snapshot for an environment session."""
+
+    id: str = Field(min_length=1, max_length=200)
+    input: InputT
+    reference: Any | None = None
+    metadata: Json = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def serializable(self):
+        json.dumps(self.model_dump(mode="json"), allow_nan=False)
+        return self
 
 
 class Capabilities(Record):
@@ -41,6 +57,7 @@ class EnvironmentSpec(Record):
     implementation: str = Field(min_length=1)
     observation_schema: Json = Field(default_factory=lambda: {"type": "object"})
     action_schema: Json = Field(default_factory=lambda: {"type": "object"})
+    scenario_schema: Json = Field(default_factory=lambda: {"type": "object"})
     scheduling: Mode
     modalities: tuple[str, ...] = ("text", "json")
     motor_skills: tuple[str, ...] = ()
@@ -76,6 +93,9 @@ class ExperimentSpec(Record):
     participants: tuple[AgentSpec, ...] = Field(min_length=1)
     seed: int = 0
     scenario: str = "synthetic"
+    scenario_input: Any = Field(default_factory=dict)
+    scenario_reference: Any | None = None
+    scenario_metadata: Json = Field(default_factory=dict)
     split: Literal["training", "heldout"] = "heldout"
     purpose: Literal["evaluation", "training"] = "evaluation"
     time_boundary: str = "unspecified"

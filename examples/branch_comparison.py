@@ -21,7 +21,7 @@ def experiment(directory):
             AgentSpec(id=p, implementation="synthetic-agent@1", policy_version="1", checkpoint=True)
             for p in ("alice", "bob")
         ),
-        policy=RunPolicy(max_turns=20),
+        policy=RunPolicy(max_turns=5),
         scoring_versions=("synthetic-total@1",),
     )
 
@@ -71,6 +71,7 @@ def experiment(directory):
         "checkpoint": checkpoint["id"],
         "observations_at_checkpoint": observations,
         "totals": {w: session.observe(w, who, "alice")["payload"]["total"] for w in (parent, child)},
+        "statuses": {w: session.get(w, who)["status"] for w in (parent, child)},
         "comparison": compare(store, [parent, child], who),
         "evidence": {w: store.verify(w, who) for w in (parent, child)},
     }

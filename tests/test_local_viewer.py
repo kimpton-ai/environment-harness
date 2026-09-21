@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from environment_harness import EnvironmentSession, EvidenceStore, Principal, local_viewer
 from environment_harness.fixtures import SyntheticEnvironment
-from environment_harness.local_viewer import LocalViewerLogin
+from environment_harness.local_viewer import LocalViewerAccess
 from environment_harness.server import create_app
 
 ORIGIN = "http://127.0.0.1:8765"
@@ -15,70 +15,62 @@ ORIGIN = "http://127.0.0.1:8765"
 def local_service(tmp_path):
     session = EnvironmentSession(EvidenceStore(tmp_path), SyntheticEnvironment())
     principal = Principal(tenant="local", subject="researcher", role="researcher")
-    login = LocalViewerLogin(ORIGIN, session.store.issue(principal))
-    app = create_app(session, local_login=login)
-    return session, login, app
+    access = LocalViewerAccess(ORIGIN, session.store.issue(principal))
+    app = create_app(session, local_access=access)
+    return session, access, app
 
 
-def test_one_time_connection_keeps_api_authenticated(local_service):
-    session, login, app = local_service
+def test_local_viewer_reconnects_while_api_stays_authenticated(local_service):
+    session, access, app = local_service
     client = TestClient(app, base_url=ORIGIN, client=("127.0.0.1", 50000))
-    headers = {"Origin": ORIGIN, "X-Local-Login": login.ticket}
+    headers = {"Origin": ORIGIN}
     assert client.get("/v1/environments").status_code == 401
     html = client.get("/").text
-    assert login.ticket not in html and login.credential not in html
-    response = client.post("/local/connect", headers=headers)
-    assert response.status_code == 200
-    assert response.headers["Cache-Control"] == "no-store"
-    credential = response.json()["token"]
+    assert access.credential not in html
+    first = client.post("/local/connect", headers=headers)
+    second = client.post("/local/connect", headers=headers)
+    assert first.status_code == second.status_code == 200
+    assert first.headers["Cache-Control"] == "no-store"
+    assert first.json() == second.json()
+    credential = first.json()["token"]
     assert session.store.authenticate(credential).tenant == "local"
     assert (
         client.get("/v1/environments", headers={"Authorization": "Bearer " + credential}).status_code == 200
     )
-    assert client.post("/local/connect", headers=headers).status_code == 403
     assert client.get("/v1/environments").status_code == 401
+    assert client.get("/viewer/config").json() == {"authentication": "local"}
 
 
 @pytest.mark.parametrize(
-    "origin,base_url,peer,ticket",
+    "origin,base_url,peer",
     [
-        ("https://attacker.invalid", ORIGIN, "127.0.0.1", "valid"),
-        (None, ORIGIN, "127.0.0.1", "valid"),
-        ("http://attacker.invalid", "http://attacker.invalid", "127.0.0.1", "valid"),
-        (ORIGIN, ORIGIN, "203.0.113.1", "valid"),
-        (ORIGIN, ORIGIN, "127.0.0.1", "wrong"),
+        ("https://attacker.invalid", ORIGIN, "127.0.0.1"),
+        (None, ORIGIN, "127.0.0.1"),
+        ("http://attacker.invalid", "http://attacker.invalid", "127.0.0.1"),
+        (ORIGIN, ORIGIN, "203.0.113.1"),
     ],
 )
-def test_local_connection_rejects_other_origins_hosts_peers_and_tickets(
+def test_local_connection_rejects_other_origins_hosts_and_peers(
     local_service,
     origin,
     base_url,
     peer,
-    ticket,
 ):
-    _, login, app = local_service
+    _, _, app = local_service
     client = TestClient(app, base_url=base_url, client=(peer, 50000))
-    headers = {"X-Local-Login": login.ticket if ticket == "valid" else ticket, "X-Forwarded-For": "127.0.0.1"}
+    headers = {"X-Forwarded-For": "127.0.0.1"}
     if origin is not None:
         headers["Origin"] = origin
     assert client.post("/local/connect", headers=headers).status_code == 403
-    assert login.ticket
-
-
-def test_expired_connection_link(local_service):
-    _, login, app = local_service
-    login.expires = 0
-    client = TestClient(app, base_url=ORIGIN, client=("127.0.0.1", 50000))
-    response = client.post("/local/connect", headers={"Origin": ORIGIN, "X-Local-Login": login.ticket})
-    assert response.status_code == 403
 
 
 def test_supplier_service_has_no_local_connection_endpoint(local_service):
-    session, login, _ = local_service
+    session, _, _ = local_service
     client = TestClient(create_app(session), base_url=ORIGIN, client=("127.0.0.1", 50000))
-    response = client.post("/local/connect", headers={"Origin": ORIGIN, "X-Local-Login": login.ticket})
+    response = client.post("/local/connect", headers={"Origin": ORIGIN})
     assert response.status_code == 404
     assert client.get("/v1/environments").status_code == 401
+    assert client.get("/viewer/config").json() == {"authentication": "credential"}
 
 
 def test_browser_opening_uses_explicit_known_browsers(monkeypatch):
@@ -122,16 +114,15 @@ def test_browser_opening_and_readiness_fail_safely(monkeypatch, capsys):
     )
     assert not local_viewer.open_browser("http://localhost")
 
-    login = local_viewer.LocalViewerLogin("http://localhost", "credential")
     server = type("Server", (), {"started": True, "should_exit": False})()
     monkeypatch.setattr(local_viewer, "open_browser", lambda _url: False)
-    local_viewer.open_when_ready(server, login)
-    assert "Could not open a browser" in capsys.readouterr().out
+    local_viewer.open_when_ready(server, "http://localhost/home")
+    assert capsys.readouterr().out == ("Could not open a browser. Open http://localhost/home manually.\n")
 
     server = type("Server", (), {"started": False, "should_exit": True})()
-    local_viewer.open_when_ready(server, login)
+    local_viewer.open_when_ready(server, "http://localhost/home")
 
     server = type("Server", (), {"started": True, "should_exit": False})()
     monkeypatch.setattr(local_viewer, "open_browser", lambda _url: (_ for _ in ()).throw(OSError()))
-    local_viewer.open_when_ready(server, login)
+    local_viewer.open_when_ready(server, "http://localhost/home")
     assert "Could not open a browser" in capsys.readouterr().out

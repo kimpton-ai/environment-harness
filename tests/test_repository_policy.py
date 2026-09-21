@@ -267,7 +267,8 @@ def test_prepare_release_updates_all_version_surfaces(tmp_path):
     assert version == "0.3.0"
     assert release_version.current_version(tmp_path) == version
     assert 'name = "environment-harness"\nversion = "0.3.0"' in (tmp_path / "uv.lock").read_text()
-    assert "--branch v0.3.0" in (tmp_path / "README.md").read_text()
+    assert 'python -m pip install "environment-harness[server]"' in (tmp_path / "README.md").read_text()
+    assert "--branch v" not in (tmp_path / "README.md").read_text()
     assert "environment-harness-client-0.3.0.tgz" in (tmp_path / "packages/typescript/README.md").read_text()
     assert (
         "environment-harness-client-0.2.2.tgz" not in (tmp_path / "packages/typescript/README.md").read_text()
@@ -312,10 +313,10 @@ def test_prepare_release_candidate_increment_and_finalization(tmp_path):
     assert json.loads((tmp_path / "packages/typescript/package.json").read_text())["version"] == "0.2.3"
 
 
-def test_readme_names_supported_uv_version():
+def test_contributing_names_supported_uv_version():
     root = Path(__file__).resolve().parents[1]
 
-    assert "uv 0.12.0 or later" in (root / "README.md").read_text()
+    assert "uv 0.12.0" in (root / "CONTRIBUTING.md").read_text()
 
 
 def test_prepare_release_requires_unreleased_notes(tmp_path):

@@ -68,16 +68,34 @@ def test_remote_client_validates_transport_and_builds_public_requests(monkeypatc
         participants=(AgentSpec(id="a", implementation="test", policy_version="1"),),
     )
     assert client.create(spec)[0:3] == ("POST", "/v1/environments", spec.model_dump(mode="json"))
+    assert client.list(limit=25, cursor="a" * 32)[1].endswith("/v1/environments?limit=25&cursor=" + "a" * 32)
     assert client.get("a/b")[1].endswith("a%2Fb")
     assert client.observe("env", "a/b")[1].endswith("?participant=a%2Fb")
     assert client.submit("env", {"value": 1})[1].endswith("/actions")
     assert client.command("env", "cancel", reason="test")[2]["arguments"] == {"reason": "test"}
     assert client.agent_work("env")[1].endswith("/agent-work")
     assert client.cancel("env")[2]["operation"] == "cancel"
+    assert client.advance("env")[2]["operation"] == "advance"
+    assert client.credentials("env", "a", ttl=30)[2] == {"participant": "a", "ttl": 30}
+    assert client.reports("env")[1].endswith("/reports")
     assert client.events("env", 7)[1].endswith("events?after=7")
+    assert client.activity_snapshot()[1] == "/v1/activity/snapshot"
+    assert client.activity(3)[1].endswith("activity/events?after=3")
+    assert client.experiment_activity("a/b", 4)[1].endswith("experiments/a%2Fb/events?after=4")
+    assert client.session_activity("a/b", 5)[1].endswith("environments/a%2Fb/activity?after=5")
+
+
+def test_advanced_module_exposes_the_low_level_workflow():
+    import environment_harness.advanced as advanced
+
+    assert advanced.EnvironmentSession is not None
+    assert advanced.ExperimentSpec is ExperimentSpec
+    assert callable(advanced.run)
 
 
 def test_remote_client_redacts_failures_and_bounds_responses():
+    from environment_harness.errors import ServiceError
+
     client = EnvironmentClient("https://example.test", "credential")
 
     class Opener:
@@ -88,10 +106,62 @@ def test_remote_client_redacts_failures_and_bounds_responses():
 
     opener = Opener()
     client.opener = opener
+    body = json.dumps(
+        {
+            "error": {
+                "code": "forbidden",
+                "message": "Environment unavailable",
+                "status": 403,
+                "request_id": "a" * 32,
+                "timestamp": "2026-09-21T12:00:00.000Z",
+                "details": [{"field": "environment", "message": "Unavailable", "type": "forbidden"}],
+            }
+        }
+    ).encode()
+    opener.error = urllib.error.HTTPError(
+        "https://example.test",
+        403,
+        "forbidden",
+        {"Content-Type": "application/json"},
+        io.BytesIO(body),
+    )
+    with pytest.raises(ServiceError, match="HTTP 403: Environment unavailable") as structured:
+        client.request("GET", "/")
+    assert structured.value.code == "forbidden"
+    assert structured.value.status == 403
+    assert structured.value.request_id == "a" * 32
+    assert structured.value.details == [
+        {"field": "environment", "message": "Unavailable", "type": "forbidden"}
+    ]
+
     opener.error = urllib.error.HTTPError("https://example.test", 403, "secret body", {}, None)
     with pytest.raises(HarnessError, match="HTTP 403") as denied:
         client.request("GET", "/")
     assert "credential" not in str(denied.value) and "secret body" not in str(denied.value)
+    for unsafe in (
+        b"x" * 4097,
+        b"not-json",
+        json.dumps(
+            {
+                "error": {
+                    "code": "forbidden",
+                    "message": "Environment unavailable",
+                    "status": 200,
+                    "request_id": "request",
+                    "timestamp": "now",
+                }
+            }
+        ).encode(),
+    ):
+        opener.error = urllib.error.HTTPError(
+            "https://example.test",
+            403,
+            "private",
+            {"Content-Type": "application/json"},
+            io.BytesIO(unsafe),
+        )
+        with pytest.raises(HarnessError, match="HTTP 403"):
+            client.request("GET", "/")
     opener.error = urllib.error.URLError("private network detail")
     with pytest.raises(HarnessError, match="reconcile"):
         client.request("POST", "/")

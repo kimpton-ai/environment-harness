@@ -6,12 +6,15 @@ GitHub settings are part of the security boundary and cannot be enforced by file
 - at least one independent approval, required CODEOWNERS approval, dismissal of stale approvals, and approval of the complete commit range;
 - blocked direct pushes, force pushes, branch deletion, and ordinary administrator/team bypasses;
 - a `v*` tag ruleset allowing creation only by release maintainers, while blocking update/deletion and automation bypass;
-- protected `github-release` environment approval by a security/release maintainer other than the release PR author;
-- a protected `pypi` environment with the same independent-review requirement;
-- immutable GitHub Releases and GitHub Private Vulnerability Reporting; and
+- protected `github-release` environment approval by a security/release maintainer other than the release PR author, with administrator bypass disabled;
+- a protected `pypi` environment with the same independent-review requirement and administrator bypass disabled;
+- GitHub Actions restricted to GitHub-owned actions and the explicitly approved third-party actions already used by the workflows, with full commit-SHA pinning required;
+- Dependabot alerts and security updates, immutable GitHub Releases, and GitHub Private Vulnerability Reporting; and
 - review of the complete release commit range before a maintainer creates a tag.
 
-Do not install a release GitHub App or store a long-lived release credential in Actions. Release preparation and protected tag creation are deliberate maintainer operations. Dependency updates are never auto-merged. Review branch rules after ownership changes and record exceptions in a tracked security issue.
+Do not install a release GitHub App or store a long-lived release credential in Actions. Release preparation and protected tag creation are deliberate maintainer operations. Dependabot may open security-update pull requests, but dependency updates are never auto-merged. Review branch rules and the Actions allowlist after ownership or workflow changes, and record exceptions in a tracked security issue.
+
+Release immutability applies when a release is published after the repository setting is enabled. A legacy mutable release cannot be locked retroactively through GitHub's release settings; replacing one requires a separately reviewed migration because it changes public release metadata and artifact availability.
 
 Before the first publication, create a pending Trusted Publisher on production PyPI for project `environment-harness`. Create it within the Kimpton PyPI organization when that organization is ready. Use GitHub owner `kimpton-ai`, repository `environment-harness`, workflow filename `release.yml`, and environment name `pypi`. The pending publisher creates the project on its first successful publication, so do not create an API token or add a PyPI password to GitHub.
 

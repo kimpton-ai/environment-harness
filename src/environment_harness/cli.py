@@ -1,17 +1,17 @@
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 
 from . import presentation
-from .contracts import AgentSpec, ExperimentSpec, Principal, RunPolicy
+from .contracts import ExperimentSpec, Principal
 from .errors import HarnessError
 from .evaluation import compare, rollouts
-from .fixtures import SyntheticAgent, SyntheticEnvironment
+from .fixtures import SyntheticEnvironment
 from .plugins import doctor, environment
 from .runner import run
 from .runtime import EnvironmentSession
+from .showcase import create_synthetic_review_demo
 from .store import EvidenceStore, encode
 
 
@@ -30,7 +30,7 @@ def main():
     serve = sub.add_parser("serve")
     serve.add_argument("--port", type=int, default=8765)
     serve.add_argument("--environment", default="synthetic-protocol")
-    serve.add_argument("--open", action="store_true", help="Open and connect the local browser viewer")
+    serve.add_argument("--open", action="store_true", help="Open the local browser viewer")
     for name in ("replay", "attach", "checkpoint", "resume", "cancel", "export"):
         command = sub.add_parser(name)
         command.add_argument("environment")
@@ -92,18 +92,9 @@ def main():
     session = EnvironmentSession(store, env)
     if args.command in ("quickstart", "run"):
         if args.command == "quickstart":
-            spec = ExperimentSpec(
-                environment=env.spec,
-                participants=tuple(
-                    AgentSpec(id=p, implementation="synthetic-agent@1", policy_version="1", checkpoint=True)
-                    for p in ("alice", "bob")
-                ),
-                purpose="training" if args.training else "evaluation",
-                split="training" if args.training else "heldout",
-                policy=RunPolicy(max_turns=max(args.turns + 10, 20)),
-                scoring_versions=("synthetic-control@1",),
-            )
-            agents = {p.id: SyntheticAgent() for p in spec.participants}
+            result = create_synthetic_review_demo(store, who, turns=args.turns, training=args.training)
+            print(json.dumps(result, indent=2))
+            return
         else:
             from .adapters.programs import CommandAgent
 
@@ -120,26 +111,24 @@ def main():
 
         import uvicorn
 
-        from .local_viewer import LocalViewerLogin, open_when_ready
+        from .local_viewer import LocalViewerAccess, open_when_ready
         from .server import create_app
 
         credential = store.issue(who, 86400)
-        path = store.root / "researcher-token"
-        path.write_text(credential + "\n")
-        os.chmod(path, 0o600)
-        print(f"Viewer: http://127.0.0.1:{args.port}\nCredential file: {path}", flush=True)
-        login = LocalViewerLogin(f"http://127.0.0.1:{args.port}", credential) if args.open else None
+        origin = f"http://127.0.0.1:{args.port}"
+        print(f"Viewer: {origin}", flush=True)
+        access = LocalViewerAccess(origin, credential)
         server = uvicorn.Server(
             uvicorn.Config(
-                create_app(session, local_login=login),
+                create_app(session, local_access=access),
                 host="127.0.0.1",
                 port=args.port,
                 access_log=False,
                 proxy_headers=False,
             )
         )
-        if login is not None:
-            threading.Thread(target=open_when_ready, args=(server, login), daemon=True).start()
+        if args.open:
+            threading.Thread(target=open_when_ready, args=(server, f"{origin}/home"), daemon=True).start()
         try:
             server.run()
         except KeyboardInterrupt:

@@ -6,7 +6,7 @@ The supplier service owns the environment. HTTPS commands use bearer credentials
 
 Administrative Python methods are trusted embedding APIs. They must not be exposed directly to untrusted agents. Store directories are private to the operating-system account. SQL credentials, signing keys, model credentials and resource handles belong to the server or worker scope.
 
-The loopback CLI's `serve --open` option opens a browser with a single-use connection ticket in the URL fragment. The viewer removes that fragment and exchanges the ticket through `POST /local/connect`, which requires the exact loopback origin and a loopback peer. Tickets expire after five minutes and cannot be reused. This endpoint is absent from ordinary supplier applications. The CLI disables proxy-header trust. The local viewer stores the resulting bearer credential in tab-scoped session storage for refreshes; manual connections retain credentials only in page memory. Every supplier API request still requires its bearer credential.
+The loopback CLI's `serve` command configures automatic local viewer access independently of browser launch. The viewer reads its non-secret authentication mode from `GET /viewer/config` and exchanges local access through `POST /local/connect`, which requires the exact loopback origin and a loopback peer. The endpoint supports refreshes and new tabs, is absent from ordinary supplier applications, and never places its researcher credential in a URL, HTML, browser storage or a token file. `serve --open` only opens the plain viewer URL. The CLI disables proxy-header trust. Manual supplier connections retain credentials only in page memory, and every supplier API request still requires its bearer credential.
 
 ## API
 
@@ -18,6 +18,10 @@ The loopback CLI's `serve --open` option opens a browser with a single-use conne
 | Authorized observation | `GET /v1/environments/{id}/observation` |
 | Submit decision | `POST /v1/environments/{id}/actions` |
 | Events | `GET /v1/environments/{id}/events?after=CURSOR` |
+| Activity snapshot | `GET /v1/activity/snapshot` |
+| Global activity | `GET /v1/activity/events?after=CURSOR` |
+| Experiment activity | `GET /v1/experiments/{id}/events?after=CURSOR` |
+| Environment-session activity | `GET /v1/environments/{id}/activity?after=CURSOR` |
 | Lifecycle | `POST /v1/environments/{id}/commands` |
 | Participant token | `POST /v1/environments/{id}/credentials` |
 | Journal external intent | `POST /v1/environments/{id}/operations` |
@@ -26,11 +30,38 @@ The loopback CLI's `serve --open` option opens a browser with a single-use conne
 | Evidence/training export | `GET /v1/environments/{id}/export?format=evidence` or `training` |
 | Comparison | `POST /v1/compare` |
 
+Every HTTP error uses one traceable envelope. `request_id` also appears in the `X-Request-ID` response header; operators may use it to correlate safe server-side logs without recording credentials or request bodies. Validation details identify fields but omit submitted values.
+
+```json
+{
+  "error": {
+    "code": "invalid_request",
+    "message": "Request validation failed",
+    "status": 422,
+    "request_id": "32-character request identifier",
+    "timestamp": "2026-09-21T12:00:00.000Z",
+    "details": [
+      {
+        "field": "query.limit",
+        "message": "Input should be greater than or equal to 1",
+        "type": "greater_than_equal"
+      }
+    ]
+  }
+}
+```
+
+`details` is optional. Authentication failures use `401`; authorization and intentionally hidden resource-existence failures use `403`; unsupported HTTP methods use `405`; state conflicts use `409`; schema and request validation failures use `422`; unavailable suppliers use `503`. Budget exhaustion retains `402` so callers can distinguish a frozen session budget from rate limiting. Unexpected failures return a generic `500 internal_error`; response bodies never contain stack traces.
+
 Create requires `X-Operation-ID`, a durable caller-generated 32-character lowercase hex ID. Reusing it with a different experiment fails. Action IDs are stable, participant-bound operations. Accepted and committed receipt retries return the existing result. Do not generate a new ID after an ambiguous timeout.
 
-Commands have shape `{"operation":"checkpoint","arguments":{"lease":{"owner":"worker","epoch":1}}}`. Available commands include lease, release, cancel, resolve, checkpoint, resume, branch, control, memory, transfer external_event and finalize_outcomes. Branch takes a checkpoint ID, declared interventions and an optional durable new-environment ID. Lifecycle commands other than create, branch, cancellation and action submission do not promise general HTTP idempotency. Clients never retry writes implicitly.
+Environment-session listing is bounded to 1–1,000 records and uses a stable keyset cursor. When another page exists, `X-Next-Cursor` and the `Link` header's `rel="next"` URL carry the opaque cursor. Event and activity feeds retain their separate monotonic event cursors.
+
+Commands have shape `{"operation":"checkpoint","arguments":{"lease":{"owner":"worker","epoch":1}}}`. Available commands include advance, lease, release, cancel, resolve, close_phase, checkpoint, reconcile_agent, resume, branch, control, memory, transfer, external_event and finalize_outcomes. `advance` lets a trusted coordinator resolve at most one ready phase for externally controlled participants; it does not execute models. Branch takes a checkpoint ID, declared interventions and an optional durable new-environment ID. Lifecycle commands other than create, branch, cancellation and action submission do not promise general HTTP idempotency. Clients never retry writes implicitly.
 
 Events support JSON pages and finite server-sent-event pages. Reconnect with `Last-Event-ID`; an empty page means caught up. Cursors expose ordering gaps but never hidden event payloads. A viewer can disconnect without blocking evidence writes. Artifact access is authorized against its environment and audience before retrieving any bytes.
+
+Activity feeds use a transactional outbox and global cursor. They cover experiment status and environment-session evidence without exposing the scheduler queue as an authority. SSE pages include a reconnect delay and heartbeat; clients tolerate duplicate IDs and recover from the activity snapshot after reconnecting. Global, experiment and environment-session scopes all require an authenticated tenant principal.
 
 ## Scheduling
 

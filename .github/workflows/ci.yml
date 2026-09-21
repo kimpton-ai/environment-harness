@@ -20,6 +20,19 @@ jobs:
     name: Python
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+        env:
+          POSTGRES_USER: harness
+          POSTGRES_PASSWORD: synthetic-local-only # pragma: allowlist secret (ephemeral test database)
+          POSTGRES_DB: harness
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U harness -d harness"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      ENVIRONMENT_HARNESS_POSTGRES_URL: postgresql://harness:synthetic-local-only@127.0.0.1:5432/harness # pragma: allowlist secret (ephemeral test database)
     permissions:
       contents: read
     steps:
@@ -34,7 +47,7 @@ jobs:
         with:
           version: "0.12.0"
           enable-cache: false
-      - run: uv sync --frozen --extra server
+      - run: uv sync --frozen --extra server --extra postgres
       - run: uv run --no-sync pytest --cov --cov-branch --cov-report=term-missing --cov-report=json --cov-report=xml
       - run: uv run --no-sync python scripts/check_coverage.py
       - run: uv run --no-sync diff-cover coverage.xml --compare-branch=origin/main --fail-under=100
@@ -44,6 +57,7 @@ jobs:
       - run: uv run --no-sync ruff check src tests scripts examples
       - run: uv run --no-sync pyright
       - run: uv run --no-sync python scripts/build_contracts.py --check
+      - run: uv run --no-sync python scripts/build_openapi.py --check
 
   compatibility:
     name: Compatibility (${{ matrix.label }})
@@ -229,3 +243,4 @@ jobs:
       - run: uv run --no-sync python scripts/check_distribution.py
       - run: uv run --no-sync python scripts/check_release.py
       - run: uv run --no-sync python scripts/check_browser_security.py
+      - run: uv run --no-sync python scripts/check_browser_ui.py

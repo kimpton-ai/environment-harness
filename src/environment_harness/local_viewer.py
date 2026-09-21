@@ -1,34 +1,16 @@
-"""Single-use browser connection for the loopback CLI service."""
+"""Automatic browser access for the loopback CLI service."""
 
-import secrets
 import subprocess
 import sys
-import threading
 import time
 import webbrowser
 from dataclasses import dataclass, field
 
-from .errors import Forbidden
 
-
-@dataclass
-class LocalViewerLogin:
+@dataclass(frozen=True)
+class LocalViewerAccess:
     origin: str
     credential: str = field(repr=False)
-    ticket: str = field(default_factory=lambda: secrets.token_urlsafe(32), repr=False)
-    expires: float = field(default_factory=lambda: time.monotonic() + 300)
-    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
-
-    def redeem(self, ticket: str) -> str:
-        with self._lock:
-            if (
-                not self.ticket
-                or time.monotonic() >= self.expires
-                or not secrets.compare_digest(ticket, self.ticket)
-            ):
-                raise Forbidden("Local connection link expired or already used. Restart with serve --open.")
-            self.ticket = ""
-            return self.credential
 
 
 def open_browser(url: str) -> bool:
@@ -52,15 +34,15 @@ def open_browser(url: str) -> bool:
     return False
 
 
-def open_when_ready(server, login: LocalViewerLogin):
+def open_when_ready(server, url: str):
     deadline = time.monotonic() + 30
     while not server.started:
         if server.should_exit or time.monotonic() >= deadline:
             return
         time.sleep(0.05)
     try:
-        opened = open_browser(f"{login.origin}/#local-login={login.ticket}")
+        opened = open_browser(url)
     except OSError:
         opened = False
     if not opened:
-        print("Could not open a browser. Open the viewer and use the printed credential file.", flush=True)
+        print(f"Could not open a browser. Open {url} manually.", flush=True)

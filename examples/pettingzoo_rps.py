@@ -10,6 +10,8 @@ from environment_harness.runner import run
 
 
 class Rock:
+    implementation = "synthetic-rock@1"
+
     def act(self, observation):
         return {"action": 0}
 

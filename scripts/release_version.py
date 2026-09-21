@@ -235,11 +235,6 @@ def prepare_release(
         rf'(^\[\[package\]\]\n(?:(?!^\[\[package\]\]).)*?^name = "environment-harness"\n^version = "){re.escape(previous)}("$)',
         rf"\g<1>{version}\g<2>",
     )
-    _replace_once(
-        root / "README.md",
-        rf"(--branch v){re.escape(previous)}(\s)",
-        rf"\g<1>{version}\g<2>",
-    )
     previous_npm = npm_version(previous)
     version_npm = npm_version(version)
     _replace_once(

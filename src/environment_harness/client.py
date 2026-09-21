@@ -5,13 +5,56 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from .errors import HarnessError
+from .errors import HarnessError, ServiceError
 from .store import encode, uid
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         raise HarnessError("redirect refused")
+
+
+def _service_error(error):
+    fallback = f"Environment service returned HTTP {error.code}"
+    headers = getattr(error, "headers", None)
+    content_type = headers.get("Content-Type", "") if headers is not None else ""
+    if "application/json" not in content_type.lower():
+        return HarnessError(fallback)
+    try:
+        raw = error.read(4097)
+        if len(raw) > 4096:
+            return HarnessError(fallback)
+        envelope = json.loads(raw)
+        body = envelope["error"]
+        code = body["code"]
+        message = body["message"]
+        status = body["status"]
+        request_id = body["request_id"]
+        timestamp = body["timestamp"]
+        details = body.get("details")
+        if (
+            not isinstance(code, str)
+            or not 1 <= len(code) <= 100
+            or not isinstance(message, str)
+            or not 1 <= len(message) <= 512
+            or status != error.code
+            or not isinstance(request_id, str)
+            or not 1 <= len(request_id) <= 128
+            or not isinstance(timestamp, str)
+            or not 1 <= len(timestamp) <= 100
+            or (details is not None and (not isinstance(details, list) or len(details) > 100))
+        ):
+            return HarnessError(fallback)
+        return ServiceError(
+            f"{fallback}: {message}",
+            code=code,
+            status=status,
+            request_id=request_id,
+            timestamp=timestamp,
+            details=details,
+        )
+    except (AttributeError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return HarnessError(fallback)
 
 
 class EnvironmentClient:
@@ -31,7 +74,7 @@ class EnvironmentClient:
         ):
             raise ValueError("HTTPS endpoint required, with no embedded credentials")
         self.endpoint, self.token, self.timeout = endpoint.rstrip("/"), token, timeout
-        self.opener = urllib.request.build_opener(NoRedirect())
+        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
 
     def request(self, method, path, body=None, *, operation_id=None):
         headers = {"Authorization": "Bearer " + self.token, "Accept": "application/json"}
@@ -48,14 +91,20 @@ class EnvironmentClient:
                     raise HarnessError("response size limit exceeded")
                 return json.loads(raw)
         except urllib.error.HTTPError as error:
-            # Server errors never include caller credentials or arbitrary remote response bodies.
-            raise HarnessError(f"environment service returned HTTP {error.code}") from None
+            # Only the bounded standard envelope is surfaced; arbitrary response bodies stay private.
+            raise _service_error(error) from None
         except urllib.error.URLError:
             raise HarnessError("environment service unavailable; reconcile before retrying a write") from None
 
     def create(self, experiment, operation_id=None):
         body = experiment.model_dump(mode="json") if hasattr(experiment, "model_dump") else experiment
         return self.request("POST", "/v1/environments", body, operation_id=operation_id or uid())
+
+    def list(self, *, limit=100, cursor=None):
+        query = {"limit": limit}
+        if cursor is not None:
+            query["cursor"] = cursor
+        return self.request("GET", "/v1/environments?" + urllib.parse.urlencode(query))
 
     def get(self, environment):
         return self.request("GET", "/v1/environments/" + urllib.parse.quote(environment, safe=""))
@@ -84,10 +133,37 @@ class EnvironmentClient:
     def cancel(self, environment):
         return self.command(environment, "cancel")
 
+    def advance(self, environment):
+        return self.command(environment, "advance")
+
+    def credentials(self, environment, participant, *, ttl=3600):
+        return self.request(
+            "POST",
+            f"/v1/environments/{urllib.parse.quote(environment, safe='')}/credentials",
+            {"participant": participant, "ttl": ttl},
+        )
+
+    def reports(self, environment):
+        return self.request("GET", f"/v1/environments/{urllib.parse.quote(environment, safe='')}/reports")
+
     def events(self, environment, after=0):
         return self.request(
             "GET", f"/v1/environments/{urllib.parse.quote(environment, safe='')}/events?after={after}"
         )
+
+    def activity_snapshot(self):
+        return self.request("GET", "/v1/activity/snapshot")
+
+    def activity(self, after=0):
+        return self.request("GET", f"/v1/activity/events?after={after}")
+
+    def experiment_activity(self, experiment, after=0):
+        key = urllib.parse.quote(experiment, safe="")
+        return self.request("GET", f"/v1/experiments/{key}/events?after={after}")
+
+    def session_activity(self, environment, after=0):
+        key = urllib.parse.quote(environment, safe="")
+        return self.request("GET", f"/v1/environments/{key}/activity?after={after}")
 
     def replay(self, environment):
         cursor = 0

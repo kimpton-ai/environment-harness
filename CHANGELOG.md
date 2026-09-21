@@ -2,7 +2,29 @@
 
 ## Unreleased
 
+Typed scenarios now expand into bounded concurrent experiment trials with durable
+status, deterministic seeds and resumable activity feeds. The evidence viewer adds
+experiment grouping, filtering, unequal-length comparison, progression and report
+history. The HTTP service now checks in generated OpenAPI, validates command and
+operation request shapes, and returns one traceable error envelope across routes and
+both SDK clients.
+
+Native implementations can run behind authenticated HTTP workers while a trusted
+supervisor retains the evidence store. External participants can advance ready
+phases through the fenced coordinator. A versioned legacy adapter preserves old
+records, and an ORS HTTP/SSE client retains original task receipts without implicit
+write retries. See [remote workers](docs/REMOTE-WORKERS.md).
+
+Optional motor control adds bounded native, browser and desktop skills with durable
+receipts and an optional Jev selector. Direct execution remains the default.
+
+Hosted PostgreSQL/S3 storage adds aggregate environment payload admission and
+explicit tenant erasure with confirmed object deletion. Erasure includes experiment,
+scenario, environment-session and activity metadata introduced by this release.
+
 Production PyPI publishing now uses short-lived Trusted Publishing credentials and publishes only the reviewed Python wheel and source distribution. Releases support PEP 440 alpha, beta, and release-candidate versions while mapping those versions to npm-compatible SemVer prereleases. Package metadata now includes the rendered README, classifiers, project links, and the `py.typed` marker.
+
+Deployment, release, and viewer-maintenance guides now define the supported local topology, hosted-service qualification boundary, prerelease workflow, generated browser assets, required checks, and documentation triggers for future contributors.
 
 ## 0.2.2 - 2026-09-18
 
