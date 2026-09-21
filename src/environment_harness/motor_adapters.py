@@ -8,6 +8,7 @@ Minecraft, browser, or desktop dependency.
 from __future__ import annotations
 
 import time
+from abc import ABC, abstractmethod
 from copy import deepcopy
 
 from .motor_contracts import MotorCandidate, MotorRequest, MotorStep
@@ -34,21 +35,18 @@ def _target_point(value, label="target"):
     return {axis: _integer(value.get(axis), f"{label}.{axis}") for axis in ("x", "y", "z")}
 
 
-def _subset(expected, actual):
-    if isinstance(expected, dict):
-        return isinstance(actual, dict) and all(key in actual and _subset(value, actual[key]) for key, value in expected.items())
-    if isinstance(expected, list):
-        return expected == actual
-    return expected == actual
-
-
-class _Adapter:
+class _Adapter(ABC):
     def __init__(self, driver, *, max_steps=128):
-        if not all(callable(getattr(driver, name, None)) for name in ("observe", "execute", "stop", "lookup")):
+        if not all(
+            callable(getattr(driver, name, None)) for name in ("observe", "execute", "stop", "lookup")
+        ):
             raise TypeError("driver must provide observe, execute, stop, and lookup")
         if not isinstance(max_steps, int) or not 1 <= max_steps <= 10000:
             raise ValueError("max_steps must be between 1 and 10000")
         self.driver, self.max_steps = driver, max_steps
+
+    @abstractmethod
+    def plan(self, request: MotorRequest, observation: dict) -> tuple[MotorCandidate, ...]: ...
 
     def observe(self):
         return deepcopy(_dict(self.driver.observe(), "observation"))
@@ -72,7 +70,9 @@ class _Adapter:
         if deadline is not None and time.monotonic() >= deadline:
             raise MotorError("motor execution deadline expired")
         payload = {"target": deepcopy(step.target), **deepcopy(step.arguments)}
-        result = self.driver.execute(step.operation, payload, operation_id=operation_id, cancel=cancel, deadline=deadline)
+        result = self.driver.execute(
+            step.operation, payload, operation_id=operation_id, cancel=cancel, deadline=deadline
+        )
         if not isinstance(result, dict):
             raise MotorError("driver returned an invalid receipt")
         return deepcopy(result)
@@ -94,6 +94,7 @@ class _Adapter:
 
     def lookup(self, operation_id):
         return self.driver.lookup(operation_id)
+
 
 class MinecraftMotor(_Adapter):
     """Bounded movement, mining, and crafting over a native Minecraft driver."""
@@ -122,7 +123,11 @@ class MinecraftMotor(_Adapter):
             current_blocks = observation.get("blocks")
             if not isinstance(current_blocks, list) or not current_blocks:
                 raise MotorError("mine target observation is missing")
-            observed = {(b.get("x"), b.get("y"), b.get("z"), b.get("name")) for b in current_blocks if isinstance(b, dict)}
+            observed = {
+                (b.get("x"), b.get("y"), b.get("z"), b.get("name"))
+                for b in current_blocks
+                if isinstance(b, dict)
+            }
             normalized = []
             seen = set()
             for index, block in enumerate(blocks):
@@ -137,7 +142,11 @@ class MinecraftMotor(_Adapter):
                 if key not in observed:
                     raise MotorError("mine target does not match current observation")
                 normalized.append({**point, "name": name})
-            step = MotorStep(operation="mine", target={"blocks": normalized}, arguments={"tool": request.arguments.get("tool")})
+            step = MotorStep(
+                operation="mine",
+                target={"blocks": normalized},
+                arguments={"tool": request.arguments.get("tool")},
+            )
         else:
             recipe = target.get("recipe")
             count = _integer(request.arguments.get("count"), "count")
@@ -147,7 +156,14 @@ class MinecraftMotor(_Adapter):
             if recipes is not None and recipe not in recipes:
                 raise MotorError("craft recipe is not currently available")
             step = MotorStep(operation="craft", target={"recipe": recipe}, arguments={"count": count})
-        return (MotorCandidate(id=f"{request.skill}-direct", description=f"Execute bounded Minecraft {request.skill}", steps=(step,)),)
+        return (
+            MotorCandidate(
+                id=f"{request.skill}-direct",
+                description=f"Execute bounded Minecraft {request.skill}",
+                steps=(step,),
+            ),
+        )
+
 
 class BrowserMotor(_Adapter):
     """Deterministic browser focus, fill, click, and readback routines."""
@@ -169,17 +185,27 @@ class BrowserMotor(_Adapter):
             if not isinstance(text, str) or len(text) > 4096:
                 raise MotorError("fill text is invalid")
             arguments["text"] = text
-        direct = MotorCandidate(id=f"{request.skill}-direct", description=f"Execute bounded browser {request.skill}",
-                                steps=(MotorStep(operation=request.skill, target=target, arguments=arguments),))
+        direct = MotorCandidate(
+            id=f"{request.skill}-direct",
+            description=f"Execute bounded browser {request.skill}",
+            steps=(MotorStep(operation=request.skill, target=target, arguments=arguments),),
+        )
         supports = any(
             element.get("element_id") == target.get("element_id")
             and element.get("selector") == target.get("selector")
             and {"focus", "fill"}.issubset(set(element.get("supported_operations", [])))
-            for element in observation["elements"] if isinstance(element, dict)
+            for element in observation["elements"]
+            if isinstance(element, dict)
         )
         if request.skill == "fill" and supports:
-            focused = MotorCandidate(id="fill-focus-then-fill", description="Focus then fill the same browser element",
-                                     steps=(MotorStep(operation="focus", target=target), MotorStep(operation="fill", target=target, arguments=arguments)))
+            focused = MotorCandidate(
+                id="fill-focus-then-fill",
+                description="Focus then fill the same browser element",
+                steps=(
+                    MotorStep(operation="focus", target=target),
+                    MotorStep(operation="fill", target=target, arguments=arguments),
+                ),
+            )
             return direct, focused
         return (direct,)
 
@@ -198,11 +224,11 @@ class BrowserMotor(_Adapter):
                 continue
             if target.get("selector") is not None and element.get("selector") != target["selector"]:
                 continue
-            if target.get("element_id") is not None or target.get("selector") is not None:
-                matches.append(element)
+            matches.append(element)
         if len(matches) != 1:
             raise MotorError("browser target is missing or ambiguous")
         return {key: matches[0][key] for key in ("element_id", "selector") if key in matches[0]}
+
 
 class DesktopMotor(_Adapter):
     """Deterministic desktop app/window/element focus and typing routines."""
@@ -224,12 +250,19 @@ class DesktopMotor(_Adapter):
             if not isinstance(text, str) or len(text) > 4096:
                 raise MotorError("type text is invalid")
             arguments["text"] = text
-        return (MotorCandidate(id=f"{request.skill}-direct", description=f"Execute bounded desktop {request.skill}",
-                               steps=(MotorStep(operation=request.skill, target=target, arguments=arguments),)),)
+        return (
+            MotorCandidate(
+                id=f"{request.skill}-direct",
+                description=f"Execute bounded desktop {request.skill}",
+                steps=(MotorStep(operation=request.skill, target=target, arguments=arguments),),
+            ),
+        )
 
     def _resolve(self, observation, target):
         target = _dict(target, "target")
-        if any(not isinstance(target.get(key), str) or not target[key] for key in ("app", "window", "element")):
+        if any(
+            not isinstance(target.get(key), str) or not target[key] for key in ("app", "window", "element")
+        ):
             raise MotorError("desktop target requires app, window, and element")
         windows = observation.get("windows")
         if not isinstance(windows, list):
@@ -251,4 +284,8 @@ class DesktopMotor(_Adapter):
         if len(matches) != 1:
             raise MotorError("desktop target is missing or ambiguous")
         match = matches[0]
-        return {"app": match["window"]["app"], "window": match["window"]["window"], "element": match["element"]["element"]}
+        return {
+            "app": match["window"]["app"],
+            "window": match["window"]["window"],
+            "element": match["element"]["element"],
+        }
