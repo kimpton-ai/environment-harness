@@ -101,6 +101,14 @@
       "title": "Modalities",
       "type": "array"
     },
+    "motor_skills": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Motor Skills",
+      "type": "array"
+    },
     "observation_schema": {
       "additionalProperties": true,
       "title": "Observation Schema",

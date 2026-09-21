@@ -69,6 +69,7 @@ def compare(store, environments, who):
             row = store.environment(db, environment, who, ("researcher", "scorer"))
             manifest = json.loads(row["manifest"])
             cohort = {k: manifest[k] for k in ("environment", "participants", "purpose", "split", "policy")}
+            cohort["motor"] = manifest.get("motor")
             cohort_id = digest(cohort)
             record = {
                 "environment": environment,
