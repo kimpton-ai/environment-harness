@@ -44,6 +44,7 @@ jobs:
       - run: uv run --no-sync ruff check src tests scripts examples
       - run: uv run --no-sync pyright
       - run: uv run --no-sync python scripts/build_contracts.py --check
+      - run: uv run --no-sync python scripts/build_openapi.py --check
 
   compatibility:
     name: Compatibility (${{ matrix.label }})
@@ -229,3 +230,4 @@ jobs:
       - run: uv run --no-sync python scripts/check_distribution.py
       - run: uv run --no-sync python scripts/check_release.py
       - run: uv run --no-sync python scripts/check_browser_security.py
+      - run: uv run --no-sync python scripts/check_browser_ui.py

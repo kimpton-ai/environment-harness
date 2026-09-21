@@ -2,16 +2,24 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import shutil
 import signal
 import subprocess
-import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+import uvicorn
+
+from environment_harness import EnvironmentSession, EvidenceStore
+from environment_harness.fixtures import SyntheticEnvironment
+from environment_harness.server import create_app
 
 
 def request(url: str, *, origin: str | None = None):
@@ -41,22 +49,19 @@ def main() -> None:
         root = Path(directory)
         port = 18765
         origin = f"http://127.0.0.1:{port}"
-        server = subprocess.Popen(
-            [
-                sys.executable,
-                "-m",
-                "environment_harness.cli",
-                "--store",
-                str(root / "evidence"),
-                "serve",
-                "--port",
-                str(port),
-            ],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            env={"PATH": os.defpath, "LANG": "C.UTF-8", "PYTHON_DOTENV_DISABLED": "1"},
+        session = EnvironmentSession(EvidenceStore(root / "evidence"), SyntheticEnvironment())
+        server = uvicorn.Server(
+            uvicorn.Config(
+                create_app(session),
+                host="127.0.0.1",
+                port=port,
+                access_log=False,
+                proxy_headers=False,
+                log_level="error",
+            )
         )
+        server_thread = threading.Thread(target=server.run, daemon=True)
+        server_thread.start()
         try:
             deadline = time.monotonic() + 15
             while True:
@@ -67,9 +72,26 @@ def main() -> None:
                         assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
                     break
                 except OSError:
-                    if server.poll() is not None or time.monotonic() >= deadline:
+                    if not server_thread.is_alive() or time.monotonic() >= deadline:
                         raise RuntimeError("viewer server did not become ready") from None
                     time.sleep(0.05)
+
+            with request(origin + "/viewer/config") as response:
+                assert json.load(response) == {"authentication": "credential"}
+            try:
+                urllib.request.urlopen(
+                    urllib.request.Request(
+                        origin + "/local/connect",
+                        headers={"Origin": origin},
+                        method="POST",
+                    ),
+                    timeout=2,
+                )
+            except urllib.error.HTTPError as error:
+                if error.code != 404:
+                    raise RuntimeError("supplier service exposed local viewer access") from error
+            else:
+                raise RuntimeError("supplier service exposed local viewer access")
 
             browser = subprocess.Popen(
                 [
@@ -99,7 +121,11 @@ def main() -> None:
             if browser.returncode not in (0, -signal.SIGKILL):
                 raise RuntimeError(f"headless browser failed: {browser_stderr[-1000:]}")
             if "EnvironmentHarness" not in browser_stdout or 'type="password"' not in browser_stdout:
-                raise RuntimeError("headless browser did not render the credential-gated viewer")
+                raise RuntimeError("headless browser did not render the viewer")
+            if re.search(r'<section id="access"[^>]*\shidden', browser_stdout):
+                raise RuntimeError("supplier viewer hid its credential gate")
+            if not re.search(r'<div id="workspace"[^>]*\shidden', browser_stdout):
+                raise RuntimeError("supplier viewer exposed its workspace before authentication")
             if "Bearer " in browser_stdout or "local-login=" in browser_stdout:
                 raise RuntimeError("viewer HTML exposed a credential")
 
@@ -111,12 +137,10 @@ def main() -> None:
             else:
                 raise RuntimeError("cross-origin browser request was accepted")
         finally:
-            server.terminate()
-            try:
-                server.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                server.kill()
-                server.wait()
+            server.should_exit = True
+            server_thread.join(timeout=5)
+            if server_thread.is_alive():
+                raise RuntimeError("supplier viewer server did not stop")
     print("headless browser security check passed")
 
 

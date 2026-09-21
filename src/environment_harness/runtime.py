@@ -127,15 +127,26 @@ class EnvironmentSession:
             "reserved_micros": row["reserved"],
         }
 
-    def list(self, who, limit=100):
+    def list_page(self, who, limit=100, cursor=None):
         if who.role != "researcher":
             raise Forbidden("researcher required")
+        if not 1 <= limit <= 1000:
+            raise ValueError("invalid environment-session page size")
+        if cursor is not None and (
+            len(cursor) != 32 or any(character not in "0123456789abcdef" for character in cursor)
+        ):
+            raise ValueError("invalid environment-session cursor")
         with self.store.transaction() as db:
             rows = db.execute(
-                "SELECT * FROM environments WHERE tenant=? AND (CAST(? AS TEXT) IS NULL OR id=?) ORDER BY id DESC LIMIT ?",
-                (who.tenant, who.environment, who.environment, limit),
-            )
-            return [self._public(row) for row in rows]
+                "SELECT * FROM environments WHERE tenant=? AND (CAST(? AS TEXT) IS NULL OR id=?) "
+                "AND (CAST(? AS TEXT) IS NULL OR id<?) ORDER BY id DESC LIMIT ?",
+                (who.tenant, who.environment, who.environment, cursor, cursor, limit + 1),
+            ).fetchall()
+            page = [self._public(row) for row in rows[:limit]]
+            return page, page[-1]["id"] if len(rows) > limit else None
+
+    def list(self, who, limit=100):
+        return self.list_page(who, limit)[0]
 
     def get(self, environment, who):
         with self.store.transaction() as db:

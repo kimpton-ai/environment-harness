@@ -5,7 +5,146 @@ import math
 import statistics
 
 from .errors import Forbidden, Unsupported
+from .presentation import SLOTS, build_timeline, next_revision
 from .store import digest
+
+
+def _bounded_points(points, max_points):
+    """Bound a series while retaining the first, last, and bucket extrema."""
+    if len(points) <= max_points:
+        return points, False
+    interior = points[1:-1]
+    bucket_count = max(1, (max_points - 2) // 2)
+    bucket_size = math.ceil(len(interior) / bucket_count)
+    selected = [points[0]]
+    for offset in range(0, len(interior), bucket_size):
+        bucket = interior[offset : offset + bucket_size]
+        extrema = {
+            min(range(len(bucket)), key=lambda index: bucket[index]["value"]),
+            max(range(len(bucket)), key=lambda index: bucket[index]["value"]),
+        }
+        selected.extend(bucket[index] for index in sorted(extrema))
+    selected.append(points[-1])
+    return selected, True
+
+
+def turn_series(store, environment, who, *, start_turn=1, end_turn=None, max_points=300):
+    """Project bounded turn-level evidence series for comparison and visualization."""
+    with store.transaction() as db:
+        row = store.environment(db, environment, who, ("researcher", "scorer"))
+        participants = list(json.loads(row["participants"]))
+    events = list(store.replay(environment, who))
+    turns = [
+        turn
+        for turn in build_timeline(events, participants)
+        if any(slots[slot] for slots in turn["participants"].values() for slot in SLOTS)
+    ]
+    total_turns = len(turns)
+    first_turn = start_turn
+    final_turn = total_turns if end_turn is None else end_turn
+    turn_by_revision = {}
+    turn_by_starting_revision = {}
+    revision_by_turn = {}
+    for index, turn in enumerate(turns, 1):
+        turn_by_starting_revision[turn["revision"]] = index
+        revision = next_revision(turn)
+        if revision is not None:
+            turn_by_revision[revision] = index
+            revision_by_turn[index] = revision
+
+    projected = {}
+
+    def append(series_id, label, kind, unit, participant, turn, revision, value):
+        if turn is None or isinstance(value, bool) or not isinstance(value, (int, float)):
+            return
+        if not math.isfinite(value):
+            return
+        series = projected.setdefault(
+            series_id,
+            {
+                "id": series_id,
+                "label": label,
+                "kind": kind,
+                "unit": unit,
+                "participant": participant,
+                "points": [],
+            },
+        )
+        series["points"].append({"turn": turn, "revision": revision, "value": value})
+
+    rewards_by_turn = {}
+    activity = {
+        index: {"observed": 0, "attempted": 0, "executed": 0, "blocked": 0}
+        for index in range(1, total_turns + 1)
+    }
+    for event in events:
+        kind, payload, revision = event["kind"], event.get("payload") or {}, event["revision"]
+        if kind == "action.executed":
+            turn = turn_by_revision.get(revision)
+            reward = payload.get("reward")
+            if turn is not None and isinstance(reward, (int, float)) and not isinstance(reward, bool):
+                rewards_by_turn[turn] = rewards_by_turn.get(turn, 0) + reward
+            if turn is not None:
+                activity[turn]["executed"] += 1
+        elif kind in ("observation.delivered", "action.attempted"):
+            turn = turn_by_starting_revision.get(revision)
+            if turn is not None:
+                activity[turn]["observed" if kind == "observation.delivered" else "attempted"] += 1
+                if kind == "action.attempted" and (payload.get("receipt") or {}).get("status") == "blocked":
+                    activity[turn]["blocked"] += 1
+        if event.get("audience") == ["*"] and kind not in ("transition.committed", "action.executed"):
+            turn = turn_by_revision.get(revision)
+            for field, value in payload.items():
+                append(
+                    f"signal:{kind}:{field}",
+                    f"{kind} · {field.replace('_', ' ').title()}",
+                    "signal",
+                    None,
+                    None,
+                    turn,
+                    revision,
+                    value,
+                )
+
+    cumulative_reward = 0
+    cumulative_executed = 0
+    for turn in range(1, total_turns + 1):
+        revision = revision_by_turn.get(turn, turns[turn - 1]["revision"])
+        cumulative_reward += rewards_by_turn.get(turn, 0)
+        cumulative_executed += activity[turn]["executed"]
+        append(
+            "reward:cumulative",
+            "Cumulative Reward",
+            "reward",
+            "reward",
+            None,
+            turn,
+            revision,
+            cumulative_reward,
+        )
+        append(
+            "activity:executed:cumulative",
+            "Executed Actions",
+            "activity",
+            "count",
+            None,
+            turn,
+            revision,
+            cumulative_executed,
+        )
+
+    series = []
+    for item in projected.values():
+        points = [point for point in item.pop("points") if first_turn <= point["turn"] <= final_turn]
+        bounded, downsampled = _bounded_points(points, max_points)
+        series.append(item | {"source_points": len(points), "downsampled": downsampled, "points": bounded})
+    return {
+        "environment": environment,
+        "total_turns": total_turns,
+        "range": {"start_turn": first_turn, "end_turn": final_turn},
+        "max_points": max_points,
+        "series": sorted(series, key=lambda item: item["id"]),
+    }
 
 
 def rollouts(store, environment, who, *, require_token_ids=False, require_logprobs=False):

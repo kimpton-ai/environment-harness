@@ -12,7 +12,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from environment_harness import backends, hosted, plugins, receipts, worker
 from environment_harness.adapters.programs import HTTPAgent, InstrumentedModel, MCPTools
-from environment_harness.client import EnvironmentClient, NoRedirect
+from environment_harness.client import EnvironmentClient, NoRedirect, ServiceError
 from environment_harness.contracts import AgentSpec, ExperimentSpec, Principal
 from environment_harness.errors import Conflict, Forbidden, HarnessError, Unsupported
 from environment_harness.fixtures import SyntheticEnvironment
@@ -88,6 +88,34 @@ def test_remote_client_redacts_failures_and_bounds_responses():
 
     opener = Opener()
     client.opener = opener
+    body = json.dumps(
+        {
+            "error": {
+                "code": "forbidden",
+                "message": "Environment unavailable",
+                "status": 403,
+                "request_id": "a" * 32,
+                "timestamp": "2026-09-21T12:00:00.000Z",
+                "details": [{"field": "environment", "message": "Unavailable", "type": "forbidden"}],
+            }
+        }
+    ).encode()
+    opener.error = urllib.error.HTTPError(
+        "https://example.test",
+        403,
+        "forbidden",
+        {"Content-Type": "application/json"},
+        io.BytesIO(body),
+    )
+    with pytest.raises(ServiceError, match="HTTP 403: Environment unavailable") as structured:
+        client.request("GET", "/")
+    assert structured.value.code == "forbidden"
+    assert structured.value.status == 403
+    assert structured.value.request_id == "a" * 32
+    assert structured.value.details == [
+        {"field": "environment", "message": "Unavailable", "type": "forbidden"}
+    ]
+
     opener.error = urllib.error.HTTPError("https://example.test", 403, "secret body", {}, None)
     with pytest.raises(HarnessError, match="HTTP 403") as denied:
         client.request("GET", "/")

@@ -7,6 +7,7 @@ from environment_harness import contracts
 root = Path(__file__).resolve().parents[1]
 models = (
     "Capabilities",
+    "Scenario",
     "EnvironmentSpec",
     "AgentSpec",
     "RunPolicy",

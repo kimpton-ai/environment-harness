@@ -142,6 +142,11 @@
       "title": "Purposes",
       "type": "array"
     },
+    "scenario_schema": {
+      "additionalProperties": true,
+      "title": "Scenario Schema",
+      "type": "object"
+    },
     "scheduling": {
       "enum": [
         "sequential",

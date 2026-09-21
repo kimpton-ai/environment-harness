@@ -63,6 +63,10 @@ server = subprocess.Popen(
     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
 )
 origin = f"http://127.0.0.1:{port}"
+token = subprocess.check_output(
+    [sys.executable, "-m", "environment_harness.cli", "--store", "environments", "token"],
+    text=True,
+).strip()
 def request(path, token=None):
     headers = {"Authorization": "Bearer " + token} if token else {}
     return urlopen(Request(origin + path, headers=headers), timeout=5)
@@ -84,7 +88,6 @@ try:
         raise AssertionError("Unauthenticated environment list was accepted")
     except HTTPError as error:
         assert error.code == 401
-    token = Path("environments/researcher-token").read_text().strip()
     environments = json.load(request("/v1/environments", token))
     assert {parent, child} <= {environment["id"] for environment in environments}
     for environment in (parent, child):
