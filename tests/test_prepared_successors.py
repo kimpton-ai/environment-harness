@@ -97,6 +97,7 @@ def successor_setup(tmp_path: Path):
     def authority(_):
         return {
             "owner": "owner",
+            "epoch": 1,
             "goal_revision": "g1",
             "observation_revision": "r1",
             "stop_epoch": executor.stop_epoch,
@@ -200,3 +201,17 @@ def test_preparation_fault_is_quarantined_until_native_reconciliation(tmp_path):
         executor.prepare_successor(intent, request=request, selection=selection, authority=authority)
     admission = executor.reconcile_successor(intent.intent_id)
     assert admission.status == "admitted" and adapter.reconciled
+
+
+def test_owner_epoch_change_rejects_admission(tmp_path):
+    executor, adapter, request, selection, intent, authority, _ = successor_setup(tmp_path)
+    executor.prepare_successor(intent, request=request, selection=selection, authority=authority)
+
+    def changed(_):
+        return {**authority(request), "epoch": 2}
+
+    admission = executor.admit_successor(
+        intent.intent_id, request=request, selection=selection, authority=changed
+    )
+    assert admission.status == "rejected"
+    assert adapter.admissions == 0

@@ -42,6 +42,7 @@ def _target_point(value, label="target"):
 
 
 class _Adapter(ABC):
+    implementation: str
     supports_prepared_successors = False
 
     def __init__(self, driver, *, max_steps=128):

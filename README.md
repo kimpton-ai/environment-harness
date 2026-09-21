@@ -47,10 +47,10 @@ Add the local HTTP service and viewer when you need them:
 python -m pip install "environment-harness[server]"
 ```
 
-Release candidates use PEP 440 versions such as `0.2.3rc1`. Pip excludes prereleases from ordinary installs; test one by requesting its exact version or by opting in:
+Release candidates use PEP 440 versions such as `0.2.4rc1`. Pip excludes prereleases from ordinary installs; test one by requesting its exact version or by opting in:
 
 ```sh
-python -m pip install "environment-harness==0.2.3rc1"
+python -m pip install "environment-harness==0.2.4rc1"
 python -m pip install --pre --upgrade environment-harness
 ```
 
@@ -59,7 +59,7 @@ python -m pip install --pre --upgrade environment-harness
 You need macOS or Linux, Python 3.12 or later, and [uv 0.12.0 or later](https://docs.astral.sh/uv/getting-started/installation/). The demo uses synthetic agents, so it needs no account, model API key, or paid service.
 
 ```sh
-git clone --branch v0.2.3rc1 --depth 1 https://github.com/kimpton-ai/environment-harness.git
+git clone --branch v0.2.4rc1 --depth 1 https://github.com/kimpton-ai/environment-harness.git
 cd environment-harness
 uv sync --extra server
 uv run python examples/branch_comparison.py --store .local/branch-demo

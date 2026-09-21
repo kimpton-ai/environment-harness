@@ -44,4 +44,4 @@ __all__ = [
     "MotorGroup",
     "MotorGroupReceipt",
 ]
-__version__ = "0.2.3rc1"
+__version__ = "0.2.4rc1"

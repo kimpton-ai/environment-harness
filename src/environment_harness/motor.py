@@ -14,7 +14,7 @@ import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, cast
+from typing import Any, Callable, Literal, cast
 
 from .errors import BudgetExceeded, Conflict, Forbidden
 from .motor_adapters import MotorError
@@ -291,6 +291,7 @@ class MotorExecutor:
             raise Forbidden("live successor authority must return ownership context")
         for key, expected in (
             ("owner", intent.metadata.owner),
+            ("epoch", intent.metadata.epoch),
             ("goal_revision", intent.metadata.goal_revision),
             ("observation_revision", intent.metadata.observation_revision),
             ("stop_epoch", intent.metadata.stop_epoch),
@@ -628,11 +629,12 @@ class MotorExecutor:
         watcher.start()
 
         def finish(status, reason=None, reason_code=None):
-            outcome = {
-                "completed": "completed",
-                "blocked": "rejected",
-                "cancelled": "cancelled",
-            }.get(status, "unknown")
+            outcome = cast(
+                Literal["rejected", "accepted", "started", "completed", "cancelled", "unknown"],
+                {"completed": "completed", "blocked": "rejected", "cancelled": "cancelled"}.get(
+                    status, "unknown"
+                ),
+            )
             effect = (
                 "applied"
                 if status == "completed"
