@@ -26,6 +26,10 @@ Production PyPI publishing now uses short-lived Trusted Publishing credentials a
 
 Deployment, release, and viewer-maintenance guides now define the supported local topology, hosted-service qualification boundary, prerelease workflow, generated browser assets, required checks, and documentation triggers for future contributors.
 
+The motor SDK adds generic coordinated goal contracts with immutable goal and milestone context, channel claims, resource ownership, bounded group deadlines, stop-epoch fencing, and durable per-tick receipts. Group dispatch requires an adapter capability and matching environment-issued permissions, and rechecks the contract at the effect boundary. These contracts record coordination and authority; domain controllers, graders, native drivers, and task-success guarantees remain supplier responsibilities.
+
+Prepared successors now use a versioned, one-slot intent contract. Preparation requires a live owner, goal, observation, epoch, selected candidate, and environment-issued controls. Native admission checks freshness, predecessor identity, frame, camera, UI, and tick fences. Unknown preparation or admission is quarantined for ledger reconciliation and is never replayed. Existing sequential adapters explicitly reject successor preparation.
+
 ## 0.2.2 - 2026-09-18
 
 Release publishing now extracts immutable-ID artifacts directly into the verified distribution directory before checking attestations and explicitly disables dependency caching during the tag build. Routine Dependabot version updates are grouped into one monthly pull request per ecosystem, while security updates remain immediate.

@@ -32,12 +32,22 @@ for name in models:
         path.write_text(text)
 
 for name in (
+    "MilestoneIdentity",
+    "GoalContext",
+    "ResourceOwnership",
+    "ControlClaim",
+    "ProgressReceipt",
     "MotorProfile",
+    "MotorExecutionMetadata",
     "MotorRequest",
     "MotorStep",
     "MotorCandidate",
     "MotorSelection",
     "MotorReceipt",
+    "MotorGroup",
+    "MotorGroupReceipt",
+    "PreparedSuccessorIntent",
+    "PreparedSuccessorAdmission",
 ):
     schema = getattr(motor_contracts, name).model_json_schema()
     schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"

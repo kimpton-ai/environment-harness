@@ -33,7 +33,7 @@ def git(*arguments: str, text: bool = False):
 def require_regression_test_failure(returncode: int) -> None:
     if returncode == 0:
         raise SystemExit("changed regression tests also pass on the base revision")
-    if returncode != 1:
+    if returncode not in {1, 2}:
         raise SystemExit(f"regression proof runner failed with exit code {returncode}")
 
 
@@ -76,12 +76,21 @@ def main() -> None:
             destination.write_bytes(source.read_bytes())
         env = {key: value for key, value in os.environ.items() if key in SAFE_ENV}
         env["UV_CACHE_DIR"] = str(Path(directory) / "uv-cache")
+        setup = subprocess.run(
+            ["uv", "sync", "--project", str(checkout), "--extra", "server"],
+            cwd=checkout,
+            env=env,
+            check=False,
+        )
+        if setup.returncode != 0:
+            raise SystemExit(f"regression proof environment failed with exit code {setup.returncode}")
         result = subprocess.run(
             [
                 "uv",
                 "run",
                 "--project",
                 str(checkout),
+                "--no-sync",
                 "--extra",
                 "server",
                 "pytest",

@@ -3,7 +3,22 @@
 from .contracts import AgentSpec, EnvironmentSpec, ExperimentSpec, Principal, Scenario
 from .harness import EnvironmentHarness, EnvironmentSession, Experiment, ExperimentResult
 from .motor import MotorExecutor
-from .motor_contracts import MotorAdapter, MotorProfile, MotorRequest
+from .motor_contracts import (
+    ControlClaim,
+    GoalContext,
+    MilestoneIdentity,
+    MotorAdapter,
+    MotorExecutionMetadata,
+    MotorGroup,
+    MotorGroupReceipt,
+    MotorProfile,
+    MotorRequest,
+    PreparedSuccessorAdmission,
+    PreparedSuccessorIntent,
+    ProgressReceipt,
+    ResourceOwnership,
+    UnsupportedPreparation,
+)
 from .store import EvidenceStore
 
 __all__ = [
@@ -21,5 +36,16 @@ __all__ = [
     "MotorAdapter",
     "MotorProfile",
     "MotorRequest",
+    "MotorExecutionMetadata",
+    "PreparedSuccessorAdmission",
+    "PreparedSuccessorIntent",
+    "UnsupportedPreparation",
+    "GoalContext",
+    "MilestoneIdentity",
+    "ResourceOwnership",
+    "ControlClaim",
+    "ProgressReceipt",
+    "MotorGroup",
+    "MotorGroupReceipt",
 ]
-__version__ = "0.2.3rc2"
+__version__ = "0.2.4rc1"

@@ -31,6 +31,13 @@ python -m pip install "environment-harness[server]"
 
 To install an editable source checkout instead, follow the [contributing guide](https://github.com/kimpton-ai/environment-harness/blob/main/CONTRIBUTING.md).
 
+Release candidates use PEP 440 versions such as `0.2.4rc1`. Pip excludes prereleases from ordinary installs; test one by requesting its exact version or by opting in:
+
+```sh
+python -m pip install "environment-harness==0.2.4rc1"
+python -m pip install --pre --upgrade environment-harness
+```
+
 Create a synthetic review dataset and open its evidence viewer:
 
 ```sh
@@ -43,6 +50,16 @@ The demo creates two named experiments and three named standalone environment se
 Each demo run finishes after the requested turns, so Home reports it as `Completed`. Standalone rows show the number of turns actually recorded; safety limits such as maximum turns remain in the session Overview instead of appearing as unfinished progress.
 
 `serve` starts an authenticated API and read-only viewer at `http://127.0.0.1:8765`. The loopback viewer receives local researcher access automatically; `--open` only opens it in your browser. API clients still use an explicit credential from `environment-harness token`. The server is available only on your computer and does not deploy or publish the environment session. Press `Ctrl+C` to stop it.
+
+To run the richer branch-comparison example from this release candidate:
+
+```sh
+git clone --depth 1 https://github.com/kimpton-ai/environment-harness.git
+cd environment-harness
+uv sync --extra server
+uv run python examples/branch_comparison.py --store .local/branch-demo
+uv run environment-harness --store .local/branch-demo serve --open
+```
 
 The running service publishes its generated OpenAPI document at `/openapi.json` and interactive reference at `/docs`. The repository checks the committed [`contracts/openapi.json`](contracts/openapi.json) and versioned JSON Schemas in [`contracts/`](contracts/) for drift. [`docs/API-REFERENCE.md`](docs/API-REFERENCE.md) documents endpoints and examples; [`docs/PROTOCOL.md`](docs/PROTOCOL.md) defines the authority, lifecycle, activity-stream, recovery, and evidence semantics that OpenAPI alone cannot express.
 

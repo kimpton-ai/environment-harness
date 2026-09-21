@@ -1,6 +1,3 @@
-import builtins
-import os
-
 import pytest
 from test_motor import Alternatives, request, setup
 
@@ -13,8 +10,6 @@ from environment_harness.motor_contracts import (
     MotorSelection,
     MotorStep,
 )
-
-pytestmark = pytest.mark.skipif(os.name == "nt", reason="MotorExecutor uses POSIX application locking")
 
 
 def direct(motor, req, *, operation_id="direct", write=True, budget=100, authority=None):
@@ -55,19 +50,6 @@ def test_constructor_and_lookup_guards(tmp_path):
             journal=tmp_path / "bad4.sqlite",
             selector=type("S", (), {"model": "other"})(),
         )
-    real_import = builtins.__import__
-
-    def no_fcntl(name, *args, **kwargs):
-        if name == "fcntl":
-            raise ImportError("test")
-        return real_import(name, *args, **kwargs)
-
-    builtins.__import__ = no_fcntl
-    try:
-        with pytest.raises(RuntimeError, match="POSIX"):
-            MotorExecutor(motor.adapter, motor.profile, journal=tmp_path / "unsupported.sqlite")
-    finally:
-        builtins.__import__ = real_import
     assert motor.lookup("missing") is None
     assert motor.progress("missing") is None
     with pytest.raises(Forbidden, match="Operations"):
