@@ -231,7 +231,9 @@ class MotorExecutor:
                 return finish("blocked", "read-only request cannot execute motor effects")
             chosen = candidates[0]
             if self.selector is not None:
-                state = {"observation": before, "request": request.model_dump(mode="json")}
+                projection = getattr(self.adapter, "selection_observation", None)
+                state = {"observation": projection(request, before) if projection else before,
+                         "request": request.model_dump(mode="json")}
                 if self.selector.maximum_cost(state, candidates) > budget:
                     return finish("blocked", "selector reservation exceeds operation budget")
                 if not check():
