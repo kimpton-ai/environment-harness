@@ -32,16 +32,18 @@ jobs:
           REPOSITORY: ${{ github.repository }}
         run: |
           if [ "$EVENT_NAME" != pull_request ]; then
-            echo "compatibility=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          files="$(gh api --paginate "repos/$REPOSITORY/pulls/$PR_NUMBER/files" --jq '.[].filename')"
-          compatibility_files="$(grep -Ev '^src/environment_harness/viewer/' <<< "$files" || true)"
-          if grep -Eq '^(src/|tests/|examples/|scripts/|contracts/|pyproject\.toml$|uv\.lock$|Makefile$|\.github/workflows/ci\.yml$)' <<< "$compatibility_files"; then
-            echo "compatibility=true" >> "$GITHUB_OUTPUT"
+            compatibility=true
           else
-            echo "compatibility=false" >> "$GITHUB_OUTPUT"
+            files="$(gh api --paginate "repos/$REPOSITORY/pulls/$PR_NUMBER/files" --jq '.[].filename')"
+            compatibility_files="$(grep -Ev '^src/environment_harness/viewer/' <<< "$files" || true)"
+            if grep -Eq '^(src/|tests/|examples/|scripts/|contracts/|pyproject\.toml$|uv\.lock$|Makefile$|\.github/workflows/ci\.yml$)' <<< "$compatibility_files"; then
+              compatibility=true
+            else
+              compatibility=false
+            fi
           fi
+          echo "compatibility=$compatibility" >> "$GITHUB_OUTPUT"
+          printf '### CI routing\n\n- Compatibility matrix: %s\n' "$compatibility" >> "$GITHUB_STEP_SUMMARY"
 
   python:
     name: Python

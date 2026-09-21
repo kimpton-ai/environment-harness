@@ -16,6 +16,37 @@ Branches created in this repository follow [Conventional Branch 1.1.0](https://c
 
 After the release PR merges, copy its merge commit SHA from GitHub; do not use the newest `main` commit if later changes have landed. A release maintainer fetches `main` and tags, detaches at the recorded merge commit, and runs `python scripts/release_version.py detect`. Create the reported protected tag with `git tag vX.Y.Z <release-merge-sha>` and push only `refs/tags/vX.Y.Z`. The tag dispatches the attested publisher, which waits for independent `github-release` environment approval. Release preparation and tag creation intentionally use no stored GitHub App private key or other long-lived Actions credential. Never rebuild different artifacts under an existing version.
 
+## Continuous integration
+
+Pull requests always report the five required checks below. The checks run in parallel against the proposed merge result. The full CI workflow does not run again after merging to `main`; the dedicated coverage workflow records canonical coverage for the merged commit instead.
+
+| Check | When it runs | What it establishes |
+| --- | --- | --- |
+| Python | Every pull request and manual CI run | Python tests, PostgreSQL integration, coverage, regression proof, authorization mutation checks, Ruff, Pyright, and contract drift |
+| Cross-platform | Every pull request and manual CI run | Aggregated compatibility coverage when the compatibility matrix is required; otherwise a lightweight confirmation that the matrix was intentionally skipped |
+| TypeScript | Every pull request and manual CI run | TypeScript compilation, tests, dependency policy, and generated viewer asset drift |
+| Security | Every pull request and manual CI run | Dependency review, secret scanning, workflow analysis, package audits, repository policy, and vulnerability scanning |
+| Distribution | Every pull request and manual CI run | Python and TypeScript package construction, clean-install smoke tests, browser security, and browser UI behavior |
+
+The `Changes` job decides whether to run the four compatibility shards: Python 3.13 and 3.14 on Linux, Python 3.12 on macOS, and Python 3.12 on Windows. Manual CI runs always include them. On pull requests, they run when a change touches:
+
+- Python source outside `src/environment_harness/viewer/`;
+- Python tests, examples, scripts, or generated contracts;
+- `pyproject.toml`, `uv.lock`, or `Makefile`; or
+- `.github/workflows/ci.yml` itself.
+
+Viewer-only, TypeScript-only, documentation-only, and unrelated workflow-only changes skip those four runners. The required `Cross-platform` check still reports success after verifying that the skip was intentional. A pull request that changes CI routing runs the matrix once to validate the new routing logic.
+
+| Example change | Compatibility matrix | Required checks that validate it |
+| --- | --- | --- |
+| Python SDK, server, storage, or runtime | Runs | All five |
+| Viewer HTML, CSS, or checked-in JavaScript only | Skips | Distribution exercises the browser; the other required checks retain the integrated release baseline |
+| TypeScript client only | Skips | TypeScript, Security, and Distribution provide the relevant package checks; all required checks still report |
+| Documentation or `coverage.yml` only | Skips | Required checks still report; Cross-platform remains a lightweight gate |
+| Python dependency or CI workflow | Runs | All five, including every supported Python and operating-system shard |
+
+Pushes to `main` run `.github/workflows/coverage.yml`, which produces `coverage.json` for the repository ratchet and `coverage.xml` for Codecov. The weekly workflow performs extended dependency and compatibility assurance. Version tags alone start the attested release workflow.
+
 Before submitting a change, run `make check`, `make viewer`, `npm run typecheck --prefix packages/typescript`, and `make build`. Include a small reproducible example of the behavior you changed. Schema changes must update the generated JSON and TypeScript contracts. `src/environment_harness/presentation.py` and `packages/typescript/src/timeline.ts` must keep the same turn-grouping rules and field names so the command line and the viewer describe evidence identically. Do not change protocol semantics without describing compatibility and migration.
 
 Viewer changes must follow the [viewer style guide](docs/STYLE-GUIDE.md) and [viewer maintenance guide](docs/VIEWER-MAINTENANCE.md). Deployment-facing changes must update the [deployment guide](docs/DEPLOYMENT.md) in the same pull request.
