@@ -36,7 +36,8 @@ jobs:
             exit 0
           fi
           files="$(gh api --paginate "repos/$REPOSITORY/pulls/$PR_NUMBER/files" --jq '.[].filename')"
-          if grep -Eq '^(src/|tests/|examples/|scripts/|contracts/|pyproject\.toml$|uv\.lock$|Makefile$|\.github/workflows/ci\.yml$)' <<< "$files"; then
+          compatibility_files="$(grep -Ev '^src/environment_harness/viewer/' <<< "$files" || true)"
+          if grep -Eq '^(src/|tests/|examples/|scripts/|contracts/|pyproject\.toml$|uv\.lock$|Makefile$|\.github/workflows/ci\.yml$)' <<< "$compatibility_files"; then
             echo "compatibility=true" >> "$GITHUB_OUTPUT"
           else
             echo "compatibility=false" >> "$GITHUB_OUTPUT"
