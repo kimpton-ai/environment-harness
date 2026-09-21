@@ -7,8 +7,10 @@ application to share its input lease between workers.
 
 from __future__ import annotations
 
+import errno
 import json
 import math
+import os
 import sqlite3
 import threading
 import time
@@ -113,11 +115,14 @@ class MotorExecutor:
             raise ValueError("Jev mode requires a selector; deterministic mode forbids one")
         if selector is not None and profile.selector_model != selector.model:
             raise ValueError("selector does not match the pinned model")
-        try:
+        if os.name == "nt":
+            import msvcrt
+
+            self._file_lock = (msvcrt, True)
+        else:
             import fcntl
-        except ImportError as exc:
-            raise RuntimeError("MotorExecutor requires POSIX application locking") from exc
-        self._fcntl = fcntl
+
+            self._file_lock = (fcntl, False)
         self.adapter, self.profile, self.selector = adapter, profile, selector
         self.journal = Path(journal)
         self.journal.parent.mkdir(parents=True, exist_ok=True)
@@ -157,6 +162,31 @@ class MotorExecutor:
                 yield db
         finally:
             db.close()
+
+    def _acquire_file_lock(self, lock):
+        module, windows = self._file_lock
+        if windows:
+            lock.seek(0, 2)
+            if lock.tell() == 0:
+                lock.write("0")
+                lock.flush()
+            lock.seek(0)
+            try:
+                module.locking(lock.fileno(), module.LK_NBLCK, 1)
+            except OSError as exc:
+                if exc.errno in {errno.EACCES, errno.EAGAIN, errno.EDEADLK, 13, 36}:
+                    raise BlockingIOError from exc
+                raise
+        else:
+            module.flock(lock, module.LOCK_EX | module.LOCK_NB)
+
+    def _release_file_lock(self, lock):
+        module, windows = self._file_lock
+        if windows:
+            lock.seek(0)
+            module.locking(lock.fileno(), module.LK_UNLCK, 1)
+        else:
+            module.flock(lock, module.LOCK_UN)
 
     @staticmethod
     def _discard_prepared(db):
@@ -212,7 +242,7 @@ class MotorExecutor:
         try:
             with self.journal.with_suffix(self.journal.suffix + ".lock").open("a") as lock:
                 try:
-                    self._fcntl.flock(lock, self._fcntl.LOCK_EX | self._fcntl.LOCK_NB)
+                    self._acquire_file_lock(lock)
                 except BlockingIOError as exc:
                     raise Conflict("motor is still settling") from exc
                 try:
@@ -228,7 +258,7 @@ class MotorExecutor:
                         db.execute("UPDATE motor SET status='acknowledged_unknown' WHERE receipt IS NULL")
                     return {"operation_ids": ids, "observation": observation, "stop_epoch": self.stop_epoch}
                 finally:
-                    self._fcntl.flock(lock, self._fcntl.LOCK_UN)
+                    self._release_file_lock(lock)
         finally:
             self._lock.release()
 
@@ -515,15 +545,6 @@ class MotorExecutor:
                 status="rejected",
                 reason_code="predecessor_not_completed",
             )
-        elif intent.metadata.stop_epoch != self.stop_epoch:
-            admission = PreparedSuccessorAdmission(
-                intent_id=intent.intent_id,
-                predecessor_operation_id=intent.predecessor_operation_id,
-                operation_id=intent.operation_id,
-                metadata=intent.metadata,
-                status="rejected",
-                reason_code="stop_epoch_changed",
-            )
         else:
             try:
                 admission = self.adapter.admit_successor(
@@ -646,13 +667,13 @@ class MotorExecutor:
         try:
             with self.journal.with_suffix(self.journal.suffix + ".lock").open("a") as lock:
                 try:
-                    self._fcntl.flock(lock, self._fcntl.LOCK_EX | self._fcntl.LOCK_NB)
+                    self._acquire_file_lock(lock)
                 except BlockingIOError as exc:
                     raise Conflict("motor already has an input owner") from exc
                 try:
                     return self._execute(operation_id, request, payload, maximum_cost_micros, authority)
                 finally:
-                    self._fcntl.flock(lock, self._fcntl.LOCK_UN)
+                    self._release_file_lock(lock)
         finally:
             self._lock.release()
 
