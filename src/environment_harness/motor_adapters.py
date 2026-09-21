@@ -44,6 +44,7 @@ def _target_point(value, label="target"):
 class _Adapter(ABC):
     implementation: str
     supports_prepared_successors = False
+    native_admits_prepared_successors = False
 
     def __init__(self, driver, *, max_steps=128):
         if not all(
@@ -115,6 +116,10 @@ class _Adapter(ABC):
         if not self.supports_prepared_successors:
             raise UnsupportedPreparation(f"{self.implementation} does not support prepared successors")
         raise NotImplementedError("prepared successor admission must be implemented by the native adapter")
+
+    def reconcile_prepared_successor(self, intent):
+        """Return an already-native admission, or ``None`` if it is unknown."""
+        return None
 
     def reconcile(self, operation_id):
         return self.lookup(operation_id)

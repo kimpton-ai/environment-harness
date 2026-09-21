@@ -145,8 +145,8 @@ class MotorExecutor:
                 "CREATE UNIQUE INDEX IF NOT EXISTS one_prepared_successor "
                 "ON motor_successors((1)) WHERE status='prepared'"
             )
-            if discard_prepared:
-                self._discard_prepared(db)
+        if discard_prepared:
+            self.discard_prepared_successors()
 
     @contextmanager
     def _db(self):
@@ -164,9 +164,30 @@ class MotorExecutor:
         db.execute("UPDATE motor_successors SET status='discarded' WHERE status='prepared'")
 
     def discard_prepared_successors(self):
-        """Discard the one pending successor without replaying its intent."""
+        """Stop native input, then reconcile pending native intents."""
+        if getattr(self.adapter, "native_admits_prepared_successors", False):
+            self.adapter.stop()
+            with self._db() as db:
+                ids = [
+                    row["id"] for row in db.execute("SELECT id FROM motor_successors WHERE status='prepared'")
+                ]
+            for intent_id in ids:
+                try:
+                    self.reconcile_successor(intent_id)
+                except MotorOutcomeUnknown:
+                    with self._db() as db:
+                        db.execute(
+                            "UPDATE motor_successors SET status='unknown',admission=? WHERE id=? AND status='prepared'",
+                            (encode({"reason_code": "restart_reconciliation_unknown"}), intent_id),
+                        )
+            return
         with self._db() as db:
             self._discard_prepared(db)
+
+    def _unknown_successor_exists(self, db):
+        return (
+            db.execute("SELECT 1 FROM motor_successors WHERE status='unknown' LIMIT 1").fetchone() is not None
+        )
 
     @property
     def stop_epoch(self):
@@ -338,6 +359,9 @@ class MotorExecutor:
             raise TypeError("intent must be PreparedSuccessorIntent")
         if not getattr(self.adapter, "supports_prepared_successors", False):
             raise UnsupportedPreparation(f"{self.profile.adapter} does not support prepared successors")
+        with self._db() as db:
+            if self._unknown_successor_exists(db):
+                raise MotorOutcomeUnknown("an unknown successor requires reconciliation")
         self._authorize_successor(intent, request, selection, authority)
         encoded = encode(intent.model_dump(mode="json"))
         request_encoded = encode(request.model_dump(mode="json"))
@@ -411,6 +435,41 @@ class MotorExecutor:
             selection.model_dump(mode="json")
         ):
             raise Conflict("prepared successor authorization differs from the prepared request")
+        if getattr(self.adapter, "native_admits_prepared_successors", False):
+            try:
+                native = self.adapter.reconcile_prepared_successor(intent)
+            except Exception as exc:
+                native = None
+                with self._db() as db:
+                    db.execute(
+                        "UPDATE motor_successors SET status='unknown',admission=? WHERE id=? AND status='prepared'",
+                        (encode({"reason_code": "native_admission_unknown"}), intent_id),
+                    )
+                raise MotorOutcomeUnknown("native successor admission outcome is unknown") from exc
+            if native is None:
+                with self._db() as db:
+                    db.execute(
+                        "UPDATE motor_successors SET status='unknown',admission=? WHERE id=? AND status='prepared'",
+                        (encode({"reason_code": "native_admission_unknown"}), intent_id),
+                    )
+                raise MotorOutcomeUnknown("native successor admission remains unknown")
+            if not isinstance(native, PreparedSuccessorAdmission):
+                raise MotorOutcomeUnknown("native adapter returned an invalid successor admission")
+            if (
+                native.intent_id != intent.intent_id
+                or native.operation_id != intent.operation_id
+                or native.predecessor_operation_id != intent.predecessor_operation_id
+                or native.status not in {"admitted", "rejected", "unknown"}
+            ):
+                raise MotorOutcomeUnknown("native successor admission identity is invalid")
+            with self._db() as db:
+                db.execute(
+                    "UPDATE motor_successors SET status=?, admission=? WHERE id=? AND status='prepared'",
+                    (native.status, encode(native.model_dump(mode="json")), intent_id),
+                )
+            if native.status == "unknown":
+                raise MotorOutcomeUnknown("native successor admission remains unknown")
+            return native
         try:
             self._authorize_successor(intent, request, selection, authority)
         except MotorOutcomeUnknown as exc:
@@ -512,14 +571,39 @@ class MotorExecutor:
             row = db.execute("SELECT * FROM motor_successors WHERE id=?", (intent_id,)).fetchone()
         if row is None:
             raise Conflict("unknown prepared successor")
-        if row["status"] != "unknown":
+        native_restart_reconcile = (
+            getattr(self.adapter, "native_admits_prepared_successors", False) and row["status"] == "prepared"
+        )
+        if row["status"] != "unknown" and not native_restart_reconcile:
             if row["admission"]:
                 value = json.loads(row["admission"])
                 if value.get("intent_id") == intent_id:
                     return PreparedSuccessorAdmission.model_validate(value)
             raise Conflict("successor is not awaiting reconciliation")
         intent = PreparedSuccessorIntent.model_validate(json.loads(row["intent"]))
-        result = self.adapter.reconcile(intent.operation_id)
+        if getattr(self.adapter, "native_admits_prepared_successors", False):
+            try:
+                result = self.adapter.reconcile_prepared_successor(intent)
+            except Exception as exc:
+                raise MotorOutcomeUnknown("native reconciliation remains unknown") from exc
+            if isinstance(result, PreparedSuccessorAdmission):
+                if (
+                    result.intent_id != intent.intent_id
+                    or result.operation_id != intent.operation_id
+                    or result.predecessor_operation_id != intent.predecessor_operation_id
+                ):
+                    raise MotorOutcomeUnknown("native reconciliation identity is invalid")
+                admission = result
+                if admission.status == "unknown":
+                    raise MotorOutcomeUnknown("native reconciliation remains unknown")
+                with self._db() as db:
+                    db.execute(
+                        "UPDATE motor_successors SET status=?,admission=? WHERE id=? AND status IN ('unknown','prepared')",
+                        (admission.status, encode(admission.model_dump(mode="json")), intent_id),
+                    )
+                return admission
+        else:
+            result = self.adapter.reconcile(intent.operation_id)
         if not isinstance(result, dict) or result.get("operation_id") != intent.operation_id:
             raise MotorOutcomeUnknown("native reconciliation did not identify the successor")
         status = result.get("status")
@@ -597,6 +681,8 @@ class MotorExecutor:
                 "SELECT 1 FROM motor WHERE receipt IS NULL AND status!='acknowledged_unknown' LIMIT 1"
             ).fetchone():
                 raise MotorOutcomeUnknown("application has an unresolved motor operation")
+            if self._unknown_successor_exists(db):
+                raise MotorOutcomeUnknown("an unknown successor requires reconciliation")
             db.execute("INSERT INTO motor VALUES (?,?,'running',NULL,'[]')", (operation_id, identity))
         self._cancel = threading.Event()
         cancel = self._cancel

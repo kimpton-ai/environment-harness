@@ -62,6 +62,22 @@ class PreparedBrowser(BrowserMotor):
         )
 
 
+class NativePreparedBrowser(PreparedBrowser):
+    native_admits_prepared_successors = True
+
+    def __init__(self, driver):
+        super().__init__(driver)
+        self.native_admission = None
+        self.stops = 0
+
+    def stop(self):
+        self.stops += 1
+        super().stop()
+
+    def reconcile_prepared_successor(self, intent):
+        return self.native_admission
+
+
 def successor_setup(tmp_path: Path):
     driver = Driver()
     adapter = PreparedBrowser(driver)
@@ -215,3 +231,60 @@ def test_owner_epoch_change_rejects_admission(tmp_path):
     )
     assert admission.status == "rejected"
     assert adapter.admissions == 0
+
+
+def test_native_admission_proof_wins_after_freshness_expiry(tmp_path):
+    executor, _, request, selection, intent, authority, predecessor = successor_setup(tmp_path)
+    native = NativePreparedBrowser(Driver())
+    executor = MotorExecutor(native, executor.profile, journal=executor.journal)
+    executor.prepare_successor(intent, request=request, selection=selection, authority=authority)
+    native.native_admission = PreparedSuccessorAdmission(
+        intent_id=intent.intent_id,
+        predecessor_operation_id=intent.predecessor_operation_id,
+        operation_id=intent.operation_id,
+        metadata=intent.metadata,
+        status="admitted",
+    )
+    admission = executor.admit_successor(
+        intent.intent_id,
+        request=request,
+        selection=selection,
+        authority=authority,
+        predecessor=predecessor.model_dump(mode="json"),
+    )
+    assert admission.status == "admitted"
+    assert native.admissions == 0
+
+
+def test_native_restart_stops_then_reconciles_accepted_intent(tmp_path):
+    executor, _, request, selection, intent, authority, _ = successor_setup(tmp_path)
+    native = NativePreparedBrowser(Driver())
+    executor = MotorExecutor(native, executor.profile, journal=executor.journal)
+    executor.prepare_successor(intent, request=request, selection=selection, authority=authority)
+    native.native_admission = PreparedSuccessorAdmission(
+        intent_id=intent.intent_id,
+        predecessor_operation_id=intent.predecessor_operation_id,
+        operation_id=intent.operation_id,
+        metadata=intent.metadata,
+        status="admitted",
+    )
+    restarted = MotorExecutor(native, executor.profile, journal=executor.journal, discard_prepared=True)
+    assert native.stops == 1
+    assert (
+        restarted.admit_successor(
+            intent.intent_id, request=request, selection=selection, authority=authority
+        ).status
+        == "admitted"
+    )
+
+
+def test_unknown_successor_blocks_new_prepare_and_execute_until_reconciled(tmp_path):
+    executor, _, request, selection, intent, authority, _ = successor_setup(tmp_path)
+    executor.prepare_successor(intent, request=request, selection=selection, authority=authority)
+    with executor._db() as db:
+        db.execute("UPDATE motor_successors SET status='unknown' WHERE id=?", (intent.intent_id,))
+    with pytest.raises(MotorOutcomeUnknown, match="unknown successor"):
+        executor.prepare_successor(intent, request=request, selection=selection, authority=authority)
+    envelope = {"payload": request.model_dump(mode="json"), "write": True}
+    with pytest.raises(MotorOutcomeUnknown, match="unknown successor"):
+        executor.execute("new-operation", envelope, 1000, authority=authority)
