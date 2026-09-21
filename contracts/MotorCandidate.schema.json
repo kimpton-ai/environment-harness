@@ -8,6 +8,11 @@
           "title": "Arguments",
           "type": "object"
         },
+        "controls": {
+          "additionalProperties": true,
+          "title": "Controls",
+          "type": "object"
+        },
         "operation": {
           "minLength": 1,
           "title": "Operation",

@@ -1,5 +1,59 @@
 {
   "$defs": {
+    "MotorControlPermission": {
+      "additionalProperties": false,
+      "description": "One exact, environment-issued permission for bounded control inputs.",
+      "properties": {
+        "controls": {
+          "additionalProperties": true,
+          "title": "Controls",
+          "type": "object"
+        },
+        "id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "max_steps": {
+          "default": 1,
+          "maximum": 128,
+          "minimum": 1,
+          "title": "Max Steps",
+          "type": "integer"
+        },
+        "max_travel": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Travel"
+        },
+        "protected_region_revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Protected Region Revision"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "MotorControlPermission",
+      "type": "object"
+    },
     "MotorProfile": {
       "additionalProperties": false,
       "properties": {
@@ -50,6 +104,14 @@
           "title": "Arguments",
           "type": "object"
         },
+        "control_permissions": {
+          "items": {
+            "$ref": "#/$defs/MotorControlPermission"
+          },
+          "maxItems": 128,
+          "title": "Control Permissions",
+          "type": "array"
+        },
         "expected": {
           "additionalProperties": true,
           "minProperties": 1,
@@ -60,6 +122,13 @@
           "minLength": 1,
           "title": "Goal Revision",
           "type": "string"
+        },
+        "max_recovery_attempts": {
+          "default": 0,
+          "maximum": 128,
+          "minimum": 0,
+          "title": "Max Recovery Attempts",
+          "type": "integer"
         },
         "max_steps": {
           "default": 32,
@@ -210,6 +279,20 @@
       ],
       "default": null,
       "title": "Reason"
+    },
+    "reason_code": {
+      "anyOf": [
+        {
+          "maxLength": 80,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reason Code"
     },
     "request": {
       "$ref": "#/$defs/MotorRequest"

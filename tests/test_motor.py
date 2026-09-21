@@ -9,7 +9,12 @@ from environment_harness.errors import Conflict, Forbidden
 from environment_harness.fixtures import SyntheticEnvironment
 from environment_harness.motor import MotorOutcomeUnknown
 from environment_harness.motor_adapters import BrowserMotor
-from environment_harness.motor_contracts import MotorCandidate, MotorSelection, MotorStep
+from environment_harness.motor_contracts import (
+    MotorCandidate,
+    MotorControlPermission,
+    MotorSelection,
+    MotorStep,
+)
 from environment_harness.operations import Operations
 from environment_harness.runtime import EnvironmentSession
 from environment_harness.store import EvidenceStore
@@ -77,7 +82,7 @@ def setup(tmp_path, *, selector=None, adapter_class=BrowserMotor):
 
 
 def test_motor_operations_receipt_replay_and_profile(tmp_path):
-    driver, motor, prepare, dispatch, *_ = setup(tmp_path)
+    driver, motor, prepare, dispatch, session, who, environment, _ = setup(tmp_path)
     prepare()
     receipt = dispatch()
     assert receipt["status"] == "completed"
@@ -125,6 +130,15 @@ def test_unknown_effect_keeps_reservation_and_blocks_replay_after_restart(tmp_pa
     with session.store.transaction() as db:
         row = session.store.environment(db, eid, who)
         assert row["reserved"] == 100
+        assert len(driver.calls) == 1
+
+
+def test_unverified_postcondition_quarantines_completed_effect(tmp_path):
+    driver, motor, prepare, dispatch, session, who, environment, _ = setup(tmp_path)
+    prepare(request().model_copy(update={"expected": {"elements": [{"element_id": "input", "value": "different"}]}}))
+    with pytest.raises(MotorOutcomeUnknown, match="postcondition"):
+        dispatch()
+    assert motor.progress(f"{environment}:fill")["status"] == "unknown"
     assert len(driver.calls) == 1
 
 
@@ -168,6 +182,57 @@ def test_selector_cannot_invent_steps_and_cost_is_recorded(tmp_path):
     prepare()
     receipt = dispatch()
     assert receipt["status"] == "blocked" and receipt["cost_micros"] == 1
+    assert not driver.calls
+
+
+def test_intermediate_controls_are_explicit_and_semantic_target_stays_bound(tmp_path):
+    class Controlled(BrowserMotor):
+        def plan(self, req, observation):
+            return (MotorCandidate(
+                id="controlled", description="bounded focus", steps=(MotorStep(
+                    operation="fill", target=req.target, arguments=req.arguments,
+                    controls={"approach": "left", "distance": 1, "travel": 1},
+                ),)),)
+
+    permission = MotorControlPermission(id="left", controls={"approach": "left", "distance": 1, "travel": 1}, max_travel=2)
+    driver, _, prepare, dispatch, *_ = setup(tmp_path, adapter_class=Controlled)
+    prepared = request(control_permissions=(permission,))
+    prepare(prepared)
+    assert dispatch()["status"] == "completed"
+
+    driver, _, prepare, dispatch, *_ = setup(tmp_path, adapter_class=Controlled)
+    prepare(request(control_permissions=()))
+    receipt = dispatch()
+    assert receipt["status"] == "blocked" and receipt["reason_code"] == "unauthorized_control"
+    assert not driver.calls
+
+
+@pytest.mark.parametrize("travel", [1.0, float("nan"), -1.0, 3.0])
+def test_control_travel_bounds_are_finite_nonnegative_and_total(tmp_path, travel):
+    class Controlled(BrowserMotor):
+        def plan(self, req, observation):
+            controls = {"approach": "left", "travel": travel}
+            return (MotorCandidate(id="controlled", description="bounded", steps=(
+                MotorStep(operation="fill", target=req.target, arguments=req.arguments, controls=controls),
+            )),)
+
+    permission = MotorControlPermission(id="left", controls={"approach": "left", "travel": travel}, max_travel=2)
+    driver, _, prepare, dispatch, *_ = setup(tmp_path, adapter_class=Controlled)
+    prepare(request(control_permissions=(permission,)))
+    receipt = dispatch()
+    valid = travel == 1.0
+    assert receipt["status"] == ("completed" if valid else "blocked")
+    assert bool(driver.calls) is valid
+
+
+def test_jev_abstention_has_a_distinct_reason_code(tmp_path):
+    class Abstain(Selector):
+        def select(self, *args, **kwargs):
+            return MotorSelection(candidate_id=None, model=self.model, cost_micros=1)
+    driver, _, prepare, dispatch, *_ = setup(tmp_path, selector=Abstain())
+    prepare()
+    receipt = dispatch()
+    assert receipt["status"] == "blocked" and receipt["reason_code"] == "abstention"
     assert not driver.calls
 
 

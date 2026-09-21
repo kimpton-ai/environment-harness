@@ -24,6 +24,16 @@ class MotorProfile(MotorRecord):
         return self
 
 
+class MotorControlPermission(MotorRecord):
+    """One exact, environment-issued permission for bounded control inputs."""
+
+    id: str = Field(min_length=1, max_length=80)
+    controls: dict[str, Any] = Field(default_factory=dict)
+    max_steps: int = Field(default=1, ge=1, le=128, strict=True)
+    max_travel: float | None = Field(default=None, ge=0)
+    protected_region_revision: str | None = None
+
+
 class MotorRequest(MotorRecord):
     skill: str = Field(min_length=1, max_length=80)
     target: dict[str, Any]
@@ -34,12 +44,15 @@ class MotorRequest(MotorRecord):
     stop_epoch: int = Field(default=0, ge=0, strict=True)
     max_steps: int = Field(default=32, ge=1, le=128, strict=True)
     timeout_ms: int = Field(default=10000, ge=1, le=120000, strict=True)
+    control_permissions: tuple[MotorControlPermission, ...] = Field(default_factory=tuple, max_length=128)
+    max_recovery_attempts: int = Field(default=0, ge=0, le=128, strict=True)
 
 
 class MotorStep(MotorRecord):
     operation: str = Field(min_length=1)
     target: dict[str, Any]
     arguments: dict[str, Any] = Field(default_factory=dict)
+    controls: dict[str, Any] = Field(default_factory=dict)
 
 
 class MotorCandidate(MotorRecord):
@@ -64,6 +77,7 @@ class MotorReceipt(MotorRecord):
     profile: MotorProfile
     request: MotorRequest
     reason: str | None = None
+    reason_code: str | None = Field(default=None, min_length=1, max_length=80)
     before: dict[str, Any] = Field(default_factory=dict)
     after: dict[str, Any] = Field(default_factory=dict)
     selection: MotorSelection | None = None

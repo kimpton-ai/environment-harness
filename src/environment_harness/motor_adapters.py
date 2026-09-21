@@ -77,6 +77,18 @@ class _Adapter:
             raise MotorError("driver returned an invalid receipt")
         return deepcopy(result)
 
+    def revalidate(self, request, observation, selected, completed_index=0):
+        """Recheck a frozen selection while preserving its candidate and step IDs."""
+        candidates = self.plan(request, observation)
+        current = next((candidate for candidate in candidates if candidate.id == selected.id), None)
+        if current is None:
+            raise MotorError("selected candidate is no longer available")
+        if len(current.steps) != len(selected.steps):
+            raise MotorError("selected plan length changed")
+        if any(current.steps[index] != selected.steps[index] for index in range(len(selected.steps))):
+            raise MotorError("selected plan steps changed")
+        return (current,)
+
     def stop(self):
         self.driver.stop()
 

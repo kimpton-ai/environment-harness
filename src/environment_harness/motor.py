@@ -7,6 +7,7 @@ application to share its input lease between workers.
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 import threading
 import time
@@ -15,7 +16,14 @@ from pathlib import Path
 
 from .errors import BudgetExceeded, Conflict, Forbidden
 from .motor_adapters import MotorError
-from .motor_contracts import MotorAdapter, MotorCandidate, MotorProfile, MotorReceipt, MotorRequest
+from .motor_contracts import (
+    MotorAdapter,
+    MotorCandidate,
+    MotorControlPermission,
+    MotorProfile,
+    MotorReceipt,
+    MotorRequest,
+)
 from .store import encode
 
 
@@ -27,6 +35,41 @@ def _matches(expected, actual):
     if isinstance(expected, dict):
         return isinstance(actual, dict) and all(k in actual and _matches(v, actual[k]) for k, v in expected.items())
     return type(expected) is type(actual) and expected == actual
+
+
+def _control_permission(request, step):
+    """Return whether a step's bounded controls were explicitly authorized."""
+    if not step.controls:
+        return True
+    permissions = request.control_permissions
+    return any(isinstance(permission, MotorControlPermission) and permission.controls == step.controls for permission in permissions)
+
+
+def _validate_candidate(request, candidate, observation):
+    if any(not _matches(request.target, step.target) for step in candidate.steps):
+        return "target_changed"
+    if any(not _control_permission(request, step) for step in candidate.steps):
+        return "unauthorized_control"
+    if any(
+        key in request.arguments and not _matches(value, request.arguments[key])
+        for step in candidate.steps for key, value in step.arguments.items()
+    ):
+        return "unauthorized_arguments"
+    for permission in request.control_permissions:
+        matched = [step for step in candidate.steps if permission.controls == step.controls]
+        if not matched:
+            continue
+        if len(matched) > permission.max_steps:
+            return "control_limit_exceeded"
+        if permission.max_travel is not None:
+            travels = [step.controls.get("travel") for step in matched]
+            if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0 for value in travels):
+                return "control_limit_exceeded"
+            if sum(travels) > permission.max_travel:
+                return "control_limit_exceeded"
+        if permission.protected_region_revision is not None and observation.get("protected_region_revision") != permission.protected_region_revision:
+            return "protection_changed"
+    return None
 
 
 class MotorExecutor:
@@ -200,11 +243,12 @@ class MotorExecutor:
         watcher = threading.Thread(target=watch, daemon=True, name="motor-fence")
         watcher.start()
 
-        def finish(status, reason=None):
+        def finish(status, reason=None, reason_code=None):
             receipt = MotorReceipt(
                 operation_id=operation_id, status=status, cost_micros=cost, profile=self.profile,
                 request=request, reason=reason, before=before, after=after, selection=selection,
-                steps=tuple(steps), elapsed_ms=(time.monotonic() - started) * 1000,
+                steps=tuple(steps), reason_code=reason_code,
+                elapsed_ms=(time.monotonic() - started) * 1000,
             ).model_dump(mode="json")
             with self._db() as db:
                 db.execute("UPDATE motor SET status=?,receipt=? WHERE id=?", (status, encode(receipt), operation_id))
@@ -212,58 +256,72 @@ class MotorExecutor:
 
         try:
             if not check():
-                return finish("cancelled", "authority, deadline, or stop epoch expired")
+                return finish("cancelled", "authority, deadline, or stop epoch expired", "authority_expired")
             before = self.adapter.observe()
             after = before
             if str(before.get("revision", "")) != request.observation_revision:
-                return finish("blocked", "observation revision changed")
+                return finish("blocked", "observation revision changed", "observation_changed")
             try:
                 candidates = tuple(self.adapter.plan(request, before))
             except (MotorError, ValueError) as exc:
-                return finish("blocked", str(exc))
+                return finish("blocked", str(exc), "invalid_plan")
             if not candidates or any(not isinstance(c, MotorCandidate) for c in candidates):
-                return finish("blocked", "adapter supplied no valid bounded plans")
+                return finish("blocked", "adapter supplied no valid bounded plans", "no_plan")
             if len({c.id for c in candidates}) != len(candidates) or any(len(c.steps) > request.max_steps for c in candidates):
-                return finish("blocked", "candidate IDs or step bounds are invalid")
-            if any(not _matches(request.target, step.target) for c in candidates for step in c.steps):
-                return finish("blocked", "adapter plan changed the authorized target")
+                return finish("blocked", "candidate IDs or step bounds are invalid", "invalid_candidate")
+            invalid = None
+            for candidate in candidates:
+                invalid = _validate_candidate(request, candidate, before)
+                if invalid:
+                    break
+            if invalid:
+                return finish("blocked", "candidate violates the request authority", invalid)
             if not envelope.get("write") and any(step.operation != "read" for c in candidates for step in c.steps):
-                return finish("blocked", "read-only request cannot execute motor effects")
+                return finish("blocked", "read-only request cannot execute motor effects", "write_authority_required")
             chosen = candidates[0]
             if self.selector is not None:
                 projection = getattr(self.adapter, "selection_observation", None)
                 state = {"observation": projection(request, before) if projection else before,
                          "request": request.model_dump(mode="json")}
                 if self.selector.maximum_cost(state, candidates) > budget:
-                    return finish("blocked", "selector reservation exceeds operation budget")
+                    return finish("blocked", "selector reservation exceeds operation budget", "budget_exceeded")
                 if not check():
-                    return finish("cancelled", "authority expired before selection")
+                    return finish("cancelled", "authority expired before selection", "authority_expired")
                 selection = self.selector.select(state, candidates, maximum_cost_micros=budget, cancel=cancel, deadline=deadline)
                 cost = selection.cost_micros
                 if cost > budget:
                     raise BudgetExceeded("selector exceeded its reservation")
                 if selection.model != self.profile.selector_model:
-                    return finish("blocked", "selector model changed")
+                    return finish("blocked", "selector model changed", "selector_model_changed")
                 chosen = next((c for c in candidates if c.id == selection.candidate_id), None)
                 if chosen is None:
-                    return finish("blocked", "selector abstained or returned an unknown candidate")
+                    if selection.candidate_id is None:
+                        return finish("blocked", "selector abstained", "abstention")
+                    return finish("blocked", "selector returned an unknown candidate", "invalid_candidate")
             for index, step in enumerate(chosen.steps):
                 if not check():
-                    return finish("cancelled", "authority, deadline, or stop epoch expired")
+                    return finish("cancelled", "authority, deadline, or stop epoch expired", "authority_expired")
                 fresh = self.adapter.observe()
                 if fresh.get("revision") != after.get("revision"):
-                    return finish("blocked", "application changed before motor effect")
+                    return finish("blocked", "application changed before motor effect", "observation_changed")
                 # Revalidate target identity against current state before every effect.
                 try:
-                    replanned = self.adapter.plan(request.model_copy(update={"observation_revision": str(fresh["revision"])}), fresh)
+                    current_request = request.model_copy(update={"observation_revision": str(fresh["revision"])})
+                    revalidate = getattr(self.adapter, "revalidate", None)
+                    replanned = revalidate(current_request, fresh, chosen, index) if callable(revalidate) else self.adapter.plan(current_request, fresh)
                     current = next((c for c in replanned if c.id == chosen.id), None)
                     if current is None or index >= len(current.steps) or current.steps[index] != step:
-                        return finish("blocked", "planned control changed before effect")
+                        return finish("blocked", "planned control changed before effect", "plan_changed")
+                    invalid = _validate_candidate(current_request, current, fresh)
+                    if invalid:
+                        return finish("blocked", "revalidated candidate violates request authority", invalid)
                 except (MotorError, ValueError) as exc:
-                    return finish("blocked", str(exc))
+                    return finish("blocked", str(exc), "invalid_plan")
                 if not check():
-                    return finish("cancelled", "authority expired before motor effect")
+                    return finish("cancelled", "authority expired before motor effect", "authority_expired")
                 step_id = f"{operation_id}:motor:{index}"
+                if any(entry["id"] == step_id for entry in steps):
+                    return finish("blocked", "step effect was already recorded", "duplicate_effect")
                 entry = {"id": step_id, "candidate": chosen.id, "step": step.model_dump(mode="json"), "status": "dispatching"}
                 steps.append(entry)
                 self._save_progress(operation_id, steps)
@@ -275,12 +333,12 @@ class MotorExecutor:
                 self._save_progress(operation_id, steps)
                 after = self.adapter.observe()
                 if result["status"] != "completed":
-                    return finish(result["status"], "driver stopped the bounded skill")
+                    return finish(result["status"], "driver stopped the bounded skill", "driver_cancelled" if result["status"] == "cancelled" else "effect_rejected")
                 if not check():
-                    return finish("cancelled", "authority expired after effect")
+                    return finish("cancelled", "authority expired after effect", "authority_expired")
             if not _matches(request.expected, after):
-                return finish("blocked", "postcondition was not confirmed by observation")
-            return finish("completed")
+                raise MotorOutcomeUnknown("effect completed but its postcondition was not confirmed")
+            return finish("completed", reason_code="completed")
         except BaseException:
             cancel.set()
             try:
