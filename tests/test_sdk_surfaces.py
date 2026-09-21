@@ -12,7 +12,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from environment_harness import backends, hosted, plugins, receipts, worker
 from environment_harness.adapters.programs import HTTPAgent, InstrumentedModel, MCPTools
-from environment_harness.client import EnvironmentClient, NoRedirect, ServiceError
+from environment_harness.client import EnvironmentClient, NoRedirect
 from environment_harness.contracts import AgentSpec, ExperimentSpec, Principal
 from environment_harness.errors import Conflict, Forbidden, HarnessError, Unsupported
 from environment_harness.fixtures import SyntheticEnvironment
@@ -79,9 +79,23 @@ def test_remote_client_validates_transport_and_builds_public_requests(monkeypatc
     assert client.credentials("env", "a", ttl=30)[2] == {"participant": "a", "ttl": 30}
     assert client.reports("env")[1].endswith("/reports")
     assert client.events("env", 7)[1].endswith("events?after=7")
+    assert client.activity_snapshot()[1] == "/v1/activity/snapshot"
+    assert client.activity(3)[1].endswith("activity/events?after=3")
+    assert client.experiment_activity("a/b", 4)[1].endswith("experiments/a%2Fb/events?after=4")
+    assert client.session_activity("a/b", 5)[1].endswith("environments/a%2Fb/activity?after=5")
+
+
+def test_advanced_module_exposes_the_low_level_workflow():
+    import environment_harness.advanced as advanced
+
+    assert advanced.EnvironmentSession is not None
+    assert advanced.ExperimentSpec is ExperimentSpec
+    assert callable(advanced.run)
 
 
 def test_remote_client_redacts_failures_and_bounds_responses():
+    from environment_harness.errors import ServiceError
+
     client = EnvironmentClient("https://example.test", "credential")
 
     class Opener:
@@ -124,6 +138,30 @@ def test_remote_client_redacts_failures_and_bounds_responses():
     with pytest.raises(HarnessError, match="HTTP 403") as denied:
         client.request("GET", "/")
     assert "credential" not in str(denied.value) and "secret body" not in str(denied.value)
+    for unsafe in (
+        b"x" * 4097,
+        b"not-json",
+        json.dumps(
+            {
+                "error": {
+                    "code": "forbidden",
+                    "message": "Environment unavailable",
+                    "status": 200,
+                    "request_id": "request",
+                    "timestamp": "now",
+                }
+            }
+        ).encode(),
+    ):
+        opener.error = urllib.error.HTTPError(
+            "https://example.test",
+            403,
+            "private",
+            {"Content-Type": "application/json"},
+            io.BytesIO(unsafe),
+        )
+        with pytest.raises(HarnessError, match="HTTP 403"):
+            client.request("GET", "/")
     opener.error = urllib.error.URLError("private network detail")
     with pytest.raises(HarnessError, match="reconcile"):
         client.request("POST", "/")

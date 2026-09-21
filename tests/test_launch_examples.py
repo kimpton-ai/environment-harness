@@ -9,7 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from environment_harness import EvidenceStore, Principal
+from environment_harness import EvidenceStore, Principal, showcase
+from environment_harness.fixtures import SyntheticShowcaseAgent
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -91,3 +92,22 @@ def test_optional_pettingzoo_example_matches_its_frozen_agent_implementation(tmp
         "revision": 3,
         "status": "completed",
     }
+
+
+def test_synthetic_showcase_rejects_invalid_fixture_inputs(tmp_path, monkeypatch):
+    researcher = Principal(tenant="local", subject="researcher", role="researcher")
+    store = EvidenceStore(tmp_path)
+    with pytest.raises(ValueError, match="turns must be at least one"):
+        showcase.create_synthetic_experiment_showcase(store, researcher, turns=0)
+    with pytest.raises(ValueError, match="turns must be at least one"):
+        showcase.create_synthetic_showcase(store, researcher, turns=0)
+    with pytest.raises(ValueError, match="unknown synthetic showcase state"):
+        SyntheticShowcaseAgent().restore({"offset": 9})
+
+    monkeypatch.setattr(
+        showcase.EnvironmentSession,
+        "submit",
+        lambda *_args, **_kwargs: {"status": "completed"},
+    )
+    with pytest.raises(RuntimeError, match="expected its out-of-schema action to be blocked"):
+        showcase.create_synthetic_showcase(store, researcher, turns=1)

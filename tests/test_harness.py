@@ -14,7 +14,7 @@ from environment_harness import (
     Scenario,
 )
 from environment_harness.contracts import Capabilities, EnvironmentSpec, Transition
-from environment_harness.errors import Forbidden
+from environment_harness.errors import Conflict, Forbidden
 from environment_harness.server import create_app
 
 
@@ -170,7 +170,15 @@ def test_interrupted_experiment_requires_explicit_resume(tmp_path):
 
     assert interrupted_result.status == "interrupted"
     assert interrupted_result.sessions[0].status == "interrupted"
-    resumed = experiment.resume().wait(2)
+    interrupted_session = interrupted_result.sessions[0]
+    harness._futures.pop(interrupted_session.id)
+    with pytest.raises(Conflict, match="explicit resume"):
+        interrupted_session.wait()
+    reconnected = harness.experiment(
+        "restart", [Scenario(id="recoverable", input={"difficulty": 2})], turns=1
+    )
+    reconnected.id = experiment.id
+    resumed = reconnected.resume().wait(2)
     assert resumed.status == "succeeded"
 
 
@@ -257,6 +265,18 @@ def test_activity_snapshot_groups_experiments_and_keeps_standalone_sessions_top_
         harness.store.activity_snapshot(
             Principal(tenant="local", subject="agent", role="agent", participant="agent")
         )
+    agent = Principal(tenant="local", subject="agent", role="agent", participant="agent")
+    outsider = Principal(tenant="other", subject="researcher", role="researcher")
+    with pytest.raises(Forbidden, match="activity authority"):
+        harness.store.activity(agent)
+    with pytest.raises(ValueError, match="activity page"):
+        harness.store.activity(harness.researcher, after=-1)
+    with pytest.raises(ValueError, match="activity page"):
+        harness.store.activity(harness.researcher, limit=0)
+    with pytest.raises(Forbidden, match="experiment unavailable"):
+        harness.store.activity(outsider, experiment=grouped.id)
+    with pytest.raises(Forbidden, match="environment session unavailable"):
+        harness.store.activity(outsider, environment=standalone.id)
 
 
 def test_concurrent_progress_counts_and_failure_isolation(tmp_path):
@@ -329,3 +349,142 @@ def test_stopping_a_running_environment_session_is_terminal(tmp_path):
     session.wait(2)
 
     assert session.status == "stopped"
+
+
+def test_harness_lifecycle_guards_and_validation_edges(tmp_path):
+    low_level = EnvironmentSession(tmp_path / "low-level", ScenarioEnvironment())
+    with pytest.raises(AttributeError, match="do not have an ID"):
+        _ = low_level.id
+    with pytest.raises(AttributeError, match="lifecycle properties"):
+        _ = low_level.status
+    with pytest.raises(AttributeError, match="wait is available"):
+        low_level.wait()
+    with pytest.raises(AttributeError, match="stop is available"):
+        low_level.stop()
+    with pytest.raises(AttributeError, match="resume is available"):
+        low_level.resume()
+
+    with pytest.raises(ValueError, match="limits must be positive"):
+        EnvironmentHarness(
+            tmp_path / "limits",
+            environment_factory=ScenarioEnvironment,
+            agent_factories={"agent": ScenarioAgent},
+            max_concurrency=0,
+        )
+    with pytest.raises(ValueError, match="agent factory"):
+        EnvironmentHarness(tmp_path / "agents", environment_factory=ScenarioEnvironment, agent_factories={})
+
+    harness = EnvironmentHarness(
+        tmp_path / "valid",
+        environment_factory=ScenarioEnvironment,
+        agent_factories={"agent": ScenarioAgent},
+        max_sessions=2,
+    )
+    missing = EnvironmentSession(harness.store, ScenarioEnvironment(), harness=harness, session_id="f" * 32)
+    with pytest.raises(Conflict, match="record is unavailable"):
+        _ = missing.status
+    scenario = Scenario(id="one", input={"difficulty": 1})
+    with pytest.raises(ValueError, match="turns must be positive"):
+        harness.start(scenario, turns=0)
+    for name, scenarios, trials, turns, message in (
+        (" ", [scenario], 1, 1, "name is required"),
+        ("bad trials", [scenario], 0, 1, "trials and turns"),
+        ("bad turns", [scenario], 1, 0, "trials and turns"),
+        ("empty", [], 1, 1, "at least one scenario"),
+        ("duplicates", [scenario, scenario], 1, 1, "IDs must be unique"),
+    ):
+        with pytest.raises(ValueError, match=message):
+            harness.experiment(name, scenarios, trials=trials, turns=turns)
+    with pytest.raises(Conflict, match="exceeds max_sessions"):
+        harness.experiment("large", [scenario], trials=3)
+
+    pending = harness.experiment("pending", [scenario], turns=1)
+    with pytest.raises(Conflict, match="before waiting"):
+        pending.wait()
+    with pytest.raises(Conflict, match="before stopping"):
+        pending.stop()
+    with pytest.raises(Conflict, match="before resuming"):
+        pending.resume()
+    with pytest.raises(Conflict, match="unavailable"):
+        pending.result()
+    assert pending.start().start() is pending
+    result = pending.wait(2)
+    harness._futures.pop(result.sessions[0].id)
+    assert result.sessions[0].wait().status == "succeeded"
+    with pytest.raises(Conflict, match="only interrupted"):
+        result.sessions[0].resume()
+
+    class SchemaEnvironment(ScenarioEnvironment):
+        scenario_type = None
+        spec = ScenarioEnvironment.spec.model_copy(
+            update={
+                "scenario_schema": {
+                    "type": "object",
+                    "properties": {"difficulty": {"type": "integer"}},
+                    "required": ["difficulty"],
+                    "additionalProperties": False,
+                }
+            }
+        )
+
+    schema_harness = EnvironmentHarness(
+        tmp_path / "schema",
+        environment_factory=SchemaEnvironment,
+        agent_factories={"agent": ScenarioAgent},
+    )
+    assert schema_harness._validate_scenario(scenario) == scenario
+
+
+def test_harness_stops_queued_work_and_enforces_active_limits(tmp_path):
+    started = Event()
+    release = Event()
+
+    class BlockingAgent(ScenarioAgent):
+        def act(self, observation):
+            started.set()
+            release.wait(2)
+            return {}
+
+    harness = EnvironmentHarness(
+        tmp_path / "queued",
+        environment_factory=ScenarioEnvironment,
+        agent_factories={"agent": BlockingAgent},
+        max_concurrency=1,
+        max_sessions=3,
+    )
+    running = harness.start(Scenario(id="running", input={"difficulty": 1}), turns=1)
+    assert started.wait(2)
+    queued = harness.start(Scenario(id="queued", input={"difficulty": 2}), turns=1)
+    queued.stop().wait(2)
+    assert queued.status == "stopped"
+    experiment = harness.experiment(
+        "queued experiment", [Scenario(id="experiment", input={"difficulty": 3})], turns=1
+    ).start()
+    assert experiment.stop().status == "stopped"
+    release.set()
+    running.wait(2)
+
+    limit_started = Event()
+    limit_release = Event()
+
+    class LimitAgent(ScenarioAgent):
+        def act(self, observation):
+            limit_started.set()
+            limit_release.wait(2)
+            return {}
+
+    limited = EnvironmentHarness(
+        tmp_path / "limited",
+        environment_factory=ScenarioEnvironment,
+        agent_factories={"agent": LimitAgent},
+        max_concurrency=1,
+        max_sessions=1,
+    )
+    active = limited.start(Scenario(id="active", input={"difficulty": 1}), turns=1)
+    assert limit_started.wait(2)
+    with pytest.raises(Conflict, match="max_sessions limit"):
+        limited.start(Scenario(id="second", input={"difficulty": 2}), turns=1)
+    with pytest.raises(Conflict, match="max_sessions limit"):
+        limited.experiment("second", [Scenario(id="experiment", input={"difficulty": 3})], turns=1).start()
+    limit_release.set()
+    active.wait(2)

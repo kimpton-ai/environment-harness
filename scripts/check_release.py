@@ -109,9 +109,10 @@ try:
     comparison = client.request("POST", "/v1/compare", {"environments": [parent, child]})
     assert len(comparison["metric_groups"]) == 1
     assert comparison["metric_groups"][0]["definition"]["unit"] == "count"
-    cancelled = client.cancel(parent)
+    cancel_target = client.create(client.get(parent)["experiment"])["id"]
+    cancelled = client.cancel(cancel_target)
     assert cancelled["status"] == "cancelled" and not cancelled["unresolved_agent_work"]
-    assert client.cancel(parent) == cancelled
+    assert client.cancel(cancel_target) == cancelled
 finally:
     server.terminate()
     server.wait(timeout=10)

@@ -7,7 +7,9 @@ from fastapi.testclient import TestClient
 
 from environment_harness import AgentSpec, EnvironmentSession, EvidenceStore, ExperimentSpec, Principal
 from environment_harness.contracts import Action, RunPolicy, ScoreReport
+from environment_harness.errors import HarnessError
 from environment_harness.fixtures import SyntheticAgent, SyntheticEnvironment
+from environment_harness.presentation import SLOTS
 from environment_harness.runner import run
 from environment_harness.server import create_app
 from environment_harness.store import uid
@@ -376,11 +378,45 @@ def test_interactive_api_reference_has_route_scoped_asset_policy(tmp_path):
     health_policy = client.get("/health").headers["content-security-policy"]
 
     assert docs.status_code == 200
-    assert "https://cdn.jsdelivr.net" in docs_policy
-    assert "https://fastapi.tiangolo.com" in docs_policy
-    assert "'unsafe-inline'" in docs_policy
-    assert "https://cdn.jsdelivr.net" not in health_policy
-    assert "'unsafe-inline'" not in health_policy
+    assert docs_policy == (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "img-src 'self' data: https://fastapi.tiangolo.com; "
+        "connect-src 'self'; object-src 'none'; frame-ancestors 'none'"
+    )
+    assert health_policy == (
+        "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; "
+        "object-src 'none'; frame-ancestors 'none'"
+    )
+    assert client.get("/session/example").status_code == 200
+    assert client.get("/experiment/example").status_code == 200
+
+
+def test_http_boundaries_reject_oversize_invalid_and_unavailable_requests(tmp_path, monkeypatch):
+    client, store, session, researcher, spec, environment, headers, agent_headers = service(tmp_path)
+
+    oversized = client.post("/v1/compare", content=b"x" * 16777217, headers=headers)
+    assert oversized.status_code == 413
+    assert oversized.json()["error"]["code"] == "request_too_large"
+    invalid_control = client.post(
+        f"/v1/environments/{environment}/commands",
+        headers=headers,
+        json={"operation": "control", "arguments": {"lease": {}, "command": "unknown"}},
+    )
+    assert invalid_control.status_code == 422
+    assert invalid_control.json()["error"]["code"] == "invalid_request"
+    assert (
+        client.get("/v1/activity/events", headers=headers | {"Last-Event-ID": "invalid"}).status_code == 422
+    )
+
+    def unavailable(*_args, **_kwargs):
+        raise HarnessError("synthetic unavailable")
+
+    monkeypatch.setattr(store, "activity", unavailable)
+    failure = client.get("/v1/activity/events", headers=headers)
+    assert failure.status_code == 503
+    assert failure.json()["error"]["code"] == "harness_error"
 
 
 def test_http_route_and_role_matrix(tmp_path):
@@ -478,6 +514,63 @@ def test_turn_series_bounds_long_sessions_and_preserves_range_endpoints(tmp_path
         ).status_code
         == 422
     )
+
+
+def test_turn_series_ignores_non_numeric_signals_and_counts_blocked_attempts(monkeypatch):
+    import environment_harness.evaluation as evaluation
+
+    slots = {slot: [] for slot in SLOTS}
+    slots["observation"] = [{"payload": {"value": 1}}]
+    events = [
+        {
+            "revision": 0,
+            "kind": "action.attempted",
+            "payload": {"receipt": {"status": "blocked"}},
+            "audience": ["alice"],
+        },
+        {
+            "revision": 1,
+            "kind": "synthetic.signal",
+            "payload": {"boolean": True, "infinite": float("inf"), "count": 3},
+            "audience": ["*"],
+        },
+    ]
+
+    class Transaction:
+        def __enter__(self):
+            return object()
+
+        def __exit__(self, *_args):
+            return None
+
+    class Store:
+        def transaction(self):
+            return Transaction()
+
+        def environment(self, *_args):
+            return {"participants": '["alice"]'}
+
+        def replay(self, *_args):
+            return iter(events)
+
+    monkeypatch.setattr(
+        evaluation,
+        "build_timeline",
+        lambda *_args: [{"revision": 0, "participants": {"alice": slots}}],
+    )
+    monkeypatch.setattr(evaluation, "next_revision", lambda _turn: 1)
+
+    projection = evaluation.turn_series(
+        Store(), "environment", Principal(tenant="tenant", subject="researcher", role="researcher")
+    )
+
+    assert (
+        next(item for item in projection["series"] if item["id"] == "signal:synthetic.signal:count")[
+            "points"
+        ][0]["value"]
+        == 3
+    )
+    assert all("boolean" not in item["id"] and "infinite" not in item["id"] for item in projection["series"])
 
 
 def test_http_commands_credentials_operations_artifacts_and_reports(tmp_path):
