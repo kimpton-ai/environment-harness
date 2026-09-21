@@ -25,14 +25,14 @@ jobs:
         image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
         env:
           POSTGRES_USER: harness
-          POSTGRES_PASSWORD: synthetic-local-only
+          POSTGRES_PASSWORD: synthetic-local-only # pragma: allowlist secret (ephemeral test database)
           POSTGRES_DB: harness
         ports: ['5432:5432']
         options: >-
           --health-cmd "pg_isready -U harness -d harness"
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
-      ENVIRONMENT_HARNESS_POSTGRES_URL: postgresql://harness:synthetic-local-only@127.0.0.1:5432/harness
+      ENVIRONMENT_HARNESS_POSTGRES_URL: postgresql://harness:synthetic-local-only@127.0.0.1:5432/harness # pragma: allowlist secret (ephemeral test database)
     permissions:
       contents: read
     steps:
