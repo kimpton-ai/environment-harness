@@ -1,0 +1,68 @@
+{
+  "$id": "urn:environment-harness:v1:MotorRequest",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "arguments": {
+      "additionalProperties": true,
+      "title": "Arguments",
+      "type": "object"
+    },
+    "expected": {
+      "additionalProperties": true,
+      "minProperties": 1,
+      "title": "Expected",
+      "type": "object"
+    },
+    "goal_revision": {
+      "minLength": 1,
+      "title": "Goal Revision",
+      "type": "string"
+    },
+    "max_steps": {
+      "default": 32,
+      "maximum": 128,
+      "minimum": 1,
+      "title": "Max Steps",
+      "type": "integer"
+    },
+    "observation_revision": {
+      "minLength": 1,
+      "title": "Observation Revision",
+      "type": "string"
+    },
+    "skill": {
+      "maxLength": 80,
+      "minLength": 1,
+      "title": "Skill",
+      "type": "string"
+    },
+    "stop_epoch": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Stop Epoch",
+      "type": "integer"
+    },
+    "target": {
+      "additionalProperties": true,
+      "title": "Target",
+      "type": "object"
+    },
+    "timeout_ms": {
+      "default": 10000,
+      "maximum": 120000,
+      "minimum": 1,
+      "title": "Timeout Ms",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "skill",
+    "target",
+    "expected",
+    "observation_revision",
+    "goal_revision"
+  ],
+  "title": "MotorRequest",
+  "type": "object"
+}

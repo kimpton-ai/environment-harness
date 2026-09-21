@@ -1,0 +1,44 @@
+{
+  "$id": "urn:environment-harness:v1:MotorProfile",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "adapter": {
+      "minLength": 1,
+      "title": "Adapter",
+      "type": "string"
+    },
+    "executor": {
+      "const": "motor.v1",
+      "default": "motor.v1",
+      "title": "Executor",
+      "type": "string"
+    },
+    "mode": {
+      "default": "deterministic",
+      "enum": [
+        "deterministic",
+        "jev"
+      ],
+      "title": "Mode",
+      "type": "string"
+    },
+    "selector_model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Selector Model"
+    }
+  },
+  "required": [
+    "adapter"
+  ],
+  "title": "MotorProfile",
+  "type": "object"
+}
