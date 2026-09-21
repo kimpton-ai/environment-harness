@@ -1,0 +1,46 @@
+{
+  "actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be": {
+    "release": "v2.4.0",
+    "published_at": "2025-06-11T17:37:01Z"
+  },
+  "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683": {
+    "release": "v4.2.2",
+    "published_at": "2024-10-23T14:46:00Z"
+  },
+  "actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294": {
+    "release": "v5.0.0",
+    "published_at": "2026-05-08T20:23:50Z"
+  },
+  "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093": {
+    "release": "v4.3.0",
+    "published_at": "2025-04-24T16:28:16Z"
+  },
+  "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020": {
+    "release": "v4.4.0",
+    "published_at": "2025-04-14T02:55:06Z"
+  },
+  "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065": {
+    "release": "v5.6.0",
+    "published_at": "2025-04-24T02:50:16Z"
+  },
+  "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02": {
+    "release": "v4.6.2",
+    "published_at": "2025-03-19T17:47:02Z"
+  },
+  "astral-sh/setup-uv@557e51de59eb14aaaba2ed9621916900a91d50c6": {
+    "release": "v6.6.1",
+    "published_at": "2025-09-01T14:25:53Z"
+  },
+  "codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f": {
+    "release": "v7.0.0",
+    "published_at": "2026-06-07T01:47:01Z"
+  },
+  "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33": {
+    "release": "v1.14.2",
+    "published_at": "2026-07-29T19:31:27Z"
+  },
+  "zizmorcore/zizmor-action@70fb788f84895a7701f5643d103d587e460b5c99": {
+    "release": "v0.6.3",
+    "published_at": "2026-08-30T21:35:33Z"
+  }
+}

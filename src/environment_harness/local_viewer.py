@@ -21,8 +21,10 @@ class LocalViewerLogin:
 
     def redeem(self, ticket: str) -> str:
         with self._lock:
-            if not self.ticket or time.monotonic() >= self.expires or not secrets.compare_digest(
-                ticket, self.ticket
+            if (
+                not self.ticket
+                or time.monotonic() >= self.expires
+                or not secrets.compare_digest(ticket, self.ticket)
             ):
                 raise Forbidden("Local connection link expired or already used. Restart with serve --open.")
             self.ticket = ""
@@ -34,7 +36,9 @@ def open_browser(url: str) -> bool:
     if sys.platform == "darwin":
         for browser in ("Google Chrome", "Safari"):
             result = subprocess.run(
-                ["open", "-a", browser, url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                ["open", "-a", browser, url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
             if result.returncode == 0:
                 return True

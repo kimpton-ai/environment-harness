@@ -6,5 +6,8 @@ from .motor_contracts import MotorAdapter, MotorProfile, MotorRequest
 from .runtime import EnvironmentSession
 from .store import EvidenceStore
 
-__all__ = ["MotorExecutor", "MotorAdapter", "MotorProfile", "MotorRequest", "AgentSpec", "EnvironmentSpec", "ExperimentSpec", "Principal", "EnvironmentSession", "EvidenceStore"]
-__version__ = "0.1.0"
+__all__ = [
+    "AgentSpec", "EnvironmentSpec", "ExperimentSpec", "Principal", "EnvironmentSession", "EvidenceStore",
+    "MotorExecutor", "MotorAdapter", "MotorProfile", "MotorRequest",
+]
+__version__ = "0.2.3rc1"

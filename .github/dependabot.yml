@@ -1,0 +1,44 @@
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 1
+    groups:
+      routine-version-updates:
+        applies-to: version-updates
+        patterns:
+          - "*"
+    reviewers:
+      - kimpton-ai/maintainers
+  - package-ecosystem: npm
+    directory: /packages/typescript
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 1
+    groups:
+      routine-version-updates:
+        applies-to: version-updates
+        patterns:
+          - "*"
+    reviewers:
+      - kimpton-ai/maintainers
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 1
+    groups:
+      routine-version-updates:
+        applies-to: version-updates
+        patterns:
+          - "*"
+    reviewers:
+      - kimpton-ai/maintainers

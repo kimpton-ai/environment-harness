@@ -12,7 +12,16 @@ class Operations:
         self.store = store
 
     def prepare(
-        self, environment, who, operation_id, *, endpoint, operation, payload, maximum_cost_micros=0, write=False
+        self,
+        environment,
+        who,
+        operation_id,
+        *,
+        endpoint,
+        operation,
+        payload,
+        maximum_cost_micros=0,
+        write=False,
     ):
         if not operation_id or len(operation_id) > 128 or maximum_cost_micros < 0:
             raise ValueError("invalid operation")
@@ -41,9 +50,18 @@ class Operations:
                 raise BudgetExceeded("operation exceeds remaining budget")
             db.execute(
                 "INSERT INTO operations VALUES (?,?,?,?,?,'prepared',NULL,?)",
-                (environment, operation_id, who.participant, who.generation, encode(request), maximum_cost_micros),
+                (
+                    environment,
+                    operation_id,
+                    who.participant,
+                    who.generation,
+                    encode(request),
+                    maximum_cost_micros,
+                ),
             )
-            db.execute("UPDATE environments SET reserved=reserved+? WHERE id=?", (maximum_cost_micros, environment))
+            db.execute(
+                "UPDATE environments SET reserved=reserved+? WHERE id=?", (maximum_cost_micros, environment)
+            )
             self.store.append(
                 db,
                 environment,
@@ -87,7 +105,8 @@ class Operations:
                 if payload.goal_revision != str(row["revision"]):
                     raise Conflict("motor goal revision is stale")
             db.execute(
-                "UPDATE operations SET status='dispatching' WHERE environment=? AND id=?", (environment, operation_id)
+                "UPDATE operations SET status='dispatching' WHERE environment=? AND id=?",
+                (environment, operation_id),
             )
             self.store.append(
                 db,
@@ -196,8 +215,12 @@ class Operations:
             "SELECT * FROM operations WHERE environment=? AND status='prepared'", (environment,)
         ).fetchall()
         for op in ops:
-            db.execute("UPDATE operations SET status='failed' WHERE environment=? AND id=?", (environment, op["id"]))
-            db.execute("UPDATE environments SET reserved=reserved-? WHERE id=?", (op["reservation"], environment))
+            db.execute(
+                "UPDATE operations SET status='failed' WHERE environment=? AND id=?", (environment, op["id"])
+            )
+            db.execute(
+                "UPDATE environments SET reserved=reserved-? WHERE id=?", (op["reservation"], environment)
+            )
             self.store.append(
                 db,
                 environment,

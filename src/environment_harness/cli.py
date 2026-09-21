@@ -42,7 +42,9 @@ def main():
     branch.add_argument("--interventions", default="{}")
     comparison = sub.add_parser("compare")
     comparison.add_argument("environments", nargs="+")
-    comparison.add_argument("--json", action="store_true", help="Print the comparison record instead of the summary")
+    comparison.add_argument(
+        "--json", action="store_true", help="Print the comparison record instead of the summary"
+    )
     listing = sub.add_parser("list")
     listing.add_argument("--json", action="store_true")
     listing.add_argument("--limit", type=int, default=100)
@@ -50,9 +52,13 @@ def main():
         command = sub.add_parser(name)
         command.add_argument("environment")
         command.add_argument("--json", action="store_true")
-    sub.choices["timeline"].add_argument("--participant", help="Show only evidence visible to this participant")
+    sub.choices["timeline"].add_argument(
+        "--participant", help="Show only evidence visible to this participant"
+    )
     sub.choices["timeline"].add_argument("--kind", help="Show only event kinds containing this text")
-    sub.choices["timeline"].add_argument("--verbose", "-v", action="store_true", help="Include recorded payloads")
+    sub.choices["timeline"].add_argument(
+        "--verbose", "-v", action="store_true", help="Include recorded payloads"
+    )
     token = sub.add_parser("token")
     token.add_argument("--environment")
     token.add_argument("--participant")
@@ -123,13 +129,21 @@ def main():
         os.chmod(path, 0o600)
         print(f"Viewer: http://127.0.0.1:{args.port}\nCredential file: {path}", flush=True)
         login = LocalViewerLogin(f"http://127.0.0.1:{args.port}", credential) if args.open else None
-        server = uvicorn.Server(uvicorn.Config(
-            create_app(session, local_login=login), host="127.0.0.1", port=args.port,
-            access_log=False, proxy_headers=False,
-        ))
+        server = uvicorn.Server(
+            uvicorn.Config(
+                create_app(session, local_login=login),
+                host="127.0.0.1",
+                port=args.port,
+                access_log=False,
+                proxy_headers=False,
+            )
+        )
         if login is not None:
             threading.Thread(target=open_when_ready, args=(server, login), daemon=True).start()
-        server.run()
+        try:
+            server.run()
+        except KeyboardInterrupt:
+            pass
         return
     if args.command == "token":
         if args.participant:
@@ -184,13 +198,23 @@ def inspect(store, who, args):
         return
     item = session.get(args.environment, who)
     perspective = getattr(args, "participant", None)
-    events = presentation.filter_events(store.replay(args.environment, who), perspective, getattr(args, "kind", None))
+    events = presentation.filter_events(
+        store.replay(args.environment, who), perspective, getattr(args, "kind", None)
+    )
     turns = presentation.build_timeline(events, item["participants"])
     if args.command == "timeline":
-        print(json.dumps(turns, indent=2) if args.json else presentation.render_timeline(turns, args.verbose, perspective))
+        print(
+            json.dumps(turns, indent=2)
+            if args.json
+            else presentation.render_timeline(turns, args.verbose, perspective)
+        )
         return
     reports = store.reports(args.environment, who)
-    print(json.dumps(item | {"reports": reports}, indent=2) if args.json else presentation.render_environment(item, reports, turns))
+    print(
+        json.dumps(item | {"reports": reports}, indent=2)
+        if args.json
+        else presentation.render_environment(item, reports, turns)
+    )
 
 
 if __name__ == "__main__":

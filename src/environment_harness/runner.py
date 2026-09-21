@@ -10,6 +10,8 @@ from .contracts import Action, Principal
 from .errors import Conflict
 from .store import digest, encode, uid
 
+_monotonic = time.monotonic
+
 
 @contextmanager
 def writer(session, environment, researcher, owner):
@@ -46,7 +48,8 @@ def _prepare(session, environment, principal, observation, lease):
         if row["status"] != "running":
             raise Conflict("session is not running")
         existing = db.execute(
-            "SELECT * FROM agent_work WHERE environment=? AND revision=? AND participant=? AND generation=?", key
+            "SELECT * FROM agent_work WHERE environment=? AND revision=? AND participant=? AND generation=?",
+            key,
         ).fetchone()
         if existing:
             if existing["status"] in ("dispatching", "unknown", "failed"):
@@ -67,19 +70,38 @@ def _invoke(session, environment, principal, observation, agent, work, lease, ca
         row = session.store.environment(db, environment, principal, ("agent",))
         session._fence(row, lease)
         current = db.execute(
-            "SELECT * FROM agent_work WHERE environment=? AND revision=? AND participant=? AND generation=?", key
+            "SELECT * FROM agent_work WHERE environment=? AND revision=? AND participant=? AND generation=?",
+            key,
         ).fetchone()
-        if (current is None or current["id"] != work["id"] or current["status"] != "prepared"
-                or row["revision"] != observation["revision"] or row["status"] != "running" or cancel_event.is_set()):
+        if (
+            current is None
+            or current["id"] != work["id"]
+            or current["status"] != "prepared"
+            or row["revision"] != observation["revision"]
+            or row["status"] != "running"
+            or cancel_event.is_set()
+        ):
             raise Conflict("agent work already dispatched or phase changed")
         member = json.loads(row["participants"])[principal.participant]
         _validate_agent(agent, member)
-        registration = next(p for p in json.loads(row["manifest"])["participants"] if p["id"] == principal.participant)
-        session.store.append(db, environment, row["revision"], "agent.dispatched", {
-            "operation_id": work["id"], "participant": principal.participant,
-            "generation": principal.generation, "implementation": agent.implementation,
-            "config_hash": digest(registration["config"]), "policy_version": member["policy_version"],
-        }, (principal.participant,))
+        registration = next(
+            p for p in json.loads(row["manifest"])["participants"] if p["id"] == principal.participant
+        )
+        session.store.append(
+            db,
+            environment,
+            row["revision"],
+            "agent.dispatched",
+            {
+                "operation_id": work["id"],
+                "participant": principal.participant,
+                "generation": principal.generation,
+                "implementation": agent.implementation,
+                "config_hash": digest(registration["config"]),
+                "policy_version": member["policy_version"],
+            },
+            (principal.participant,),
+        )
         db.execute(
             "UPDATE agent_work SET status='dispatching' "
             "WHERE environment=? AND revision=? AND participant=? AND generation=?",
@@ -103,9 +125,14 @@ def _invoke(session, environment, principal, observation, agent, work, lease, ca
                 "SELECT id,status FROM agent_work WHERE environment=? AND revision=? AND participant=? AND generation=?",
                 key,
             ).fetchone()
-            if (row["revision"] != observation["revision"] or row["status"] != "running"
-                    or current is None or current["id"] != work["id"] or current["status"] != "dispatching"
-                    or cancel_event.is_set()):
+            if (
+                row["revision"] != observation["revision"]
+                or row["status"] != "running"
+                or current is None
+                or current["id"] != work["id"]
+                or current["status"] != "dispatching"
+                or cancel_event.is_set()
+            ):
                 raise Conflict("agent response no longer owns its dispatch")
             members = json.loads(row["participants"])
             members[principal.participant]["agent_state"] = state
@@ -148,8 +175,10 @@ def phase_guard(session, environment, researcher, lease, failures, signals, dead
     def monitor():
         while not stop.wait(0.2):
             try:
-                if time.monotonic() >= deadline:
-                    raise TimeoutError("agent phase deadline exceeded; unresolved work requires reconciliation")
+                if _monotonic() >= deadline:
+                    raise TimeoutError(
+                        "agent phase deadline exceeded; unresolved work requires reconciliation"
+                    )
                 with session.store.transaction() as db:
                     row = session.store.environment(db, environment, researcher)
                     session._fence(row, lease)
@@ -185,13 +214,14 @@ def run(session, environment, researcher, agents, *, turns=10, owner=None, phase
                 row = session.store.environment(db, environment, researcher)
                 members = json.loads(row["participants"])
                 accepted = {
-                    r["participant"] for r in db.execute(
+                    r["participant"]
+                    for r in db.execute(
                         "SELECT participant FROM actions WHERE environment=? AND revision=? AND status='accepted'",
                         (environment, row["revision"]),
                     )
                 }
             signals = {p: threading.Event() for p in members}
-            deadline = time.monotonic() + phase_timeout
+            deadline = _monotonic() + phase_timeout
             with phase_guard(session, environment, researcher, lease, failures, signals, deadline):
                 pool = ThreadPoolExecutor(max_workers=min(32, len(members)))
                 pending = {}
@@ -202,8 +232,12 @@ def run(session, environment, researcher, agents, *, turns=10, owner=None, phase
                         if not member["active"] or participant in accepted:
                             continue
                         principal = Principal(
-                            tenant=researcher.tenant, subject=member["controller"], role="agent",
-                            environment=environment, participant=participant, generation=member["generation"],
+                            tenant=researcher.tenant,
+                            subject=member["controller"],
+                            role="agent",
+                            environment=environment,
+                            participant=participant,
+                            generation=member["generation"],
                         )
                         observation = session.observe(environment, principal)
                         if not observation["may_act"]:
@@ -219,27 +253,45 @@ def run(session, environment, researcher, agents, *, turns=10, owner=None, phase
                             future = pool.submit(lambda response: response, work["response"])
                         else:
                             future = pool.submit(
-                                _invoke, session, environment, principal, observation,
-                                agents[principal.participant], work, lease, signals[principal.participant],
+                                _invoke,
+                                session,
+                                environment,
+                                principal,
+                                observation,
+                                agents[principal.participant],
+                                work,
+                                lease,
+                                signals[principal.participant],
                             )
                         pending[future] = (principal, observation, work)
                     while pending:
                         if failures:
                             raise failures[0]
-                        if time.monotonic() >= deadline:
-                            raise TimeoutError("agent phase deadline exceeded; unresolved work requires reconciliation")
+                        if _monotonic() >= deadline:
+                            raise TimeoutError(
+                                "agent phase deadline exceeded; unresolved work requires reconciliation"
+                            )
                         if session.get(environment, researcher)["status"] != "running":
                             raise Conflict("environment stopped during agent work")
                         done, _ = wait(pending, timeout=0.2, return_when=FIRST_COMPLETED)
-                        if time.monotonic() >= deadline:
-                            raise TimeoutError("agent phase deadline exceeded; unresolved work requires reconciliation")
+                        if _monotonic() >= deadline:
+                            raise TimeoutError(
+                                "agent phase deadline exceeded; unresolved work requires reconciliation"
+                            )
                         for future in done:
                             principal, observation, work = pending.pop(future)
                             payload = json.loads(future.result())
-                            receipt = session.submit(environment, principal, Action(
-                                operation_id=work["id"], participant=principal.participant,
-                                observation_id=observation["id"], revision=observation["revision"], payload=payload,
-                            ))
+                            receipt = session.submit(
+                                environment,
+                                principal,
+                                Action(
+                                    operation_id=work["id"],
+                                    participant=principal.participant,
+                                    observation_id=observation["id"],
+                                    revision=observation["revision"],
+                                    payload=payload,
+                                ),
+                            )
                             if receipt["status"] not in ("accepted", "committed"):
                                 raise Conflict(receipt["reason"])
                     if failures:
@@ -251,8 +303,11 @@ def run(session, environment, researcher, agents, *, turns=10, owner=None, phase
                     for signal in signals.values():
                         signal.set()
                     # Command agents finish bounded cleanup; opaque Python/remote work stays unresolved.
-                    managed = [f for f, (p, _, _) in pending.items()
-                               if getattr(agents.get(p.participant), "managed_cancellation", False)]
+                    managed = [
+                        f
+                        for f, (p, _, _) in pending.items()
+                        if getattr(agents.get(p.participant), "managed_cancellation", False)
+                    ]
                     if managed:
                         wait(managed, timeout=3)
                     pool.shutdown(wait=False, cancel_futures=True)

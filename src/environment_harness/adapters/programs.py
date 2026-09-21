@@ -2,18 +2,17 @@
 
 import json
 import os
-import selectors
-import signal
+import queue
 import subprocess
 import tempfile
 import threading
 import time
-from contextlib import suppress
 from pathlib import Path
 
 from ..client import EnvironmentClient
 from ..errors import Conflict, Unsupported
 from ..store import encode
+from ._subprocess import popen_group, terminate_tree
 
 
 class CommandAgent:
@@ -39,19 +38,34 @@ class CommandAgent:
             with source.open("rb") as stdin:
                 if cancel_event.is_set():
                     raise Conflict("agent execution cancelled")
-                process = subprocess.Popen(
+                process = popen_group(
                     self.command,
                     stdin=stdin,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.DEVNULL,
                     cwd=directory,
                     env={"PATH": os.defpath, "LANG": "C.UTF-8", "PYTHON_DOTENV_DISABLED": "1"},
-                    start_new_session=True,
                 )
-                selector = selectors.DefaultSelector()
-                selector.register(process.stdout, selectors.EVENT_READ)
+                stdout = process.stdout
+                if stdout is None:
+                    self._terminate_group(process)
+                    raise Conflict("agent output pipe is unavailable")
+                chunks = queue.Queue()
+
+                def read_output():
+                    try:
+                        while chunk := stdout.read(65536):
+                            chunks.put(chunk)
+                    except (OSError, ValueError) as exc:
+                        chunks.put(exc)
+                    finally:
+                        chunks.put(None)
+
+                reader = threading.Thread(target=read_output, daemon=True)
+                reader.start()
                 output = bytearray()
                 deadline = time.monotonic() + self.timeout
+                output_closed = False
                 try:
                     while True:
                         if cancel_event.is_set():
@@ -59,19 +73,23 @@ class CommandAgent:
                         remaining = deadline - time.monotonic()
                         if remaining <= 0:
                             raise Conflict("agent deadline exceeded")
-                        ready = selector.select(min(remaining, 0.1))
-                        if ready:
-                            chunk = os.read(process.stdout.fileno(), 65536)
-                            if not chunk:
+                        if output_closed:
+                            if process.poll() is not None:
                                 break
+                            cancel_event.wait(min(remaining, 0.05))
+                            continue
+                        try:
+                            chunk = chunks.get(timeout=min(remaining, 0.1))
+                        except queue.Empty:
+                            continue
+                        if chunk is None:
+                            output_closed = True
+                        elif isinstance(chunk, Exception):
+                            raise Conflict("agent output pipe failed") from chunk
+                        else:
                             output.extend(chunk)
                             if len(output) > self.max_bytes:
                                 raise Conflict("agent output exceeds limit")
-                    while process.poll() is None:
-                        if cancel_event.wait(0.05):
-                            raise Conflict("agent execution cancelled")
-                        if time.monotonic() >= deadline:
-                            raise Conflict("agent deadline exceeded")
                     code = process.returncode
                     if code:
                         raise Conflict("agent program failed")
@@ -80,29 +98,13 @@ class CommandAgent:
                         raise Conflict("agent returned malformed action")
                     return result
                 finally:
-                    selector.close()
                     self._terminate_group(process)
-                    process.stdout.close()
+                    stdout.close()
+                    reader.join(timeout=1)
 
     @staticmethod
     def _terminate_group(process):
-        # The group may outlive its leader. Always clean descendants, including after success.
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            process.wait()
-            return
-        deadline = time.monotonic() + 1
-        while time.monotonic() < deadline:
-            process.poll()
-            try:
-                os.killpg(process.pid, 0)
-            except ProcessLookupError:
-                break
-            time.sleep(0.02)
-        with suppress(ProcessLookupError):
-            os.killpg(process.pid, signal.SIGKILL)
-        process.wait()
+        terminate_tree(process)
 
     def checkpoint(self):
         raise Unsupported("arbitrary command programs have no checkpoint hook")

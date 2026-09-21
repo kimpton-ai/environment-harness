@@ -127,7 +127,11 @@ class EvidenceStore:
 
     def environment(self, db, environment: str, who: Principal, roles=None):
         row = self._environment_row(db, environment)
-        if not row or row["tenant"] != who.tenant or (who.environment is not None and who.environment != environment):
+        if (
+            not row
+            or row["tenant"] != who.tenant
+            or (who.environment is not None and who.environment != environment)
+        ):
             raise Forbidden("environment unavailable")
         if roles and who.role not in roles:
             raise Forbidden("role cannot perform this operation")
@@ -146,7 +150,9 @@ class EvidenceStore:
         # REAL columns round-trip integers as floats. Hash the stored representation.
         event_time = float(event_time) if event_time is not None else None
         raw = encode(payload)
-        manifest = json.loads(db.execute("SELECT manifest FROM environments WHERE id=?", (environment,)).fetchone()[0])
+        manifest = json.loads(
+            db.execute("SELECT manifest FROM environments WHERE id=?", (environment,)).fetchone()[0]
+        )
         if len(raw.encode()) > manifest["policy"]["max_event_bytes"]:
             raise Conflict("event size limit exceeded; use an artifact")
         last = db.execute(
@@ -298,11 +304,12 @@ class EvidenceStore:
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
-        fd = os.open(folder, os.O_RDONLY)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
+        if os.name != "nt":
+            fd = os.open(folder, os.O_RDONLY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
 
     def _read_artifact(self, environment, key):
         return (self.root / "artifacts" / environment / key).read_bytes()
@@ -310,7 +317,9 @@ class EvidenceStore:
     def read_artifact(self, environment, who, key):
         with self.transaction() as db:
             self.environment(db, environment, who)
-            row = db.execute("SELECT * FROM artifacts WHERE environment=? AND id=?", (environment, key)).fetchone()
+            row = db.execute(
+                "SELECT * FROM artifacts WHERE environment=? AND id=?", (environment, key)
+            ).fetchone()
             if not row:
                 row = db.execute(
                     "SELECT a.* FROM artifacts a JOIN artifact_aliases x ON x.artifact=a.id "
@@ -333,12 +342,15 @@ class EvidenceStore:
             manifest = json.loads(row["manifest"])
             if f"{report.scorer}@{report.version}" not in manifest["scoring_versions"]:
                 raise Conflict("scorer version is not frozen in experiment")
-            last = db.execute("SELECT coalesce(max(seq),0) FROM events WHERE environment=?", (environment,)).fetchone()[0]
+            last = db.execute(
+                "SELECT coalesce(max(seq),0) FROM events WHERE environment=?", (environment,)
+            ).fetchone()[0]
             if report.evidence_cursor > last:
                 raise Conflict("report references unavailable evidence")
             for finding in report.findings:
                 observation = db.execute(
-                    "SELECT * FROM observations WHERE environment=? AND id=?", (environment, finding.observation_id)
+                    "SELECT * FROM observations WHERE environment=? AND id=?",
+                    (environment, finding.observation_id),
                 ).fetchone()
                 action = db.execute(
                     "SELECT * FROM actions WHERE environment=? AND id=?", (environment, finding.action_id)
@@ -409,7 +421,8 @@ class EvidenceStore:
             body = report.model_dump(mode="json")
             envelope = {"environment": environment, "revision": revision, "report": body}
             db.execute(
-                "INSERT INTO reports VALUES (?,?,?,?)", (environment, revision, encode(body), digest(envelope))
+                "INSERT INTO reports VALUES (?,?,?,?)",
+                (environment, revision, encode(body), digest(envelope)),
             )
             self.append(
                 db, environment, row["revision"], "report", {"revision": revision, "hash": digest(envelope)}
@@ -420,6 +433,13 @@ class EvidenceStore:
         with self.transaction() as db:
             self.environment(db, environment, who, ("researcher", "scorer"))
             return [
-                dict(environment=environment, revision=r["revision"], report=json.loads(r["body"]), hash=r["hash"])
-                for r in db.execute("SELECT * FROM reports WHERE environment=? ORDER BY revision", (environment,))
+                dict(
+                    environment=environment,
+                    revision=r["revision"],
+                    report=json.loads(r["body"]),
+                    hash=r["hash"],
+                )
+                for r in db.execute(
+                    "SELECT * FROM reports WHERE environment=? ORDER BY revision", (environment,)
+                )
             ]

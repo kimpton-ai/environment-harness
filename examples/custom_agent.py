@@ -23,7 +23,9 @@ def main(directory):
     environment = session.create(spec, who)["id"]
     agent = CommandAgent([sys.executable, str(program)], "threshold-command@1")
     result = run(session, environment, who, {"custom": agent}, turns=4)
-    print(json.dumps({"environment": environment, "revision": result["revision"], "synthetic": True}, indent=2))
+    print(
+        json.dumps({"environment": environment, "revision": result["revision"], "synthetic": True}, indent=2)
+    )
 
 
 if __name__ == "__main__":

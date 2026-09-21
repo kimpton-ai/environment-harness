@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+Production PyPI publishing now uses short-lived Trusted Publishing credentials and publishes only the reviewed Python wheel and source distribution. Releases support PEP 440 alpha, beta, and release-candidate versions while mapping those versions to npm-compatible SemVer prereleases. Package metadata now includes the rendered README, classifiers, project links, and the `py.typed` marker.
+
+## 0.2.2 - 2026-09-18
+
+Release publishing now extracts immutable-ID artifacts directly into the verified distribution directory before checking attestations and explicitly disables dependency caching during the tag build. Routine Dependabot version updates are grouped into one monthly pull request per ecosystem, while security updates remain immediate.
+
+## 0.2.1 - 2026-09-17
+
+The public SDK now includes coordinated vulnerability reporting, governance and support files, dependency cooldowns, immutable workflow and container pins, credential-free security scans, cross-platform CI, positive distribution manifests, installed-wheel smoke tests, SBOM and tag-triggered artifact-attestation release automation, and protected-release setup guidance. Release maintainers create the reviewed protected tag manually; Actions stores no long-lived release credential. Python and TypeScript coverage gates require at least 90% statements/lines and 80% branches; security-critical Python modules meet those floors independently.
+
 Session recovery now rejects stale worker completion and protects reconciled responses. Cancellation works while a writer is active, terminates managed command process groups and reports unresolved effects. The runner validates registered agent implementations, and conformance supports coordinator closure and explicit event inputs.
 
 Comparisons keep incompatible metric definitions and units in separate groups. Legacy reports remain readable as raw values. Large inherited records use bounded chunks and can be branched repeatedly without adding encoding layers. Existing stores require no migration. See [compatibility and protocol details](docs/COMPATIBILITY.md).

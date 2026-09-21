@@ -1,0 +1,30 @@
+# General ownership
+* @kimpton-ai/maintainers
+
+# Routine dependency automation
+/.github/dependabot.yml @kimpton-ai/maintainers
+/.github/workflows/ci.yml @kimpton-ai/maintainers
+/.github/workflows/weekly.yml @kimpton-ai/maintainers
+/pyproject.toml @kimpton-ai/maintainers
+/uv.lock @kimpton-ai/maintainers
+/.npmrc @kimpton-ai/maintainers
+/packages/typescript/package.json @kimpton-ai/maintainers
+/packages/typescript/package-lock.json @kimpton-ai/maintainers
+
+# Security- and release-critical surfaces
+/.github/CODEOWNERS @kimpton-ai/security @kimpton-ai/maintainers
+/.github/action-pins.json @kimpton-ai/security @kimpton-ai/maintainers
+/.github/dependency-exceptions.json @kimpton-ai/security @kimpton-ai/maintainers
+/.github/secret-exceptions.json @kimpton-ai/security @kimpton-ai/maintainers
+/.github/workflows/release*.yml @kimpton-ai/security @kimpton-ai/maintainers
+/scripts/ @kimpton-ai/security @kimpton-ai/maintainers
+/src/environment_harness/server.py @kimpton-ai/security @kimpton-ai/maintainers
+/src/environment_harness/store.py @kimpton-ai/security @kimpton-ai/maintainers
+/src/environment_harness/runtime.py @kimpton-ai/security @kimpton-ai/maintainers
+/src/environment_harness/contracts.py @kimpton-ai/security @kimpton-ai/maintainers
+/src/environment_harness/migrations/ @kimpton-ai/security @kimpton-ai/maintainers
+/contracts/ @kimpton-ai/security @kimpton-ai/maintainers
+/src/environment_harness/viewer/ @kimpton-ai/security @kimpton-ai/maintainers
+/packages/typescript/src/ @kimpton-ai/security @kimpton-ai/maintainers
+/SECURITY.md @kimpton-ai/security @kimpton-ai/maintainers
+/docs/DEPENDENCY-SECURITY.md @kimpton-ai/security @kimpton-ai/maintainers

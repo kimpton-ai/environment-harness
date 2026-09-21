@@ -122,7 +122,9 @@ def test_ambiguous_external_write_is_not_repeated(setup):
         max_cost_micros=10, allowed_endpoints=("https://example.invalid",), allowed_operations=("read",)
     )
     environment = session.create(spec.model_copy(update={"policy": policy}), who)["id"]
-    agent = Principal(tenant=who.tenant, subject="alice", role="agent", environment=environment, participant="alice")
+    agent = Principal(
+        tenant=who.tenant, subject="alice", role="agent", environment=environment, participant="alice"
+    )
     ops = Operations(store)
     ops.prepare(
         environment,
@@ -174,12 +176,16 @@ def test_api_and_viewer(setup):
     assert 'id="checkpoint"' not in page and "branch-dialog" not in page
     assert client.get("/v1/environments").status_code == 401
     assert client.get("/v1/environments", headers=headers).json()[0]["id"] == environment
-    response = client.get(f"/v1/environments/{environment}/events", headers=headers | {"Accept": "text/event-stream"})
+    response = client.get(
+        f"/v1/environments/{environment}/events", headers=headers | {"Accept": "text/event-stream"}
+    )
     assert "event: evidence" in response.text
     agent_token = store.issue(agents["alice"])
     agent_headers = {"Authorization": "Bearer " + agent_token}
     assert (
-        client.get(f"/v1/environments/{environment}/observation?participant=bob", headers=agent_headers).status_code
+        client.get(
+            f"/v1/environments/{environment}/observation?participant=bob", headers=agent_headers
+        ).status_code
         == 403
     )
     assert (

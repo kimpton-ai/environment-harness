@@ -17,7 +17,8 @@ def test_coordinator_journal_and_inherited_artifact_isolation(tmp_path):
     spec = ExperimentSpec(
         environment=env.spec,
         participants=tuple(
-            AgentSpec(id=p, implementation="synthetic-agent@1", policy_version="1", checkpoint=True) for p in ("a", "b")
+            AgentSpec(id=p, implementation="synthetic-agent@1", policy_version="1", checkpoint=True)
+            for p in ("a", "b")
         ),
     )
     environment = session.create(spec, who)["id"]
@@ -58,7 +59,9 @@ def setup_environment(tmp_path, env=None):
     who = Principal(tenant="t", subject="r", role="researcher")
     spec = ExperimentSpec(
         environment=env.spec,
-        participants=(AgentSpec(id="a", implementation="synthetic-agent@1", policy_version="1", checkpoint=True),),
+        participants=(
+            AgentSpec(id="a", implementation="synthetic-agent@1", policy_version="1", checkpoint=True),
+        ),
     )
     environment = session.create(spec, who)["id"]
     return session, who, environment

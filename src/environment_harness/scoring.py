@@ -3,7 +3,7 @@
 from collections import Counter
 
 from .adapters.programs import CommandAgent
-from .contracts import ScoreReport
+from .contracts import MetricDefinition, ScoreReport
 
 
 class EventMeasurements:
@@ -38,8 +38,14 @@ class EventMeasurements:
                 "opportunities": None,
             },
             metric_definitions={
-                key: {"id": "environment-harness." + key, "version": self.version, "unit": "count"}
-                for key in ("attempted_actions", "executed_actions", "blocked_attempts", "malformed_outputs", "infrastructure_failures")
+                key: MetricDefinition(id="environment-harness." + key, version=self.version, unit="count")
+                for key in (
+                    "attempted_actions",
+                    "executed_actions",
+                    "blocked_attempts",
+                    "malformed_outputs",
+                    "infrastructure_failures",
+                )
             },
             uncertainty="Event counts are observed. Domain competence, compliance, harm and opportunities require a supplier scorer.",
             provenance={"measurement": "raw-event-counts", "domain_judgments": False},
