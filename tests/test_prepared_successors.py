@@ -730,6 +730,25 @@ def test_prepared_successor_remaining_branch_guards(tmp_path):
     with pytest.raises(MotorOutcomeUnknown, match="identity"):
         rex.reconcile_successor(inx.intent_id)
 
+    native = NativePreparedBrowser(Driver())
+    native.native_admission = PreparedSuccessorAdmission(
+        intent_id=inx.intent_id,
+        predecessor_operation_id=inx.predecessor_operation_id,
+        operation_id=inx.operation_id,
+        metadata=inx.metadata,
+        status="unknown",
+    )
+    restart = MotorExecutor(native, ex.profile, journal=tmp_path / "restart-unknown.sqlite")
+    restart.prepare_successor(inx, request=req, selection=sel, authority=auth)
+    recovered = MotorExecutor(
+        native, ex.profile, journal=tmp_path / "restart-unknown.sqlite", discard_prepared=True
+    )
+    with recovered._db() as db:
+        assert (
+            db.execute("SELECT status FROM motor_successors WHERE id=?", (inx.intent_id,)).fetchone()[0]
+            == "unknown"
+        )
+
     ex, adapter, req, sel, inx, auth, pred = successor_setup(tmp_path / "bad-reconcile")
     ex.prepare_successor(inx, request=req, selection=sel, authority=auth)
     with ex._db() as db:
@@ -737,6 +756,13 @@ def test_prepared_successor_remaining_branch_guards(tmp_path):
     adapter.reconcile = lambda _: {"operation_id": "other", "status": "completed"}
     with pytest.raises(MotorOutcomeUnknown, match="identify"):
         ex.reconcile_successor(inx.intent_id)
+
+    rejected, adapter, req, sel, inx, auth, pred = successor_setup(tmp_path / "rejected-reconcile")
+    rejected.prepare_successor(inx, request=req, selection=sel, authority=auth)
+    with rejected._db() as db:
+        db.execute("UPDATE motor_successors SET status='unknown' WHERE id=?", (inx.intent_id,))
+    adapter.reconcile = lambda _: {"operation_id": inx.operation_id, "status": "rejected"}
+    assert rejected.reconcile_successor(inx.intent_id).status == "rejected"
 
     adapter = BrowserMotor(Driver())
     direct_intent = inx
