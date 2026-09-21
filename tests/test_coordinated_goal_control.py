@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 import environment_harness
@@ -21,6 +23,8 @@ from environment_harness import (
 from environment_harness.errors import Conflict, Forbidden
 from environment_harness.motor import MotorExecutor
 from environment_harness.motor_adapters import BrowserMotor
+
+pytestmark = pytest.mark.skipif(os.name == "nt", reason="MotorExecutor requires POSIX application locking")
 
 
 def context():
@@ -212,6 +216,7 @@ def test_group_validation_rejects_stale_context_deadline_and_claims(tmp_path):
         executor.validate_group(base.group.model_copy(update={"deadline_ms": 1}), base, manifest)
     with pytest.raises(Forbidden, match="backed"):
         executor.validate_group(base.group, base.model_copy(update={"control_permissions": ()}), manifest)
+    assert executor.validate_group(base.group.model_dump(mode="json"), base, manifest).group_id == "g"
 
 
 def test_direct_execute_rechecks_group_contract(tmp_path):
