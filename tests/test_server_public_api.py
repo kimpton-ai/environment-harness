@@ -251,6 +251,7 @@ def test_http_errors_share_one_traceable_envelope(tmp_path):
             "invalid_request",
         ),
         (client.get("/viewer/private.txt"), 404, "not_found"),
+        (client.put("/health"), 405, "method_not_allowed"),
         (client.get("/health", headers={"Origin": "https://attacker.invalid"}), 403, "cross_origin_denied"),
     )
     for response, status, code in responses:
@@ -299,7 +300,7 @@ def test_openapi_documents_the_shared_error_envelope(tmp_path):
 
     assert {"ApiError", "ErrorDetail", "ErrorEnvelope"} <= set(document["components"]["schemas"])
     responses = document["paths"]["/v1/environments"]["get"]["responses"]
-    for status in ("401", "403", "409", "413", "422", "500", "503"):
+    for status in ("401", "403", "405", "409", "413", "422", "500", "503"):
         assert responses[status]["content"]["application/json"]["schema"] == {
             "$ref": "#/components/schemas/ErrorEnvelope"
         }
@@ -320,6 +321,17 @@ def test_openapi_is_a_public_authenticated_api_reference(tmp_path):
     assert document["paths"]["/v1/environments"]["get"]["security"] == [{"BearerAuth": []}]
     assert document["paths"]["/v1/environments"]["get"]["x-roles"] == ["researcher"]
     assert document["paths"]["/v1/environments/{environment}/actions"]["post"]["x-roles"] == ["agent"]
+    commands = document["paths"]["/v1/environments/{environment}/commands"]["post"]
+    assert commands["x-roles"] == ["researcher", "worker", "agent"]
+    assert "advance" in commands["x-command-operations"]
+    command_schema = document["components"]["schemas"]["CommandOperation"]
+    assert set(command_schema["enum"]) == set(commands["x-command-operations"])
+    assert document["paths"]["/v1/environments/{environment}/credentials"]["post"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/CredentialRequest"}
+    assert document["paths"]["/v1/environments/{environment}/operations"]["post"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/OperationIntentRequest"}
     assert {tag["name"] for tag in document["tags"]} >= {
         "Service",
         "Environment sessions",
@@ -483,13 +495,20 @@ def test_http_commands_credentials_operations_artifacts_and_reports(tmp_path):
         json={"operation": "release", "arguments": {"lease": lease}},
     )
     assert released.status_code == 200
+    waiting = client.post(
+        f"/v1/environments/{environment}/commands",
+        headers=headers,
+        json={"operation": "advance", "arguments": {}},
+    )
+    assert waiting.status_code == 200
+    assert waiting.json()["status"] == "waiting"
     assert (
         client.post(
             f"/v1/environments/{environment}/commands",
             headers=headers,
             json={"operation": "unknown", "arguments": {}},
-        ).status_code
-        == 422
+        ).json()["error"]["code"]
+        == "invalid_request"
     )
     assert (
         client.post(
@@ -507,6 +526,14 @@ def test_http_commands_credentials_operations_artifacts_and_reports(tmp_path):
     )
     assert credential.status_code == 200
     assert store.authenticate(credential.json()["token"]).participant == "alice"
+    assert (
+        client.post(
+            f"/v1/environments/{environment}/credentials",
+            headers=headers,
+            json={"participant": "alice", "unexpected": True},
+        ).json()["error"]["code"]
+        == "invalid_request"
+    )
     assert (
         client.post(
             f"/v1/environments/{environment}/credentials",

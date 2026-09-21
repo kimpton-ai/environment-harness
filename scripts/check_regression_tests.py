@@ -11,7 +11,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = os.environ.get("REGRESSION_BASE_REF", "origin/main")
-PROOF_TARGETS = ("tests/test_repository_policy.py::test_pep440_prerelease_maps_to_npm_semver",)
+PROOF_TARGETS = (
+    "tests/test_sdk_surfaces.py::test_remote_client_validates_transport_and_builds_public_requests",
+)
 SAFE_ENV = {
     "COMSPEC",
     "LANG",

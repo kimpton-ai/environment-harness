@@ -78,6 +78,8 @@
       "ApiError": {
         "properties": {
           "code": {
+            "maxLength": 100,
+            "minLength": 1,
             "title": "Code",
             "type": "string"
           },
@@ -87,6 +89,7 @@
                 "items": {
                   "$ref": "#/components/schemas/ErrorDetail"
                 },
+                "maxItems": 100,
                 "type": "array"
               },
               {
@@ -96,18 +99,26 @@
             "title": "Details"
           },
           "message": {
+            "maxLength": 512,
+            "minLength": 1,
             "title": "Message",
             "type": "string"
           },
           "request_id": {
+            "maxLength": 128,
+            "minLength": 1,
             "title": "Request Id",
             "type": "string"
           },
           "status": {
+            "maximum": 599.0,
+            "minimum": 400.0,
             "title": "Status",
             "type": "integer"
           },
           "timestamp": {
+            "maxLength": 100,
+            "minLength": 1,
             "title": "Timestamp",
             "type": "string"
           }
@@ -188,14 +199,70 @@
             "type": "object"
           },
           "operation": {
-            "title": "Operation",
-            "type": "string"
+            "$ref": "#/components/schemas/CommandOperation"
           }
         },
         "required": [
           "operation"
         ],
         "title": "Command",
+        "type": "object"
+      },
+      "CommandOperation": {
+        "enum": [
+          "advance",
+          "lease",
+          "release",
+          "cancel",
+          "resolve",
+          "close_phase",
+          "checkpoint",
+          "reconcile_agent",
+          "resume",
+          "branch",
+          "control",
+          "memory",
+          "transfer",
+          "external_event",
+          "finalize_outcomes"
+        ],
+        "title": "CommandOperation",
+        "type": "string"
+      },
+      "CredentialRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "participant": {
+            "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+            "title": "Participant",
+            "type": "string"
+          },
+          "ttl": {
+            "default": 3600,
+            "description": "Credential lifetime in seconds. Values above 86400 are capped at 86400.",
+            "minimum": 1.0,
+            "title": "Ttl",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "participant"
+        ],
+        "title": "CredentialRequest",
+        "type": "object"
+      },
+      "CredentialResponse": {
+        "properties": {
+          "token": {
+            "description": "Opaque participant credential. Treat this value as a secret.",
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "CredentialResponse",
         "type": "object"
       },
       "EnvironmentSpec": {
@@ -238,6 +305,14 @@
               "type": "string"
             },
             "title": "Modalities",
+            "type": "array"
+          },
+          "motor_skills": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Motor Skills",
             "type": "array"
           },
           "observation_schema": {
@@ -319,14 +394,20 @@
       "ErrorDetail": {
         "properties": {
           "field": {
+            "maxLength": 256,
+            "minLength": 1,
             "title": "Field",
             "type": "string"
           },
           "message": {
+            "maxLength": 512,
+            "minLength": 1,
             "title": "Message",
             "type": "string"
           },
           "type": {
+            "maxLength": 100,
+            "minLength": 1,
             "title": "Type",
             "type": "string"
           }
@@ -340,6 +421,24 @@
         "type": "object"
       },
       "ErrorEnvelope": {
+        "examples": [
+          {
+            "error": {
+              "code": "invalid_request",
+              "details": [
+                {
+                  "field": "body.operation",
+                  "message": "Input should be a supported command",
+                  "type": "enum"
+                }
+              ],
+              "message": "Request validation failed",
+              "request_id": "0123456789abcdef0123456789abcdef",
+              "status": 422,
+              "timestamp": "2026-09-21T12:00:00.000Z"
+            }
+          }
+        ],
         "properties": {
           "error": {
             "$ref": "#/components/schemas/ApiError"
@@ -361,6 +460,16 @@
             "additionalProperties": true,
             "title": "Interventions",
             "type": "object"
+          },
+          "motor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MotorProfile"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "participants": {
             "items": {
@@ -573,6 +682,117 @@
           "unit"
         ],
         "title": "MetricDefinition",
+        "type": "object"
+      },
+      "MotorProfile": {
+        "additionalProperties": false,
+        "properties": {
+          "adapter": {
+            "minLength": 1,
+            "title": "Adapter",
+            "type": "string"
+          },
+          "executor": {
+            "const": "motor.v1",
+            "default": "motor.v1",
+            "title": "Executor",
+            "type": "string"
+          },
+          "mode": {
+            "default": "deterministic",
+            "enum": [
+              "deterministic",
+              "jev"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "selector_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selector Model"
+          }
+        },
+        "required": [
+          "adapter"
+        ],
+        "title": "MotorProfile",
+        "type": "object"
+      },
+      "OperationIntentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "endpoint": {
+            "minLength": 1,
+            "title": "Endpoint",
+            "type": "string"
+          },
+          "maximum_cost_micros": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Maximum Cost Micros",
+            "type": "integer"
+          },
+          "operation": {
+            "minLength": 1,
+            "title": "Operation",
+            "type": "string"
+          },
+          "operation_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "write": {
+            "default": false,
+            "title": "Write",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "operation_id",
+          "endpoint",
+          "operation",
+          "payload"
+        ],
+        "title": "OperationIntentRequest",
+        "type": "object"
+      },
+      "OperationIntentResponse": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "prepared",
+              "dispatching",
+              "unknown",
+              "succeeded",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ],
+        "title": "OperationIntentResponse",
         "type": "object"
       },
       "RunPolicy": {
@@ -791,6 +1011,16 @@
             },
             "description": "Resource not found"
           },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
+          },
           "409": {
             "content": {
               "application/json": {
@@ -961,6 +1191,16 @@
             },
             "description": "Resource not found"
           },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
+          },
           "409": {
             "content": {
               "application/json": {
@@ -1088,6 +1328,16 @@
               }
             },
             "description": "Resource not found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
           },
           "409": {
             "content": {
@@ -1229,6 +1479,16 @@
             },
             "description": "Resource not found"
           },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
+          },
           "409": {
             "content": {
               "application/json": {
@@ -1356,6 +1616,16 @@
               }
             },
             "description": "Resource not found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
           },
           "409": {
             "content": {
@@ -1534,6 +1804,16 @@
             },
             "description": "Resource not found"
           },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
+          },
           "409": {
             "content": {
               "application/json": {
@@ -1680,6 +1960,16 @@
             },
             "description": "Resource not found"
           },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
+          },
           "409": {
             "content": {
               "application/json": {
@@ -1817,6 +2107,16 @@
               }
             },
             "description": "Resource not found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
           },
           "409": {
             "content": {
@@ -1968,6 +2268,16 @@
               }
             },
             "description": "Resource not found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
           },
           "409": {
             "content": {
@@ -2156,6 +2466,16 @@
             },
             "description": "Resource not found"
           },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
+          },
           "409": {
             "content": {
               "application/json": {
@@ -2307,6 +2627,16 @@
             },
             "description": "Resource not found"
           },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
+          },
           "409": {
             "content": {
               "application/json": {
@@ -2446,6 +2776,16 @@
               }
             },
             "description": "Resource not found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
           },
           "409": {
             "content": {
@@ -2596,6 +2936,16 @@
               }
             },
             "description": "Resource not found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
           },
           "409": {
             "content": {
@@ -2748,6 +3098,16 @@
             },
             "description": "Resource not found"
           },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
+          },
           "409": {
             "content": {
               "application/json": {
@@ -2809,6 +3169,7 @@
           "Environment sessions"
         ],
         "x-command-operations": [
+          "advance",
           "lease",
           "release",
           "cancel",
@@ -2826,7 +3187,8 @@
         ],
         "x-roles": [
           "researcher",
-          "worker"
+          "worker",
+          "agent"
         ]
       }
     },
@@ -2848,9 +3210,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Body",
-                "type": "object"
+                "$ref": "#/components/schemas/CredentialRequest"
               }
             }
           },
@@ -2860,7 +3220,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -2914,6 +3276,16 @@
               }
             },
             "description": "Resource not found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
           },
           "409": {
             "content": {
@@ -3102,6 +3474,16 @@
             },
             "description": "Resource not found"
           },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
+          },
           "409": {
             "content": {
               "application/json": {
@@ -3252,6 +3634,16 @@
               }
             },
             "description": "Resource not found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
           },
           "409": {
             "content": {
@@ -3410,6 +3802,16 @@
             },
             "description": "Resource not found"
           },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
+          },
           "409": {
             "content": {
               "application/json": {
@@ -3496,9 +3898,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Body",
-                "type": "object"
+                "$ref": "#/components/schemas/OperationIntentRequest"
               }
             }
           },
@@ -3508,7 +3908,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/OperationIntentResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -3562,6 +3964,16 @@
               }
             },
             "description": "Resource not found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
           },
           "409": {
             "content": {
@@ -3700,6 +4112,16 @@
               }
             },
             "description": "Resource not found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
           },
           "409": {
             "content": {
@@ -3847,6 +4269,16 @@
               }
             },
             "description": "Resource not found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
           },
           "409": {
             "content": {
@@ -4026,6 +4458,16 @@
               }
             },
             "description": "Resource not found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
           },
           "409": {
             "content": {
@@ -4214,6 +4656,16 @@
               }
             },
             "description": "Resource not found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
           },
           "409": {
             "content": {

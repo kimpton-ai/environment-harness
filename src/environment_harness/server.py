@@ -4,8 +4,9 @@ import json
 import logging
 import secrets
 from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Security
 from fastapi.exceptions import RequestValidationError
@@ -15,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .contracts import Action, ExperimentSpec, ScoreReport
+from .coordinator import advance
 from .errors import BudgetExceeded, Conflict, Forbidden, HarnessError, Unsupported
 from .evaluation import compare, rollouts, turn_series
 from .operations import Operations
@@ -23,28 +25,97 @@ from .store import encode
 logger = logging.getLogger(__name__)
 
 
+class CommandOperation(StrEnum):
+    ADVANCE = "advance"
+    LEASE = "lease"
+    RELEASE = "release"
+    CANCEL = "cancel"
+    RESOLVE = "resolve"
+    CLOSE_PHASE = "close_phase"
+    CHECKPOINT = "checkpoint"
+    RECONCILE_AGENT = "reconcile_agent"
+    RESUME = "resume"
+    BRANCH = "branch"
+    CONTROL = "control"
+    MEMORY = "memory"
+    TRANSFER = "transfer"
+    EXTERNAL_EVENT = "external_event"
+    FINALIZE_OUTCOMES = "finalize_outcomes"
+
+
 class Command(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    operation: str
+    operation: CommandOperation
     arguments: dict[str, Any] = Field(default_factory=dict)
 
 
+class CredentialRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    participant: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,80}$")
+    ttl: int = Field(
+        default=3600,
+        ge=1,
+        description="Credential lifetime in seconds. Values above 86400 are capped at 86400.",
+    )
+
+
+class CredentialResponse(BaseModel):
+    token: str = Field(description="Opaque participant credential. Treat this value as a secret.")
+
+
+class OperationIntentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    operation_id: str = Field(min_length=1, max_length=128)
+    endpoint: str = Field(min_length=1)
+    operation: str = Field(min_length=1)
+    payload: dict[str, Any]
+    maximum_cost_micros: int = Field(default=0, ge=0)
+    write: bool = False
+
+
+class OperationIntentResponse(BaseModel):
+    id: str
+    status: Literal["prepared", "dispatching", "unknown", "succeeded", "failed"]
+
+
 class ErrorDetail(BaseModel):
-    field: str
-    message: str
-    type: str
+    field: str = Field(min_length=1, max_length=256)
+    message: str = Field(min_length=1, max_length=512)
+    type: str = Field(min_length=1, max_length=100)
 
 
 class ApiError(BaseModel):
-    code: str
-    message: str
-    status: int
-    request_id: str
-    timestamp: str
-    details: list[ErrorDetail] | None = None
+    code: str = Field(min_length=1, max_length=100)
+    message: str = Field(min_length=1, max_length=512)
+    status: int = Field(ge=400, le=599)
+    request_id: str = Field(min_length=1, max_length=128)
+    timestamp: str = Field(min_length=1, max_length=100)
+    details: list[ErrorDetail] | None = Field(default=None, max_length=100)
 
 
 class ErrorEnvelope(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "error": {
+                        "code": "invalid_request",
+                        "message": "Request validation failed",
+                        "status": 422,
+                        "request_id": "0123456789abcdef0123456789abcdef",
+                        "timestamp": "2026-09-21T12:00:00.000Z",
+                        "details": [
+                            {
+                                "field": "body.operation",
+                                "message": "Input should be a supported command",
+                                "type": "enum",
+                            }
+                        ],
+                    }
+                }
+            ]
+        }
+    )
     error: ApiError
 
 
@@ -56,6 +127,7 @@ ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
         402: "Budget exhausted",
         403: "Operation forbidden",
         404: "Resource not found",
+        405: "Method not allowed",
         409: "State conflict",
         413: "Request too large",
         422: "Request validation failed",
@@ -476,28 +548,14 @@ def create_app(session, *, local_access=None):
         tags=["Environment sessions"],
         summary="Run an environment-session command",
         openapi_extra={
-            "x-roles": ["researcher", "worker"],
-            "x-command-operations": [
-                "lease",
-                "release",
-                "cancel",
-                "resolve",
-                "close_phase",
-                "checkpoint",
-                "reconcile_agent",
-                "resume",
-                "branch",
-                "control",
-                "memory",
-                "transfer",
-                "external_event",
-                "finalize_outcomes",
-            ],
+            "x-roles": ["researcher", "worker", "agent"],
+            "x-command-operations": [operation.value for operation in CommandOperation],
         },
     )
     def command(environment: str, cmd: Command, who=Depends(actor)):
         a = cmd.arguments
         allowed = {
+            "advance": lambda environment, who, **arguments: advance(session, environment, who, **arguments),
             "lease": session.lease,
             "release": session.release,
             "cancel": session.cancel,
@@ -513,13 +571,12 @@ def create_app(session, *, local_access=None):
             "external_event": session.external_event,
             "finalize_outcomes": session.finalize_outcomes,
         }
-        if cmd.operation not in allowed:
-            raise Unsupported("unknown command")
+        operation = cmd.operation.value
         try:
             import inspect
 
-            inspect.signature(allowed[cmd.operation]).bind(environment, who, **a)
-            result = allowed[cmd.operation](environment, who, **a)
+            inspect.signature(allowed[operation]).bind(environment, who, **a)
+            result = allowed[operation](environment, who, **a)
         except TypeError:
             raise HTTPException(422, "invalid command arguments") from None
         return result
@@ -528,13 +585,14 @@ def create_app(session, *, local_access=None):
         "/v1/environments/{environment}/credentials",
         tags=["Environment sessions"],
         summary="Issue a participant credential",
+        response_model=CredentialResponse,
         openapi_extra={"x-roles": ["researcher"]},
     )
-    def credential(environment: str, body: dict, who=Depends(actor)):
+    def credential(environment: str, body: CredentialRequest, who=Depends(actor)):
         with store.transaction() as db:
             row = store.environment(db, environment, who, ("researcher",))
             participants = json.loads(row["participants"])
-            participant = body.get("participant")
+            participant = body.participant
             if participant not in participants:
                 raise Forbidden("unknown participant")
             p = participants[participant]
@@ -547,16 +605,17 @@ def create_app(session, *, local_access=None):
                     "generation": p["generation"],
                 }
             )
-        return {"token": store.issue(principal, min(int(body.get("ttl", 3600)), 86400))}
+        return {"token": store.issue(principal, min(body.ttl, 86400))}
 
     @app.post(
         "/v1/environments/{environment}/operations",
         tags=["Environment sessions"],
         summary="Prepare an external operation",
+        response_model=OperationIntentResponse,
         openapi_extra={"x-roles": ["agent"]},
     )
-    def prepare(environment: str, body: dict, who=Depends(actor)):
-        return Operations(store).prepare(environment, who, **body)
+    def prepare(environment: str, body: OperationIntentRequest, who=Depends(actor)):
+        return Operations(store).prepare(environment, who, **body.model_dump())
 
     @app.post(
         "/v1/environments/{environment}/artifacts",

@@ -70,7 +70,14 @@ export class EnvironmentClient {
             throw new Error('Response size limit exceeded');
         return JSON.parse(text);
     }
-    list() { return this.request('GET', '/v1/environments'); }
+    list(options = {}) {
+        const query = new URLSearchParams();
+        if (options.limit !== undefined)
+            query.set('limit', String(options.limit));
+        if (options.cursor !== undefined)
+            query.set('cursor', options.cursor);
+        return this.request('GET', `/v1/environments${query.size ? '?' + query : ''}`);
+    }
     get(environment) { return this.request('GET', `/v1/environments/${encodeURIComponent(environment)}`); }
     create(experiment, operationId) { return this.request('POST', '/v1/environments', experiment, operationId); }
     observe(environment, participant) { return this.request('GET', `/v1/environments/${encodeURIComponent(environment)}/observation${participant ? '?participant=' + encodeURIComponent(participant) : ''}`); }
@@ -106,6 +113,8 @@ export class EnvironmentClient {
     }
     agentWork(environment) { return this.request('GET', `/v1/environments/${encodeURIComponent(environment)}/agent-work`); }
     cancel(environment) { return this.command(environment, 'cancel'); }
+    advance(environment) { return this.command(environment, 'advance'); }
+    credentials(environment, participant, ttl = 3600) { return this.request('POST', `/v1/environments/${encodeURIComponent(environment)}/credentials`, { participant, ttl }); }
     reports(environment) { return this.request('GET', `/v1/environments/${encodeURIComponent(environment)}/reports`); }
     compare(environments) { return this.request('POST', '/v1/compare', { environments }); }
     async *replay(environment) {

@@ -68,12 +68,16 @@ def test_remote_client_validates_transport_and_builds_public_requests(monkeypatc
         participants=(AgentSpec(id="a", implementation="test", policy_version="1"),),
     )
     assert client.create(spec)[0:3] == ("POST", "/v1/environments", spec.model_dump(mode="json"))
+    assert client.list(limit=25, cursor="a" * 32)[1].endswith("/v1/environments?limit=25&cursor=" + "a" * 32)
     assert client.get("a/b")[1].endswith("a%2Fb")
     assert client.observe("env", "a/b")[1].endswith("?participant=a%2Fb")
     assert client.submit("env", {"value": 1})[1].endswith("/actions")
     assert client.command("env", "cancel", reason="test")[2]["arguments"] == {"reason": "test"}
     assert client.agent_work("env")[1].endswith("/agent-work")
     assert client.cancel("env")[2]["operation"] == "cancel"
+    assert client.advance("env")[2]["operation"] == "advance"
+    assert client.credentials("env", "a", ttl=30)[2] == {"participant": "a", "ttl": 30}
+    assert client.reports("env")[1].endswith("/reports")
     assert client.events("env", 7)[1].endswith("events?after=7")
 
 

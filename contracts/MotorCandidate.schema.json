@@ -1,0 +1,68 @@
+{
+  "$defs": {
+    "MotorStep": {
+      "additionalProperties": false,
+      "properties": {
+        "arguments": {
+          "additionalProperties": true,
+          "title": "Arguments",
+          "type": "object"
+        },
+        "controls": {
+          "additionalProperties": true,
+          "title": "Controls",
+          "type": "object"
+        },
+        "operation": {
+          "minLength": 1,
+          "title": "Operation",
+          "type": "string"
+        },
+        "target": {
+          "additionalProperties": true,
+          "title": "Target",
+          "type": "object"
+        }
+      },
+      "required": [
+        "operation",
+        "target"
+      ],
+      "title": "MotorStep",
+      "type": "object"
+    }
+  },
+  "$id": "urn:environment-harness:v1:MotorCandidate",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "description": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Description",
+      "type": "string"
+    },
+    "id": {
+      "maxLength": 80,
+      "minLength": 1,
+      "title": "Id",
+      "type": "string"
+    },
+    "steps": {
+      "items": {
+        "$ref": "#/$defs/MotorStep"
+      },
+      "maxItems": 128,
+      "minItems": 1,
+      "title": "Steps",
+      "type": "array"
+    }
+  },
+  "required": [
+    "id",
+    "description",
+    "steps"
+  ],
+  "title": "MotorCandidate",
+  "type": "object"
+}

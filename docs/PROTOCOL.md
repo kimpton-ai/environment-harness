@@ -51,13 +51,13 @@ Every HTTP error uses one traceable envelope. `request_id` also appears in the `
 }
 ```
 
-`details` is optional. Authentication failures use `401`; authorization and intentionally hidden resource-existence failures use `403`; state conflicts use `409`; schema and request validation failures use `422`; unavailable suppliers use `503`. Budget exhaustion retains `402` so callers can distinguish a frozen session budget from rate limiting. Unexpected failures return a generic `500 internal_error`; response bodies never contain stack traces.
+`details` is optional. Authentication failures use `401`; authorization and intentionally hidden resource-existence failures use `403`; unsupported HTTP methods use `405`; state conflicts use `409`; schema and request validation failures use `422`; unavailable suppliers use `503`. Budget exhaustion retains `402` so callers can distinguish a frozen session budget from rate limiting. Unexpected failures return a generic `500 internal_error`; response bodies never contain stack traces.
 
 Create requires `X-Operation-ID`, a durable caller-generated 32-character lowercase hex ID. Reusing it with a different experiment fails. Action IDs are stable, participant-bound operations. Accepted and committed receipt retries return the existing result. Do not generate a new ID after an ambiguous timeout.
 
 Environment-session listing is bounded to 1–1,000 records and uses a stable keyset cursor. When another page exists, `X-Next-Cursor` and the `Link` header's `rel="next"` URL carry the opaque cursor. Event and activity feeds retain their separate monotonic event cursors.
 
-Commands have shape `{"operation":"checkpoint","arguments":{"lease":{"owner":"worker","epoch":1}}}`. Available commands include lease, release, cancel, resolve, checkpoint, resume, branch, control, memory, transfer external_event and finalize_outcomes. Branch takes a checkpoint ID, declared interventions and an optional durable new-environment ID. Lifecycle commands other than create, branch, cancellation and action submission do not promise general HTTP idempotency. Clients never retry writes implicitly.
+Commands have shape `{"operation":"checkpoint","arguments":{"lease":{"owner":"worker","epoch":1}}}`. Available commands include advance, lease, release, cancel, resolve, close_phase, checkpoint, reconcile_agent, resume, branch, control, memory, transfer, external_event and finalize_outcomes. `advance` lets a trusted coordinator resolve at most one ready phase for externally controlled participants; it does not execute models. Branch takes a checkpoint ID, declared interventions and an optional durable new-environment ID. Lifecycle commands other than create, branch, cancellation and action submission do not promise general HTTP idempotency. Clients never retry writes implicitly.
 
 Events support JSON pages and finite server-sent-event pages. Reconnect with `Last-Event-ID`; an empty page means caught up. Cursors expose ordering gaps but never hidden event payloads. A viewer can disconnect without blocking evidence writes. Artifact access is authorized against its environment and audience before retrieving any bytes.
 

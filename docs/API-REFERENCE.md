@@ -66,7 +66,7 @@ export ARTIFACT_KEY="artifact_example"
 | `GET /v1/experiments/{experiment}/events` | Researcher, worker | Read activity for one experiment. |
 | `GET /v1/environments/{environment}/activity` | Researcher, worker | Read activity for one environment session. |
 | `GET /v1/environments/{environment}/agent-work` | Researcher, worker, agent | Read agent-work records. |
-| `POST /v1/environments/{environment}/commands` | Researcher, worker | Execute a lifecycle command. |
+| `POST /v1/environments/{environment}/commands` | Researcher, worker, or agent; command-specific | Execute a lifecycle command. |
 | `POST /v1/environments/{environment}/credentials` | Researcher | Issue a scoped participant credential. |
 | `POST /v1/environments/{environment}/operations` | Agent | Persist an authorized external-operation intent. |
 | `POST /v1/environments/{environment}/artifacts` | All authenticated roles | Store an authorized artifact. |
@@ -110,7 +110,7 @@ The response is an `EnvironmentSpec`. It declares the environment implementation
 curl --fail-with-body -X POST \
   -H "Authorization: Bearer $EH_TOKEN" \
   -H "Content-Type: application/json" \
-  -H "X-Operation-ID: 0123456789abcdef0123456789abcdef" \
+  -H "X-Operation-ID: 00000000000000000000000000000000" \
   --data @experiment.json \
   "$EH_URL/v1/environments"
 ```
@@ -119,7 +119,7 @@ The body is an [`ExperimentSpec`](../contracts/ExperimentSpec.schema.json). A su
 
 ```json
 {
-  "id": "0123456789abcdef0123456789abcdef",
+  "id": "00000000000000000000000000000000",
   "status": "running",
   "revision": 0,
   "participants": ["alice"]
@@ -227,7 +227,27 @@ The command envelope is always:
 {"operation":"checkpoint","arguments":{"lease":{"owner":"worker","epoch":1}}}
 ```
 
-Supported operation names are `lease`, `release`, `cancel`, `resolve`, `close_phase`, `checkpoint`, `reconcile_agent`, `resume`, `branch`, `control`, `memory`, `transfer`, `external_event`, and `finalize_outcomes`. Arguments are the corresponding `EnvironmentSession` method arguments after `environment` and `who`. Unknown operations or incompatible arguments return `422`. See [`PROTOCOL.md`](PROTOCOL.md) and [`coordinated-sessions.md`](coordinated-sessions.md) before building recovery or branching automation.
+Supported operation names are `advance`, `lease`, `release`, `cancel`, `resolve`, `close_phase`, `checkpoint`, `reconcile_agent`, `resume`, `branch`, `control`, `memory`, `transfer`, `external_event`, and `finalize_outcomes`. `advance` resolves at most one ready externally controlled phase under the normal fenced writer lease; it returns `waiting` while required actions or events are missing and never executes a model. Other arguments are the corresponding `EnvironmentSession` method arguments after `environment` and `who`. Unknown operations or incompatible arguments return the documented `422 invalid_request` envelope. See [`PROTOCOL.md`](PROTOCOL.md), [`coordinated-sessions.md`](coordinated-sessions.md), and [`REMOTE-WORKERS.md`](REMOTE-WORKERS.md) before building recovery, remote-worker, or branching automation.
+
+| Operation | Authorized role | Required arguments | Success result | Common errors |
+| --- | --- | --- | --- | --- |
+| `advance` | Researcher, worker | None; optional `owner` | One ready phase result, or `{"status":"waiting","revision":N,"deadline_exceeded":false}` | `403` scope, `409` lost authority or invalid phase, `503` supplier unavailable |
+| `lease` | Researcher, worker | `owner`; optional `ttl` (1–300 seconds) | Fenced lease with `owner`, `epoch`, and `expires` | `409` another writer is active, `422` invalid owner/TTL |
+| `release` | Researcher, worker | `lease` | `{"released":true}` | `403` scope, `409` stale/expired lease |
+| `cancel` | Researcher | None | Cancelled status plus unresolved agent-work and operation IDs | `403` role/scope, `409` already terminal |
+| `resolve` | Researcher, worker | `lease` | Committed revision, status, and evidence event | `409` incomplete phase, stale lease, or invalid transition; `503` supplier unavailable |
+| `close_phase` | Researcher, worker | `lease`, `revision`; optional `reason` | Closed revision receipt | `409` stale phase/lease, `422` wall-clock phase |
+| `checkpoint` | Researcher | `lease`; optional `exact_agents` | Checkpoint ID, revision, hash, and exactness | `409` unsettled work, `422` unsupported capability |
+| `reconcile_agent` | Researcher, worker | `lease`, `operation_id`, `response`, `evidence`; optional `agent_state` | Responded operation receipt | `409` conflicting/stale work, `422` invalid evidence |
+| `resume` | Researcher, worker | `lease`; optional `implementations` | Updated environment session | `409` unsettled effects or changed implementations, `422` unsupported capability |
+| `branch` | Researcher | `checkpoint`; optional `interventions`, `new_environment` | New environment session | `403` unavailable checkpoint, `409` integrity/version conflict, `422` unsupported pending/live-write state |
+| `control` | Researcher | `lease`, `command` (`pause` or `cancel`) | Updated lifecycle status | `409` stale lease/terminal session, `422` unknown command |
+| `memory` | Agent | `memory`; optional `agent_state`, `expected_revision` | `null` after the update commits | `403` participant authority, `409` stale revision/size, `422` missing checkpoint hook |
+| `transfer` | Researcher | `lease`, `participant`, `controller`; optional `active` | New scoped participant principal | `409` decision boundary/last participant, `422` undeclared participant |
+| `external_event` | Researcher, worker | `lease`, `source`, `cursor`, `event_time`, `payload`; optional `gap` | Evidence event receipt | `409` stale cursor/queue limit/lease |
+| `finalize_outcomes` | Researcher, worker | `lease`, `report_revision` | Completed outcome receipt | `409` missing report or unsettled operations |
+
+All command errors use the shared envelope below. A `403` can intentionally hide whether an environment session exists; a `409` means the caller should refresh state or reconcile authority rather than retry blindly; a `422` means the operation name, arguments, or frozen capability does not permit the request.
 
 ### Issue a participant credential
 
@@ -455,6 +475,7 @@ Every HTTP error uses the same JSON envelope:
 | `402` | `budget_exhausted` | The frozen environment-session budget is exhausted. |
 | `403` | `forbidden` | The credential, role, scope, audience, or authority generation does not authorize the operation. Resource existence can be intentionally hidden. |
 | `404` | `not_found` | An unprotected route or asset does not exist. Protected resources commonly use `403` to avoid disclosure. |
+| `405` | `method_not_allowed` | The route exists but does not support the requested HTTP method. |
 | `409` | `conflict` | Current session state conflicts with the requested operation. |
 | `413` | `request_too_large` | The request exceeds the service or frozen artifact limit. |
 | `422` | `invalid_request` or `unsupported` | Schema validation failed or the requested operation is unsupported. |
@@ -471,20 +492,26 @@ The Python and TypeScript clients raise a typed `ServiceError` only after strict
 import os
 
 from environment_harness.client import EnvironmentClient
+from environment_harness.errors import ServiceError
 
 client = EnvironmentClient(
     "http://127.0.0.1:8765",
     os.environ["EH_TOKEN"],
     allow_loopback=True,
 )
-for environment_session in client.request("GET", "/v1/environments"):
+for environment_session in client.list(limit=100):
     print(environment_session["id"], environment_session["status"])
+
+try:
+    result = client.advance("environment-session-id")
+except ServiceError as error:
+    print(error.status, error.code, error.request_id)
 ```
 
 ### TypeScript
 
 ```ts
-import { EnvironmentClient } from "@environment-harness/client";
+import { EnvironmentClient, ServiceError } from "@environment-harness/client";
 
 const client = new EnvironmentClient(
   "http://127.0.0.1:8765",
@@ -492,8 +519,16 @@ const client = new EnvironmentClient(
   true,
 );
 
-for (const environmentSession of await client.list()) {
+for (const environmentSession of await client.list({limit: 100})) {
   console.log(environmentSession.id, environmentSession.status);
+}
+
+try {
+  await client.advance("environment-session-id");
+} catch (error) {
+  if (error instanceof ServiceError) {
+    console.error(error.status, error.code, error.requestId);
+  }
 }
 ```
 

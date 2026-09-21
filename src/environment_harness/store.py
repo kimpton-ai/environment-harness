@@ -485,6 +485,7 @@ class EvidenceStore:
             elif any(p not in participants and p != "*" for p in audience):
                 raise ValueError("unknown artifact audience")
             key = uid()
+            self._check_artifact_budget(db, environment, len(data))
             self._write_artifact(environment, key, data)
             sha = hashlib.sha256(data).hexdigest()
             db.execute(
@@ -500,6 +501,10 @@ class EvidenceStore:
                 audience,
             )
             return {"id": key, "sha256": sha, "size": len(data), "media_type": media_type}
+
+    def _check_artifact_budget(self, db, environment, size):
+        """Optional hosted aggregate storage admission under the environment lock."""
+        return None
 
     def _write_artifact(self, environment, key, data):
         folder = self.root / "artifacts" / environment

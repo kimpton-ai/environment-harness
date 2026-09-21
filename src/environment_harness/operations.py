@@ -3,6 +3,7 @@
 import json
 
 from .errors import BudgetExceeded, Conflict, Forbidden, Unsupported
+from .motor import MotorExecutor
 from .store import encode
 
 
@@ -99,6 +100,10 @@ class Operations:
             request = json.loads(op["request"])
             if getattr(provider, "endpoint", None) != request["endpoint"]:
                 raise Forbidden("provider endpoint does not match frozen intent")
+            if isinstance(provider, MotorExecutor):
+                payload = provider.validate(request, json.loads(row["manifest"]))
+                if payload.goal_revision != str(row["revision"]):
+                    raise Conflict("motor goal revision is stale")
             db.execute(
                 "UPDATE operations SET status='dispatching' WHERE environment=? AND id=?",
                 (environment, operation_id),
@@ -113,7 +118,26 @@ class Operations:
             )
         # No transaction during IO. Never auto-repeat a dispatch with an uncertain outcome.
         try:
-            receipt = provider.execute(f"{environment}:{operation_id}", request, op["reservation"])
+            if isinstance(provider, MotorExecutor):
+
+                def authority(payload):
+                    with self.store.transaction() as db:
+                        current = self.store.environment(db, environment, who, ("worker", "researcher"))
+                        session._fence(current, lease)
+                        actor = json.loads(current["participants"])[op["participant"]]
+                        if (
+                            current["status"] != "running"
+                            or not actor["active"]
+                            or actor["generation"] != op["generation"]
+                            or str(current["revision"]) != payload.goal_revision
+                        ):
+                            raise Forbidden("motor dispatch authority expired")
+
+                receipt = provider.execute(
+                    f"{environment}:{operation_id}", request, op["reservation"], authority=authority
+                )
+            else:
+                receipt = provider.execute(f"{environment}:{operation_id}", request, op["reservation"])
         except BaseException:
             with self.store.transaction() as db:
                 db.execute(

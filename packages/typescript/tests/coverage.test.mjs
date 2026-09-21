@@ -52,7 +52,7 @@ test('client validates endpoints, request limits, errors and every public reques
     const client = new EnvironmentClient('https://supplier.example/', 'old-token');
     client.setToken('new-token');
     await client.request('POST', '/direct', {value: 1}, 'operation');
-    await client.list();
+    await client.list({limit: 25, cursor: 'a'.repeat(32)});
     await client.get('a/b');
     await client.create({synthetic: true}, 'create-operation');
     await client.observe('environment');
@@ -67,11 +67,14 @@ test('client validates endpoints, request limits, errors and every public reques
     await client.activityStream(12);
     await client.agentWork('environment');
     await client.cancel('environment');
+    await client.advance('environment');
+    await client.credentials('environment', 'alice', 30);
     await client.reports('environment');
     await client.compare(['one', 'two']);
     await client.turnSeries('environment/a', {startTurn: 5, endTurn: 10, maxPoints: 200});
     assert.equal(calls[0].options.headers.Authorization, 'Bearer new-token');
     assert.equal(calls[0].options.headers['X-Operation-ID'], 'operation');
+    assert.match(calls[1].url, /limit=25&cursor=a{32}$/);
     assert.equal(calls[2].url, 'https://supplier.example/v1/environments/a%2Fb');
     assert.match(calls[5].url, /participant=a%2Fb/);
     assert.equal(calls[8].options.body, undefined);
@@ -80,6 +83,9 @@ test('client validates endpoints, request limits, errors and every public reques
     assert.match(calls[11].url, /experiments\/experiment%2Fa\/events\?after=10/);
     assert.match(calls[12].url, /environments\/environment%2Fa\/activity\?after=11/);
     assert.equal(calls[13].options.headers['Last-Event-ID'], '12');
+    assert.ok(calls.some(call => JSON.parse(call.options.body ?? '{}').operation === 'advance'));
+    assert.ok(calls.some(call => call.url.endsWith('/credentials') &&
+      call.options.body === JSON.stringify({participant: 'alice', ttl: 30})));
     assert.match(calls.at(-1).url, /environments\/environment%2Fa\/turn-series\?start_turn=5&max_points=200&end_turn=10/);
   } finally { globalThis.fetch = original; }
 

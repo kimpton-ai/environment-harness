@@ -1,4 +1,4 @@
-import type {Action, ActivityPage, ActivitySnapshot, EvidenceEvent, ExperimentSpec, Json, Observation, Environment, Comparison, ReportEnvelope, TurnSeriesResponse} from './types.js';
+import type {Action, ActivityPage, ActivitySnapshot, AdvanceResponse, CommandOperation, EvidenceEvent, ExperimentSpec, Json, Observation, Environment, Comparison, ReportEnvelope, TurnSeriesResponse} from './types.js';
 export type * from './types.js';
 
 export class ServiceError extends Error {
@@ -57,12 +57,17 @@ export class EnvironmentClient {
     if (text.length > 16777216) throw new Error('Response size limit exceeded');
     return JSON.parse(text) as T;
   }
-  list() {return this.request<Environment[]>('GET', '/v1/environments');}
+  list(options: {limit?: number; cursor?: string} = {}) {
+    const query = new URLSearchParams();
+    if (options.limit !== undefined) query.set('limit', String(options.limit));
+    if (options.cursor !== undefined) query.set('cursor', options.cursor);
+    return this.request<Environment[]>('GET', `/v1/environments${query.size ? '?'+query : ''}`);
+  }
   get(environment: string) {return this.request<Environment>('GET', `/v1/environments/${encodeURIComponent(environment)}`);}
   create(experiment: ExperimentSpec, operationId: string) {return this.request<Environment>('POST', '/v1/environments', experiment, operationId);}
   observe(environment: string, participant?: string) {return this.request<Observation>('GET', `/v1/environments/${encodeURIComponent(environment)}/observation${participant ? '?participant='+encodeURIComponent(participant) : ''}`);}
   submit(environment: string, action: Action) {return this.request<Record<string, Json>>('POST', `/v1/environments/${encodeURIComponent(environment)}/actions`, action);}
-  command<T>(environment: string, operation: string, args: unknown = {}) {return this.request<T>('POST', `/v1/environments/${encodeURIComponent(environment)}/commands`, {operation, arguments:args});}
+  command<T>(environment: string, operation: CommandOperation, args: Record<string, Json> = {}) {return this.request<T>('POST', `/v1/environments/${encodeURIComponent(environment)}/commands`, {operation, arguments:args});}
   events(environment: string, after = 0) {return this.request<{events:EvidenceEvent[];cursor:number}>('GET', `/v1/environments/${encodeURIComponent(environment)}/events?after=${after}`);}
   turnSeries(environment: string, options: {startTurn?: number; endTurn?: number; maxPoints?: number} = {}) {
     const query = new URLSearchParams({
@@ -90,6 +95,8 @@ export class EnvironmentClient {
   }
   agentWork(environment: string) {return this.request<{work: Array<{id: string; revision: number; participant: string; generation: number; status: string}>}>('GET', `/v1/environments/${encodeURIComponent(environment)}/agent-work`);}
   cancel(environment: string) {return this.command<{status: 'cancelled'; unresolved_agent_work: string[]; unresolved_operations: string[]}>(environment, 'cancel');}
+  advance(environment: string) {return this.command<AdvanceResponse>(environment, 'advance');}
+  credentials(environment: string, participant: string, ttl = 3600) {return this.request<{token: string}>('POST', `/v1/environments/${encodeURIComponent(environment)}/credentials`, {participant, ttl});}
   reports(environment: string) {return this.request<ReportEnvelope[]>('GET', `/v1/environments/${encodeURIComponent(environment)}/reports`);}
   compare(environments: string[]) {return this.request<Comparison & Json>('POST', '/v1/compare', {environments});}
   async *replay(environment: string): AsyncGenerator<EvidenceEvent> {
