@@ -19,10 +19,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      contents: read
       pull-requests: read
     outputs:
       compatibility: ${{ steps.paths.outputs.compatibility }}
     steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
       - id: paths
         name: Detect compatibility-sensitive changes
         env:
@@ -34,13 +38,12 @@ jobs:
           if [ "$EVENT_NAME" != pull_request ]; then
             compatibility=true
           else
-            files="$(gh api --paginate "repos/$REPOSITORY/pulls/$PR_NUMBER/files" --jq '.[].filename')"
-            compatibility_files="$(grep -Ev '^src/environment_harness/viewer/' <<< "$files" || true)"
-            if grep -Eq '^(src/|tests/|examples/|scripts/|contracts/|pyproject\.toml$|uv\.lock$|Makefile$|\.github/workflows/ci\.yml$)' <<< "$compatibility_files"; then
-              compatibility=true
-            else
-              compatibility=false
-            fi
+            files="$RUNNER_TEMP/pull-request-files.json"
+            changed_files="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" --jq '.changed_files')"
+            gh api --paginate --slurp \
+              "repos/$REPOSITORY/pulls/$PR_NUMBER/files?per_page=100" > "$files"
+            compatibility="$(python scripts/classify_ci_changes.py \
+              --changed-files "$changed_files" "$files")"
           fi
           echo "compatibility=$compatibility" >> "$GITHUB_OUTPUT"
           printf '### CI routing\n\n- Compatibility matrix: %s\n' "$compatibility" >> "$GITHUB_STEP_SUMMARY"

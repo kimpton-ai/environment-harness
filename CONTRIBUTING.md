@@ -37,6 +37,8 @@ The `Changes` job decides whether to run the four compatibility shards: Python 3
 
 Viewer-only, TypeScript-only, documentation-only, and unrelated workflow-only changes skip those four runners. The required `Cross-platform` check still reports success after verifying that the skip was intentional. A pull request that changes CI routing runs the matrix once to validate the new routing logic.
 
+The classifier evaluates both the current and previous path of renamed files. It also compares the number of files returned by GitHub with the pull request's authoritative changed-file count. Missing, truncated, or malformed file data fails closed by running the compatibility matrix. The security team owns changes to the CI workflow, and the `main` ruleset accepts required status checks only from the GitHub Actions integration.
+
 | Example change | Compatibility matrix | Required checks that validate it |
 | --- | --- | --- |
 | Python SDK, server, storage, or runtime | Runs | All five |

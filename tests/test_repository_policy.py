@@ -56,6 +56,31 @@ def test_release_versions_and_tag_are_consistent(tmp_path, monkeypatch):
     check_repository.check_version_metadata("v0.2.0")
 
 
+def test_ci_workflow_and_classifier_require_security_ownership(tmp_path, monkeypatch):
+    github = tmp_path / ".github"
+    github.mkdir()
+    (github / "CODEOWNERS").write_text(
+        "/.github/workflows/ci.yml @kimpton-ai/security\n"
+        "/scripts/classify_ci_changes.py @kimpton-ai/security\n"
+    )
+    monkeypatch.setattr(check_repository, "ROOT", tmp_path)
+
+    check_repository.check_ci_ownership()
+
+
+def test_ci_security_ownership_fails_closed(tmp_path, monkeypatch):
+    github = tmp_path / ".github"
+    github.mkdir()
+    (github / "CODEOWNERS").write_text(
+        "/.github/workflows/ci.yml @kimpton-ai/maintainers\n"
+        "/scripts/classify_ci_changes.py @kimpton-ai/maintainers\n"
+    )
+    monkeypatch.setattr(check_repository, "ROOT", tmp_path)
+
+    with pytest.raises(check_repository.PolicyError, match="CI security ownership"):
+        check_repository.check_ci_ownership()
+
+
 def test_pep440_prerelease_maps_to_npm_semver(tmp_path, monkeypatch):
     configure_versions(tmp_path, "0.3.0rc2", "0.3.0-rc.2", "0.3.0-rc.2")
     monkeypatch.setattr(check_repository, "ROOT", tmp_path)
@@ -643,7 +668,13 @@ def test_repository_command_rejects_planted_secret_in_temporary_repo(tmp_path):
     ):
         path = tmp_path / name
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("synthetic policy fixture\n")
+        if name == ".github/CODEOWNERS":
+            path.write_text(
+                "/.github/workflows/ci.yml @kimpton-ai/security\n"
+                "/scripts/classify_ci_changes.py @kimpton-ai/security\n"
+            )
+        else:
+            path.write_text("synthetic policy fixture\n")
     license_text = (root / "LICENSE").read_text()
     (tmp_path / "LICENSE").write_text(license_text)
     package = tmp_path / "packages/typescript"
