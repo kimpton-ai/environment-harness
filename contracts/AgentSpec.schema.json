@@ -9,6 +9,7 @@
       "type": "boolean"
     },
     "config": {
+      "additionalProperties": true,
       "title": "Config",
       "type": "object"
     },

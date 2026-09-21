@@ -11,9 +11,6 @@
     "executor": {
       "const": "motor.v1",
       "default": "motor.v1",
-      "enum": [
-        "motor.v1"
-      ],
       "title": "Executor",
       "type": "string"
     },

@@ -11,6 +11,7 @@
           "type": "string"
         },
         "controls": {
+          "additionalProperties": true,
           "minProperties": 1,
           "title": "Controls",
           "type": "object"

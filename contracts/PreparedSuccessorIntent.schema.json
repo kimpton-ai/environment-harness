@@ -21,9 +21,6 @@
         "contract_version": {
           "const": "motor.execution.v1",
           "default": "motor.execution.v1",
-          "enum": [
-            "motor.execution.v1"
-          ],
           "title": "Contract Version",
           "type": "string"
         },
@@ -51,6 +48,19 @@
           "default": null,
           "title": "Interface Revision"
         },
+        "native_tick": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Native Tick"
+        },
         "observation_frame_id": {
           "anyOf": [
             {
@@ -69,6 +79,19 @@
           "minLength": 1,
           "title": "Observation Revision",
           "type": "string"
+        },
+        "observed_at_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observed At Ms"
         },
         "owner": {
           "maxLength": 200,
@@ -108,10 +131,12 @@
       "additionalProperties": false,
       "properties": {
         "arguments": {
+          "additionalProperties": true,
           "title": "Arguments",
           "type": "object"
         },
         "controls": {
+          "additionalProperties": true,
           "title": "Controls",
           "type": "object"
         },
@@ -121,6 +146,7 @@
           "type": "string"
         },
         "target": {
+          "additionalProperties": true,
           "title": "Target",
           "type": "object"
         }
@@ -147,9 +173,6 @@
     "contract_version": {
       "const": "motor.prepared-successor.v1",
       "default": "motor.prepared-successor.v1",
-      "enum": [
-        "motor.prepared-successor.v1"
-      ],
       "title": "Contract Version",
       "type": "string"
     },
@@ -191,9 +214,6 @@
     "phase": {
       "const": "prepared",
       "default": "prepared",
-      "enum": [
-        "prepared"
-      ],
       "title": "Phase",
       "type": "string"
     },
@@ -204,7 +224,7 @@
       "type": "string"
     },
     "prepared_at_ms": {
-      "minimum": 0.0,
+      "minimum": 0,
       "title": "Prepared At Ms",
       "type": "number"
     },

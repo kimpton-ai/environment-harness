@@ -184,7 +184,9 @@ def test_prepared_admission_is_one_shot_and_checks_predecessor_identity(tmp_path
 def test_restart_discards_uncommitted_successor_and_unknown_cannot_retry(tmp_path):
     executor, adapter, request, selection, intent, authority, _ = successor_setup(tmp_path)
     executor.prepare_successor(intent, request=request, selection=selection, authority=authority)
-    restarted = MotorExecutor(PreparedBrowser(Driver()), executor.profile, journal=executor.journal)
+    restarted = MotorExecutor(
+        PreparedBrowser(Driver()), executor.profile, journal=executor.journal, discard_prepared=True
+    )
     with pytest.raises(MotorOutcomeUnknown):
         restarted.admit_successor(intent.intent_id, request=request, selection=selection, authority=authority)
 

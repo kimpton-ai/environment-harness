@@ -98,7 +98,15 @@ class MotorExecutor:
     endpoint = "motor"
     implementation = "motor.v1"
 
-    def __init__(self, adapter: MotorAdapter, profile: MotorProfile, *, journal: Path, selector=None):
+    def __init__(
+        self,
+        adapter: MotorAdapter,
+        profile: MotorProfile,
+        *,
+        journal: Path,
+        selector=None,
+        discard_prepared: bool = False,
+    ):
         if profile.adapter != adapter.implementation:
             raise ValueError("motor adapter does not match the frozen profile")
         if (profile.mode == "jev") != (selector is not None):
@@ -133,13 +141,12 @@ class MotorExecutor:
             for name in ("request", "selection"):
                 if name not in columns:
                     db.execute(f"ALTER TABLE motor_successors ADD COLUMN {name} TEXT")
-            # A restart must never replay an intent that was waiting for the
-            # native boundary. Keep the record for audit and reconciliation.
-            db.execute("UPDATE motor_successors SET status='discarded' WHERE status='prepared'")
             db.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS one_prepared_successor "
                 "ON motor_successors((1)) WHERE status='prepared'"
             )
+            if discard_prepared:
+                self._discard_prepared(db)
 
     @contextmanager
     def _db(self):
@@ -150,6 +157,16 @@ class MotorExecutor:
                 yield db
         finally:
             db.close()
+
+    @staticmethod
+    def _discard_prepared(db):
+        """Fence uncommitted successor intents at an explicit controller restart."""
+        db.execute("UPDATE motor_successors SET status='discarded' WHERE status='prepared'")
+
+    def discard_prepared_successors(self):
+        """Discard the one pending successor without replaying its intent."""
+        with self._db() as db:
+            self._discard_prepared(db)
 
     @property
     def stop_epoch(self):
@@ -284,6 +301,15 @@ class MotorExecutor:
             expected = getattr(intent.metadata, key)
             if expected is not None and live.get(key) != expected:
                 raise Conflict(f"prepared successor {key} changed")
+        if (
+            intent.metadata.observed_at_ms is not None
+            and intent.metadata.observed_at_ms + intent.freshness_ms < time.time() * 1000
+        ):
+            raise Conflict("prepared successor observation freshness expired")
+        if intent.metadata.native_tick is not None:
+            live_tick = live.get("native_tick")
+            if not isinstance(live_tick, int) or live_tick < intent.metadata.native_tick:
+                raise Conflict("prepared successor native observation tick changed")
         if intent.expires_tick is not None:
             native_tick = live.get("native_tick")
             if not isinstance(native_tick, int) or native_tick > intent.expires_tick:

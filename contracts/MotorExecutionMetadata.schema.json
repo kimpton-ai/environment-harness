@@ -21,9 +21,6 @@
     "contract_version": {
       "const": "motor.execution.v1",
       "default": "motor.execution.v1",
-      "enum": [
-        "motor.execution.v1"
-      ],
       "title": "Contract Version",
       "type": "string"
     },
@@ -51,6 +48,19 @@
       "default": null,
       "title": "Interface Revision"
     },
+    "native_tick": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Native Tick"
+    },
     "observation_frame_id": {
       "anyOf": [
         {
@@ -69,6 +79,19 @@
       "minLength": 1,
       "title": "Observation Revision",
       "type": "string"
+    },
+    "observed_at_ms": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Observed At Ms"
     },
     "owner": {
       "maxLength": 200,

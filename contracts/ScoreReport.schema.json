@@ -173,10 +173,12 @@
       "type": "object"
     },
     "metrics": {
+      "additionalProperties": true,
       "title": "Metrics",
       "type": "object"
     },
     "provenance": {
+      "additionalProperties": true,
       "title": "Provenance",
       "type": "object"
     },

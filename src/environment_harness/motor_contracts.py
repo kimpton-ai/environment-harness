@@ -85,6 +85,8 @@ class MotorExecutionMetadata(MotorRecord):
     ui_revision: str | None = Field(default=None, min_length=1)
     observation_frame_id: str | None = Field(default=None, min_length=1, max_length=200)
     camera_revision: str | None = Field(default=None, min_length=1, max_length=200)
+    observed_at_ms: float | None = Field(default=None, ge=0)
+    native_tick: int | None = Field(default=None, ge=0, strict=True)
 
 
 class PreparedSuccessorIntent(MotorRecord):

@@ -28,6 +28,7 @@
           "type": "string"
         },
         "payload": {
+          "additionalProperties": true,
           "title": "Payload",
           "type": "object"
         }
@@ -66,6 +67,7 @@
     },
     "outcomes": {
       "additionalProperties": {
+        "additionalProperties": true,
         "type": "object"
       },
       "title": "Outcomes",
@@ -96,6 +98,7 @@
       "type": "object"
     },
     "state": {
+      "additionalProperties": true,
       "title": "State",
       "type": "object"
     },
