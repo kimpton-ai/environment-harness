@@ -15,6 +15,7 @@ from .motor_contracts import (
     MotorCandidate,
     MotorRequest,
     MotorStep,
+    PreparedSuccessorAdmission,
     PreparedSuccessorIntent,
     UnsupportedPreparation,
 )
@@ -118,8 +119,25 @@ class _Adapter(ABC):
         raise NotImplementedError("prepared successor admission must be implemented by the native adapter")
 
     def reconcile_prepared_successor(self, intent):
-        """Return an already-native admission, or ``None`` if it is unknown."""
-        return None
+        """Convert the native operation ledger proof into an admission."""
+        result = self.reconcile(intent.operation_id)
+        if not isinstance(result, dict) or result.get("operation_id") != intent.operation_id:
+            return None
+        status = result.get("status")
+        if status in {"completed", "admitted", "accepted"}:
+            admission_status = "admitted"
+        elif status in {"rejected", "cancelled", "blocked"}:
+            admission_status = "rejected"
+        else:
+            admission_status = "unknown"
+        return PreparedSuccessorAdmission(
+            intent_id=intent.intent_id,
+            predecessor_operation_id=intent.predecessor_operation_id,
+            operation_id=intent.operation_id,
+            metadata=intent.metadata,
+            status=admission_status,
+            reason_code="native_reconciled",
+        )
 
     def reconcile(self, operation_id):
         return self.lookup(operation_id)

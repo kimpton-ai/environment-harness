@@ -277,6 +277,9 @@ class MotorAdapter(Protocol):
     def admit_successor(
         self, intent: PreparedSuccessorIntent, *, predecessor: MotorReceipt
     ) -> PreparedSuccessorAdmission: ...
+    def reconcile_prepared_successor(
+        self, intent: PreparedSuccessorIntent
+    ) -> PreparedSuccessorAdmission | None: ...
     def reconcile(self, operation_id: str) -> dict[str, Any] | None: ...
 
 
