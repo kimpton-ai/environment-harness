@@ -1,6 +1,12 @@
 import pytest
 
-from environment_harness.motor_adapters import BrowserMotor, DesktopMotor, MinecraftMotor, MotorError
+from environment_harness.motor_adapters import (
+    BrowserMotor,
+    DesktopMotor,
+    MinecraftMotor,
+    MotorError,
+    MotorRequest,
+)
 
 
 class Driver:
@@ -10,7 +16,7 @@ class Driver:
     def observe(self):
         return self.state
 
-    def execute(self, skill, payload):
+    def execute(self, skill, payload, **kwargs):
         self.calls.append((skill, payload))
         if skill == "move":
             self.state["position"] = dict(payload["target"])
@@ -96,3 +102,33 @@ def test_desktop_requires_unique_app_window_element_and_readback():
     missing = Driver({"windows": []})
     with pytest.raises(MotorError, match="missing"):
         DesktopMotor(missing).run("type-2", {"skill": "type", "target": {"app": "Editor", "window": "main", "element": "title"}, "text": "x", "expected": {}})
+
+
+def test_primary_plan_validates_before_driver_effect_and_executes_typed_step():
+    driver = Driver({"revision": "r1", "position": {"x": 0, "y": 64, "z": 0}, "walkable_positions": [{"x": 2, "y": 64, "z": 1}]})
+    motor = MinecraftMotor(driver)
+    request = MotorRequest(
+        skill="move", target={"x": 2, "y": 64, "z": 1},
+        expected={"position": {"x": 2, "y": 64, "z": 1}}, observation_revision="r1", goal_revision="g1",
+    )
+    candidate = motor.plan(request, driver.observe())[0]
+    assert candidate.steps[0].target == request.target
+    motor.execute(candidate.steps[0], operation_id="op-1", deadline=__import__("time").monotonic() + 1)
+    assert driver.calls[0][0] == "move"
+
+    before = len(driver.calls)
+    with pytest.raises(MotorError, match="walkable"):
+        motor.plan(MotorRequest(
+            skill="move", target={"x": 99, "y": 64, "z": 1}, expected={"position": {}},
+            observation_revision="r1", goal_revision="g1",
+        ), driver.observe())
+    assert len(driver.calls) == before
+
+
+def test_plan_rejects_stale_revision_and_empty_evidence():
+    driver = Driver({"revision": "r2", "elements": [{"element_id": "save"}]})
+    motor = BrowserMotor(driver)
+    with pytest.raises(MotorError, match="expected"):
+        MotorRequest(skill="click", target={"element_id": "save"}, expected={}, observation_revision="r2", goal_revision="g1")
+    with pytest.raises(MotorError, match="stale"):
+        motor.plan(MotorRequest(skill="click", target={"element_id": "save"}, expected={"elements": []}, observation_revision="r1", goal_revision="g1"), driver.observe())

@@ -7,11 +7,58 @@ Minecraft, browser, or desktop dependency.
 
 from __future__ import annotations
 
+import time
 from copy import deepcopy
+from dataclasses import dataclass, field
 
 
 class MotorError(Exception):
     """The requested motor operation could not be completed safely."""
+
+
+@dataclass(frozen=True)
+class MotorRequest:
+    skill: str
+    target: dict
+    arguments: dict = field(default_factory=dict)
+    expected: dict = field(default_factory=dict)
+    observation_revision: str = ""
+    goal_revision: str = ""
+    stop_epoch: int = 0
+    max_steps: int = 32
+    timeout_ms: int = 10000
+
+    def __post_init__(self):
+        if not isinstance(self.skill, str) or not self.skill:
+            raise MotorError("skill is required")
+        _dict(self.target, "target")
+        _dict(self.arguments, "arguments")
+        if not isinstance(self.expected, dict) or not self.expected:
+            raise MotorError("expected postconditions are required")
+        if not isinstance(self.observation_revision, str) or not self.observation_revision:
+            raise MotorError("observation_revision is required")
+        if not isinstance(self.goal_revision, str) or not self.goal_revision:
+            raise MotorError("goal_revision is required")
+        if isinstance(self.stop_epoch, bool) or not isinstance(self.stop_epoch, int) or self.stop_epoch < 0:
+            raise MotorError("stop_epoch must be a nonnegative integer")
+        if isinstance(self.max_steps, bool) or not isinstance(self.max_steps, int) or not 1 <= self.max_steps <= 10000:
+            raise MotorError("max_steps must be between 1 and 10000")
+        if isinstance(self.timeout_ms, bool) or not isinstance(self.timeout_ms, int) or not 1 <= self.timeout_ms <= 600000:
+            raise MotorError("timeout_ms must be between 1 and 600000")
+
+
+@dataclass(frozen=True)
+class MotorStep:
+    operation: str
+    target: dict
+    arguments: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class MotorCandidate:
+    id: str
+    description: str
+    steps: tuple[MotorStep, ...]
 
 
 def _dict(value, label):
@@ -48,6 +95,33 @@ class _Adapter:
         self.driver, self.max_steps = driver, max_steps
         self._requests, self._receipts = {}, {}
         self._stopped = False
+
+    def observe(self):
+        return deepcopy(_dict(self.driver.observe(), "observation"))
+
+    def _revision(self, observation):
+        revision = observation.get("revision")
+        if not isinstance(revision, str) or not revision:
+            raise MotorError("observation revision is required")
+        return revision
+
+    def _request(self, request):
+        if not isinstance(request, MotorRequest):
+            raise TypeError("plan requires MotorRequest")
+        return request
+
+    def execute(self, step, *, operation_id, cancel=None, deadline=None):
+        if not isinstance(step, MotorStep) or not isinstance(operation_id, str) or not operation_id:
+            raise MotorError("invalid motor step or operation_id")
+        if cancel is not None and cancel.is_set():
+            raise MotorError("motor execution cancelled")
+        if deadline is not None and time.monotonic() >= deadline:
+            raise MotorError("motor execution deadline expired")
+        payload = {"target": deepcopy(step.target), **deepcopy(step.arguments)}
+        result = self.driver.execute(step.operation, payload, operation_id=operation_id, cancel=cancel, deadline=deadline)
+        if not isinstance(result, dict):
+            raise MotorError("driver returned an invalid receipt")
+        return deepcopy(result)
 
     def stop(self):
         self._stopped = True
@@ -93,6 +167,49 @@ class _Adapter:
 class MinecraftMotor(_Adapter):
     """Bounded movement, mining, and crafting over a native Minecraft driver."""
 
+    implementation = "minecraft-motor@1"
+    skills = ("move", "mine", "craft")
+
+    def plan(self, request, observation):
+        request = self._request(request)
+        observation = _dict(observation, "observation")
+        if self._revision(observation) != request.observation_revision:
+            raise MotorError("observation revision is stale")
+        if request.skill not in self.skills:
+            raise MotorError("unsupported Minecraft motor skill")
+        target = deepcopy(request.target)
+        if request.skill == "move":
+            point = _target_point(target)
+            walkable = observation.get("walkable_positions")
+            if walkable is not None and point not in walkable:
+                raise MotorError("move target is not an observed walkable position")
+            step = MotorStep("move", point, {"max_steps": request.max_steps})
+        elif request.skill == "mine":
+            blocks = target.get("blocks")
+            if not isinstance(blocks, list) or not 1 <= len(blocks) <= 128:
+                raise MotorError("mine requires 1..128 explicit blocks")
+            observed = {(b.get("x"), b.get("y"), b.get("z"), b.get("name")) for b in observation.get("blocks", []) if isinstance(b, dict)}
+            normalized = []
+            for index, block in enumerate(blocks):
+                point = _target_point(block, f"blocks[{index}]")
+                name = block.get("name")
+                if not isinstance(name, str) or not name:
+                    raise MotorError("mine block name is required")
+                if observed and (*point.values(), name) not in observed:
+                    raise MotorError("mine target does not match current observation")
+                normalized.append({**point, "name": name})
+            step = MotorStep("mine", {"blocks": normalized}, {"tool": request.arguments.get("tool")})
+        else:
+            recipe = target.get("recipe")
+            count = _integer(request.arguments.get("count"), "count")
+            if not isinstance(recipe, str) or not recipe or not 1 <= count <= 64:
+                raise MotorError("craft requires recipe and count between 1 and 64")
+            recipes = observation.get("recipes")
+            if recipes is not None and recipe not in recipes:
+                raise MotorError("craft recipe is not currently available")
+            step = MotorStep("craft", {"recipe": recipe}, {"count": count})
+        return (MotorCandidate(f"{request.skill}-direct", f"Execute bounded Minecraft {request.skill}", (step,)),)
+
     def run(self, operation_id, request):
         request, cached = self._start(operation_id, request)
         if cached is not None:
@@ -137,6 +254,26 @@ class MinecraftMotor(_Adapter):
 class BrowserMotor(_Adapter):
     """Deterministic browser focus, fill, click, and readback routines."""
 
+    implementation = "browser-motor@1"
+    skills = ("focus", "fill", "click", "read")
+
+    def plan(self, request, observation):
+        request = self._request(request)
+        observation = _dict(observation, "observation")
+        if self._revision(observation) != request.observation_revision:
+            raise MotorError("observation revision is stale")
+        if request.skill not in self.skills:
+            raise MotorError("unsupported browser motor skill")
+        target = self._resolve(observation, request.target)
+        arguments = {}
+        if request.skill == "fill":
+            text = request.arguments.get("text")
+            if not isinstance(text, str) or len(text) > 4096:
+                raise MotorError("fill text is invalid")
+            arguments["text"] = text
+        return (MotorCandidate(f"{request.skill}-direct", f"Execute bounded browser {request.skill}",
+                               (MotorStep(request.skill, target, arguments),)),)
+
     def _resolve(self, observation, target):
         target = _dict(target, "target")
         elements = observation.get("elements")
@@ -177,6 +314,26 @@ class BrowserMotor(_Adapter):
 
 class DesktopMotor(_Adapter):
     """Deterministic desktop app/window/element focus and typing routines."""
+
+    implementation = "desktop-motor@1"
+    skills = ("focus", "activate", "click", "type", "read")
+
+    def plan(self, request, observation):
+        request = self._request(request)
+        observation = _dict(observation, "observation")
+        if self._revision(observation) != request.observation_revision:
+            raise MotorError("observation revision is stale")
+        if request.skill not in self.skills:
+            raise MotorError("unsupported desktop motor skill")
+        target = self._resolve(observation, request.target)
+        arguments = {}
+        if request.skill == "type":
+            text = request.arguments.get("text")
+            if not isinstance(text, str) or len(text) > 4096:
+                raise MotorError("type text is invalid")
+            arguments["text"] = text
+        return (MotorCandidate(f"{request.skill}-direct", f"Execute bounded desktop {request.skill}",
+                               (MotorStep(request.skill, target, arguments),)),)
 
     def _resolve(self, observation, target):
         target = _dict(target, "target")
