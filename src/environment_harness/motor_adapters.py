@@ -49,7 +49,6 @@ class _Adapter:
         if not isinstance(max_steps, int) or not 1 <= max_steps <= 10000:
             raise ValueError("max_steps must be between 1 and 10000")
         self.driver, self.max_steps = driver, max_steps
-        self._stopped = False
 
     def observe(self):
         return deepcopy(_dict(self.driver.observe(), "observation"))
@@ -68,7 +67,7 @@ class _Adapter:
     def execute(self, step, *, operation_id, cancel, deadline):
         if not isinstance(step, MotorStep) or not isinstance(operation_id, str) or not operation_id:
             raise MotorError("invalid motor step or operation_id")
-        if self._stopped or cancel.is_set():
+        if cancel.is_set():
             raise MotorError("motor execution cancelled")
         if deadline is not None and time.monotonic() >= deadline:
             raise MotorError("motor execution deadline expired")
@@ -79,7 +78,6 @@ class _Adapter:
         return deepcopy(result)
 
     def stop(self):
-        self._stopped = True
         self.driver.stop()
 
     def lookup(self, operation_id):

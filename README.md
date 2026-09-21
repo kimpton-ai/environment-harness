@@ -182,3 +182,5 @@ uv run --no-sync python examples/pettingzoo_rps.py
 ```
 
 [Compatibility details](docs/COMPATIBILITY.md) cover cancellation, agent registration, score groups and inherited evidence.
+
+Optional [motor control](docs/motor-control.md) adds bounded native, browser and desktop skills with durable receipts and an optional Jev selector. Direct execution remains the default.

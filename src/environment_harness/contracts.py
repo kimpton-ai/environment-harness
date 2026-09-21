@@ -5,6 +5,8 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from .motor_contracts import MotorProfile
+
 Json = dict[str, Any]
 Mode = Literal["sequential", "simultaneous", "event"]
 
@@ -41,6 +43,7 @@ class EnvironmentSpec(Record):
     action_schema: Json = Field(default_factory=lambda: {"type": "object"})
     scheduling: Mode
     modalities: tuple[str, ...] = ("text", "json")
+    motor_skills: tuple[str, ...] = ()
     capabilities: Capabilities = Field(default_factory=Capabilities)
     purposes: tuple[Literal["evaluation", "training"], ...] = ("evaluation",)
     stale_action: Literal["reject"] = "reject"
@@ -79,6 +82,7 @@ class ExperimentSpec(Record):
     interventions: Json = Field(default_factory=dict)
     scoring_versions: tuple[str, ...] = ()
     policy: RunPolicy = Field(default_factory=RunPolicy)
+    motor: MotorProfile | None = None
 
     @model_validator(mode="after")
     def check(self):
@@ -91,6 +95,8 @@ class ExperimentSpec(Record):
             raise ValueError("heldout environments cannot be used for training")
         if self.policy.external_writes and not self.environment.capabilities.external_writes:
             raise ValueError("external writes unsupported")
+        if self.motor is not None and not self.environment.motor_skills:
+            raise ValueError("motor assistance requires declared environment skills")
         return self
 
 
