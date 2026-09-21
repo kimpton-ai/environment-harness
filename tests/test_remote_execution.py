@@ -325,3 +325,138 @@ def test_ors_limits_and_explicit_failure():
         client.initialize("s", "env", task_spec={}, split="train")
     with pytest.raises(ValueError):
         client.initialize("s", "env", task_spec={}, split="train", index=0)
+
+
+def test_ors_bounds_both_directions_and_keeps_stream_failure(http_server, monkeypatch):
+    import environment_harness.adapters.ors as ors
+
+    origin, requests, replies = http_server
+    client = ORSClient(origin, TOKEN, allow_loopback=True)
+    monkeypatch.setattr(ors, "MAX_BYTES", 32)
+    with pytest.raises(ValueError, match="request exceeds"):
+        client._request("POST", "/create", {"large": "x" * 64})
+    assert not requests
+    replies.append((200, b"x" * 33))
+    with pytest.raises(ORSError) as oversized:
+        client.environments()
+    assert not oversized.value.outcome_unknown
+    monkeypatch.setattr(ors, "MAX_BYTES", 1024)
+    replies.append((200, b"event: task_id\ndata: original\n\nevent: error\ndata: private\n\n"))
+    with pytest.raises(ORSError) as uncertain:
+        client.call("session", "env", "move", {})
+    assert uncertain.value.task_id == "original" and uncertain.value.outcome_unknown
+    result = read_result(
+        [
+            b": heartbeat\n",
+            *events(("task_id", "t"), ("end", '{"ok":true,"output":{"blocks":[],"finished":true}}')),
+        ]
+    )
+    assert result.finished
+
+
+def test_worker_limits_and_entrypoint_remove_bootstrap_credential(monkeypatch):
+    import runpy
+    import sys
+
+    import uvicorn
+    from fastapi import HTTPException
+
+    from environment_harness import plugins, worker_server
+
+    env = SyntheticEnvironment()
+    app = create_worker_app(env, TOKEN)
+    headers = {"Authorization": "Bearer " + TOKEN}
+    monkeypatch.setattr(worker_server, "MAX_BYTES", 128)
+    with TestClient(app) as client:
+        assert client.post("/v1/worker/call", content=b"x" * 129, headers=headers).status_code == 413
+        response = client.post(
+            "/v1/worker/call",
+            json={"protocol": PROTOCOL, "id": "a" * 32, "method": "spec", "arguments": {}},
+            headers=headers,
+        )
+        assert response.status_code == 422 and response.json()["error"] == "worker_failure"
+    endpoint = next(route.endpoint for route in app.routes if route.path == "/v1/worker/call")
+    with pytest.raises(HTTPException) as denied:
+        endpoint(None, authorization="Bearer incorrect")
+    assert denied.value.status_code == 401
+    started = []
+    monkeypatch.setattr(plugins, "environment", lambda name: env)
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kwargs: started.append(kwargs))
+    monkeypatch.setenv("ENVIRONMENT_WORKER_TOKEN", TOKEN)
+    monkeypatch.setattr(sys, "argv", ["worker", "synthetic", "--port", "8123"])
+    runpy.run_module("environment_harness.worker_server", run_name="__main__")
+    import os
+
+    assert "ENVIRONMENT_WORKER_TOKEN" not in os.environ
+    assert started == [{"host": "0.0.0.0", "port": 8123, "access_log": False}]
+
+
+@pytest.mark.parametrize(
+    "mode,loss",
+    [("sequential", None), ("event", None), ("simultaneous", "before"), ("simultaneous", "after")],
+)
+def test_coordinator_respects_scheduling_and_lost_authority(tmp_path, monkeypatch, mode, loss):
+    from contextlib import contextmanager
+
+    from environment_harness import coordinator
+    from environment_harness.errors import Conflict
+
+    env = SyntheticEnvironment(mode=mode)
+    env.spec = env.spec.model_copy(update={"phase_deadline": "coordinator"})
+    session = EnvironmentSession(EvidenceStore(tmp_path), env)
+    who = Principal(tenant="synthetic", subject="owner", role="researcher")
+    identity = session.create(
+        ExperimentSpec(
+            environment=env.spec,
+            participants=(AgentSpec(id="alice", implementation="external", policy_version="1"),),
+        ),
+        who,
+    )["id"]
+    agent = who.model_copy(
+        update={"role": "agent", "subject": "alice", "participant": "alice", "environment": identity}
+    )
+    observation = session.observe(identity, agent)
+    session.submit(
+        identity,
+        agent,
+        Action(
+            operation_id="one",
+            participant="alice",
+            observation_id=observation["id"],
+            revision=0,
+            payload={"value": 1},
+        ),
+    )
+    if mode == "event":
+        assert advance(session, identity, who)["status"] == "waiting"
+        lease = session.lease(identity, who, "event-input")
+        session.external_event(
+            identity, who, lease, source="synthetic", cursor=1, event_time=1, payload={"signal": True}
+        )
+        session.release(identity, who, lease)
+    failures = []
+    original = coordinator.writer
+
+    @contextmanager
+    def fenced(*args, **kwargs):
+        with original(*args, **kwargs) as (lease, errors):
+            if loss == "before":
+                failures.append(RuntimeError("synthetic lost writer"))
+            yield lease, failures
+
+    monkeypatch.setattr(coordinator, "writer", fenced)
+    resolve = session.resolve
+
+    def commit(*args, **kwargs):
+        result = resolve(*args, **kwargs)
+        if loss == "after":
+            failures.append(RuntimeError("synthetic lost writer"))
+        return result
+
+    monkeypatch.setattr(session, "resolve", commit)
+    if loss:
+        with pytest.raises(Conflict, match="lost authority"):
+            advance(session, identity, who)
+        assert session.get(identity, who)["revision"] == (1 if loss == "after" else 0)
+    else:
+        assert advance(session, identity, who)["revision"] == 1

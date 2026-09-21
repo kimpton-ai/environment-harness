@@ -38,3 +38,11 @@ def test_s3_erasure_never_claims_missing_or_unsupported_deletion(versioned, page
     )
     with pytest.raises(ValueError):
         S3Artifacts(client, "synthetic").purge_prefix("a" * 32 + "/")
+
+
+@pytest.mark.parametrize("limit", [0, -1, "large"])
+def test_storage_budget_requires_a_positive_integer(limit):
+    from environment_harness.hosted import PostgresEvidenceStore
+
+    with pytest.raises(ValueError, match="positive retained"):
+        PostgresEvidenceStore("unused", None, max_retained_bytes=limit)
