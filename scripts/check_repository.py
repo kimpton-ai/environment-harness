@@ -260,6 +260,20 @@ def check_repository_metadata() -> None:
         raise PolicyError("missing governance files: " + ", ".join(missing))
 
 
+def check_ci_ownership() -> None:
+    entries = {
+        line.strip()
+        for line in (ROOT / ".github/CODEOWNERS").read_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    required = {
+        "/.github/workflows/ci.yml @kimpton-ai/security",
+        "/scripts/classify_ci_changes.py @kimpton-ai/security",
+    }
+    if missing := required - entries:
+        raise PolicyError("CI security ownership is missing: " + ", ".join(sorted(missing)))
+
+
 def check_version_metadata(release_tag: str | None = None) -> None:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text())
     package = json.loads((ROOT / "packages/typescript/package.json").read_text())
@@ -654,6 +668,7 @@ def main() -> None:
     now = _timestamp(args.now, "current time") if args.now else datetime.now(UTC)
     checks = [
         ("repository metadata", check_repository_metadata),
+        ("CI security ownership", check_ci_ownership),
         ("version metadata", lambda: check_version_metadata(args.release_tag)),
         ("licenses", check_licenses),
         ("secrets", lambda: check_secrets(now)),

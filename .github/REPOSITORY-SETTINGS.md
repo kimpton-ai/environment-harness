@@ -2,7 +2,7 @@
 
 GitHub settings are part of the security boundary and cannot be enforced by files alone. Repository administrators must configure:
 
-- a `main` ruleset requiring the `Python`, `Cross-platform`, `TypeScript`, `Security`, and `Distribution` checks;
+- a `main` ruleset requiring the `Python`, `Cross-platform`, `TypeScript`, `Security`, and `Distribution` checks, each bound to the GitHub Actions integration as its expected source;
 - at least one independent approval, required CODEOWNERS approval, dismissal of stale approvals, and approval of the complete commit range;
 - blocked direct pushes, force pushes, branch deletion, and ordinary administrator/team bypasses;
 - a `v*` tag ruleset allowing creation only by release maintainers, while blocking update/deletion and automation bypass;
@@ -13,6 +13,8 @@ GitHub settings are part of the security boundary and cannot be enforced by file
 - review of the complete release commit range before a maintainer creates a tag.
 
 Do not install a release GitHub App or store a long-lived release credential in Actions. Release preparation and protected tag creation are deliberate maintainer operations. Dependabot may open security-update pull requests, but dependency updates are never auto-merged. Review branch rules and the Actions allowlist after ownership or workflow changes, and record exceptions in a tracked security issue.
+
+Treat CI path classification only as a runner-cost optimization. Required checks must continue to report on every pull request, and incomplete GitHub file metadata must run additional checks rather than skip them. The security team owns `.github/workflows/ci.yml`; maintain the required CODEOWNER and last-push approval rules so proposed workflow code cannot approve itself.
 
 Release immutability applies when a release is published after the repository setting is enabled. A legacy mutable release cannot be locked retroactively through GitHub's release settings; replacing one requires a separately reviewed migration because it changes public release metadata and artifact availability.
 

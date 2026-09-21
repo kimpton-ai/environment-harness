@@ -11,9 +11,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = os.environ.get("REGRESSION_BASE_REF", "origin/main")
-PROOF_TARGETS = (
-    "tests/test_sdk_surfaces.py::test_remote_client_validates_transport_and_builds_public_requests",
-)
 SAFE_ENV = {
     "COMSPEC",
     "LANG",
@@ -66,9 +63,6 @@ def main() -> None:
     if not changed:
         print("regression proof: no added or changed test files")
         return
-    proof_files = {target.split("::", 1)[0] for target in PROOF_TARGETS}
-    if not proof_files.issubset(changed):
-        raise SystemExit("regression proof targets must be added or changed relative to the base revision")
     archive = git("archive", "--format=tar", BASE)
     with tempfile.TemporaryDirectory(prefix="environment-harness-regression-") as directory:
         checkout = Path(directory) / "base"
@@ -92,7 +86,7 @@ def main() -> None:
                 "server",
                 "pytest",
                 "-q",
-                *PROOF_TARGETS,
+                *changed,
             ],
             cwd=checkout,
             env=env,
