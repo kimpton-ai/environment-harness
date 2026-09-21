@@ -26,6 +26,9 @@ from .motor_contracts import (
     MotorProfile,
     MotorReceipt,
     MotorRequest,
+    PreparedSuccessorAdmission,
+    PreparedSuccessorIntent,
+    UnsupportedPreparation,
 )
 from .store import encode
 
@@ -122,6 +125,9 @@ class MotorExecutor:
                 "CREATE TABLE IF NOT EXISTS control (id INTEGER PRIMARY KEY CHECK(id=1), epoch INTEGER NOT NULL)"
             )
             db.execute("INSERT OR IGNORE INTO control VALUES (1,0)")
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS motor_successors (id TEXT PRIMARY KEY, predecessor TEXT NOT NULL, intent TEXT NOT NULL, status TEXT NOT NULL, admission TEXT)"
+            )
 
     @contextmanager
     def _db(self):
@@ -233,6 +239,86 @@ class MotorExecutor:
             row = db.execute("SELECT receipt FROM motor WHERE id=?", (operation_id,)).fetchone()
         return json.loads(row["receipt"]) if row and row["receipt"] else None
 
+    def prepare_successor(self, intent):
+        """Persist a successor intent without applying native controls."""
+        if not isinstance(intent, PreparedSuccessorIntent):
+            raise TypeError("intent must be PreparedSuccessorIntent")
+        if not getattr(self.adapter, "supports_prepared_successors", False):
+            raise UnsupportedPreparation(f"{self.profile.adapter} does not support prepared successors")
+        if intent.metadata.stop_epoch != self.stop_epoch:
+            raise Conflict("prepared successor stop epoch is stale")
+        encoded = encode(intent.model_dump(mode="json"))
+        with self._db() as db:
+            prior = db.execute("SELECT * FROM motor_successors WHERE id=?", (intent.intent_id,)).fetchone()
+            if prior:
+                if prior["intent"] != encoded:
+                    raise Conflict("prepared successor ID reused with different input")
+                return intent
+            db.execute(
+                "INSERT INTO motor_successors VALUES (?,?,?,?,NULL)",
+                (intent.intent_id, intent.predecessor_operation_id, encoded, "prepared"),
+            )
+        prepared = self.adapter.prepare_successor(intent)
+        if not isinstance(prepared, PreparedSuccessorIntent):
+            raise MotorOutcomeUnknown("adapter did not return the prepared successor intent")
+        return prepared
+
+    def admit_successor(self, intent_id, *, predecessor=None):
+        """Admit one prepared successor at the adapter boundary."""
+        if not getattr(self.adapter, "supports_prepared_successors", False):
+            raise UnsupportedPreparation(f"{self.profile.adapter} does not support prepared successors")
+        with self._db() as db:
+            row = db.execute("SELECT * FROM motor_successors WHERE id=?", (intent_id,)).fetchone()
+        if row is None:
+            raise Conflict("unknown prepared successor")
+        intent = PreparedSuccessorIntent.model_validate(json.loads(row["intent"]))
+        prior = predecessor or self.lookup(intent.predecessor_operation_id)
+        if prior is None:
+            admission = PreparedSuccessorAdmission(
+                intent_id=intent.intent_id,
+                predecessor_operation_id=intent.predecessor_operation_id,
+                operation_id=intent.operation_id,
+                metadata=intent.metadata,
+                status="unknown",
+                reason_code="predecessor_unknown",
+            )
+        elif prior.get("status") != "completed" or prior.get("outcome", "completed") != "completed":
+            admission = PreparedSuccessorAdmission(
+                intent_id=intent.intent_id,
+                predecessor_operation_id=intent.predecessor_operation_id,
+                operation_id=intent.operation_id,
+                metadata=intent.metadata,
+                status="rejected",
+                reason_code="predecessor_not_completed",
+            )
+        elif intent.metadata.stop_epoch != self.stop_epoch:
+            admission = PreparedSuccessorAdmission(
+                intent_id=intent.intent_id,
+                predecessor_operation_id=intent.predecessor_operation_id,
+                operation_id=intent.operation_id,
+                metadata=intent.metadata,
+                status="rejected",
+                reason_code="stop_epoch_changed",
+            )
+        else:
+            admission = self.adapter.admit_successor(intent, predecessor=MotorReceipt.model_validate(prior))
+            if not isinstance(admission, PreparedSuccessorAdmission):
+                raise MotorOutcomeUnknown("adapter did not return a successor admission")
+        with self._db() as db:
+            db.execute(
+                "UPDATE motor_successors SET status=?, admission=? WHERE id=?",
+                (admission.status, encode(admission.model_dump(mode="json")), intent_id),
+            )
+        return admission
+
+    # Short generic names make adapters usable by schedulers that do not know
+    # the Minecraft-specific terminology.
+    prepare = prepare_successor
+    admit = admit_successor
+
+    def reconcile(self, operation_id):
+        return self.adapter.reconcile(operation_id)
+
     def progress(self, operation_id):
         with self._db() as db:
             row = db.execute("SELECT status,progress FROM motor WHERE id=?", (operation_id,)).fetchone()
@@ -316,6 +402,12 @@ class MotorExecutor:
         watcher.start()
 
         def finish(status, reason=None, reason_code=None):
+            outcome = {
+                "completed": "completed",
+                "blocked": "rejected",
+                "cancelled": "cancelled",
+            }.get(status, "unknown")
+            effect = "applied" if status == "completed" else "none"
             receipt = MotorReceipt(
                 operation_id=operation_id,
                 status=status,
@@ -328,6 +420,8 @@ class MotorExecutor:
                 selection=selection,
                 steps=tuple(steps),
                 reason_code=reason_code,
+                outcome=outcome,
+                effect=effect,
                 elapsed_ms=(time.monotonic() - started) * 1000,
             ).model_dump(mode="json")
             with self._db() as db:

@@ -37,6 +37,7 @@ for name in (
     "ControlClaim",
     "ProgressReceipt",
     "MotorProfile",
+    "MotorExecutionMetadata",
     "MotorRequest",
     "MotorStep",
     "MotorCandidate",
@@ -44,6 +45,8 @@ for name in (
     "MotorReceipt",
     "MotorGroup",
     "MotorGroupReceipt",
+    "PreparedSuccessorIntent",
+    "PreparedSuccessorAdmission",
 ):
     schema = getattr(motor_contracts, name).model_json_schema()
     schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"

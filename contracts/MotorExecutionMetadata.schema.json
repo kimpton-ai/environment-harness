@@ -1,0 +1,75 @@
+{
+  "$id": "urn:environment-harness:v1:MotorExecutionMetadata",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The fencing values that make a motor operation admissible.",
+  "properties": {
+    "contract_version": {
+      "const": "motor.execution.v1",
+      "default": "motor.execution.v1",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "epoch": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Epoch",
+      "type": "integer"
+    },
+    "goal_revision": {
+      "minLength": 1,
+      "title": "Goal Revision",
+      "type": "string"
+    },
+    "interface_revision": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Interface Revision"
+    },
+    "observation_revision": {
+      "minLength": 1,
+      "title": "Observation Revision",
+      "type": "string"
+    },
+    "owner": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Owner",
+      "type": "string"
+    },
+    "stop_epoch": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Stop Epoch",
+      "type": "integer"
+    },
+    "ui_revision": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Ui Revision"
+    }
+  },
+  "required": [
+    "owner",
+    "goal_revision",
+    "observation_revision"
+  ],
+  "title": "MotorExecutionMetadata",
+  "type": "object"
+}

@@ -437,6 +437,16 @@
       "title": "Cost Micros",
       "type": "integer"
     },
+    "effect": {
+      "default": "none",
+      "enum": [
+        "none",
+        "possible",
+        "applied"
+      ],
+      "title": "Effect",
+      "type": "string"
+    },
     "elapsed_ms": {
       "minimum": 0,
       "title": "Elapsed Ms",
@@ -444,6 +454,19 @@
     },
     "operation_id": {
       "title": "Operation Id",
+      "type": "string"
+    },
+    "outcome": {
+      "default": "completed",
+      "enum": [
+        "rejected",
+        "accepted",
+        "started",
+        "completed",
+        "cancelled",
+        "unknown"
+      ],
+      "title": "Outcome",
       "type": "string"
     },
     "profile": {

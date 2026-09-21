@@ -1,0 +1,155 @@
+{
+  "$defs": {
+    "MotorExecutionMetadata": {
+      "additionalProperties": false,
+      "description": "The fencing values that make a motor operation admissible.",
+      "properties": {
+        "contract_version": {
+          "const": "motor.execution.v1",
+          "default": "motor.execution.v1",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "epoch": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Epoch",
+          "type": "integer"
+        },
+        "goal_revision": {
+          "minLength": 1,
+          "title": "Goal Revision",
+          "type": "string"
+        },
+        "interface_revision": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Interface Revision"
+        },
+        "observation_revision": {
+          "minLength": 1,
+          "title": "Observation Revision",
+          "type": "string"
+        },
+        "owner": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Owner",
+          "type": "string"
+        },
+        "stop_epoch": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Stop Epoch",
+          "type": "integer"
+        },
+        "ui_revision": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ui Revision"
+        }
+      },
+      "required": [
+        "owner",
+        "goal_revision",
+        "observation_revision"
+      ],
+      "title": "MotorExecutionMetadata",
+      "type": "object"
+    }
+  },
+  "$id": "urn:environment-harness:v1:PreparedSuccessorAdmission",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The native boundary decision for a prepared successor.",
+  "properties": {
+    "admitted_at_ms": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Admitted At Ms"
+    },
+    "contract_version": {
+      "const": "motor.prepared-successor-admission.v1",
+      "default": "motor.prepared-successor-admission.v1",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "intent_id": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Intent Id",
+      "type": "string"
+    },
+    "metadata": {
+      "$ref": "#/$defs/MotorExecutionMetadata"
+    },
+    "operation_id": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Operation Id",
+      "type": "string"
+    },
+    "predecessor_operation_id": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Predecessor Operation Id",
+      "type": "string"
+    },
+    "reason_code": {
+      "anyOf": [
+        {
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reason Code"
+    },
+    "status": {
+      "enum": [
+        "admitted",
+        "rejected",
+        "unknown"
+      ],
+      "title": "Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "intent_id",
+    "predecessor_operation_id",
+    "operation_id",
+    "metadata",
+    "status"
+  ],
+  "title": "PreparedSuccessorAdmission",
+  "type": "object"
+}

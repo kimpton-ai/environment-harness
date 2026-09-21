@@ -68,6 +68,55 @@ class ProgressReceipt(MotorRecord):
     stop_epoch: int = Field(ge=0, strict=True)
 
 
+class MotorExecutionMetadata(MotorRecord):
+    """The fencing values that make a motor operation admissible."""
+
+    contract_version: Literal["motor.execution.v1"] = "motor.execution.v1"
+    owner: str = Field(min_length=1, max_length=200)
+    epoch: int = Field(default=0, ge=0, strict=True)
+    goal_revision: str = Field(min_length=1)
+    observation_revision: str = Field(min_length=1)
+    stop_epoch: int = Field(default=0, ge=0, strict=True)
+    interface_revision: str | None = Field(default=None, min_length=1)
+    ui_revision: str | None = Field(default=None, min_length=1)
+
+
+class PreparedSuccessorIntent(MotorRecord):
+    """A successor that may be admitted at a native boundary.
+
+    Preparation records intent only. It never proves that the successor ran.
+    """
+
+    contract_version: Literal["motor.prepared-successor.v1"] = "motor.prepared-successor.v1"
+    intent_id: str = Field(min_length=1, max_length=160)
+    operation_id: str = Field(min_length=1, max_length=160)
+    predecessor_operation_id: str = Field(min_length=1, max_length=160)
+    metadata: MotorExecutionMetadata
+    step: "MotorStep"
+    prepared_at_ms: float = Field(ge=0)
+    freshness_ms: int = Field(default=1000, ge=1, le=120000, strict=True)
+    phase: Literal["prepared"] = "prepared"
+
+
+class PreparedSuccessorAdmission(MotorRecord):
+    """The native boundary decision for a prepared successor."""
+
+    contract_version: Literal["motor.prepared-successor-admission.v1"] = (
+        "motor.prepared-successor-admission.v1"
+    )
+    intent_id: str = Field(min_length=1, max_length=160)
+    predecessor_operation_id: str = Field(min_length=1, max_length=160)
+    operation_id: str = Field(min_length=1, max_length=160)
+    metadata: MotorExecutionMetadata
+    status: Literal["admitted", "rejected", "unknown"]
+    reason_code: str | None = Field(default=None, min_length=1, max_length=100)
+    admitted_at_ms: float | None = Field(default=None, ge=0)
+
+
+class UnsupportedPreparation(RuntimeError):
+    """Raised when a sequential adapter is asked to prepare a successor."""
+
+
 class MotorProfile(MotorRecord):
     mode: Literal["deterministic", "jev"] = "deterministic"
     executor: Literal["motor.v1"] = "motor.v1"
@@ -132,6 +181,10 @@ class MotorSelection(MotorRecord):
 class MotorReceipt(MotorRecord):
     operation_id: str
     status: Literal["completed", "blocked", "cancelled"]
+    # ``status`` is retained for wire compatibility. ``outcome`` distinguishes
+    # a proven rejection from an effect whose result is still unknown.
+    outcome: Literal["rejected", "accepted", "started", "completed", "cancelled", "unknown"] = "completed"
+    effect: Literal["none", "possible", "applied"] = "none"
     cost_micros: int = Field(default=0, ge=0, strict=True)
     profile: MotorProfile
     request: MotorRequest
@@ -207,3 +260,14 @@ class MotorAdapter(Protocol):
     ) -> dict[str, Any]: ...
     def stop(self) -> None: ...
     def lookup(self, operation_id: str) -> dict[str, Any] | None: ...
+
+    supports_prepared_successors: bool
+
+    def prepare_successor(self, intent: PreparedSuccessorIntent) -> PreparedSuccessorIntent: ...
+    def admit_successor(
+        self, intent: PreparedSuccessorIntent, *, predecessor: MotorReceipt
+    ) -> PreparedSuccessorAdmission: ...
+    def reconcile(self, operation_id: str) -> dict[str, Any] | None: ...
+
+
+PreparedSuccessorIntent.model_rebuild()

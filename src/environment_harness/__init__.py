@@ -7,12 +7,16 @@ from .motor_contracts import (
     GoalContext,
     MilestoneIdentity,
     MotorAdapter,
+    MotorExecutionMetadata,
     MotorGroup,
     MotorGroupReceipt,
     MotorProfile,
     MotorRequest,
+    PreparedSuccessorAdmission,
+    PreparedSuccessorIntent,
     ProgressReceipt,
     ResourceOwnership,
+    UnsupportedPreparation,
 )
 from .runtime import EnvironmentSession
 from .store import EvidenceStore
@@ -28,6 +32,10 @@ __all__ = [
     "MotorAdapter",
     "MotorProfile",
     "MotorRequest",
+    "MotorExecutionMetadata",
+    "PreparedSuccessorAdmission",
+    "PreparedSuccessorIntent",
+    "UnsupportedPreparation",
     "GoalContext",
     "MilestoneIdentity",
     "ResourceOwnership",
