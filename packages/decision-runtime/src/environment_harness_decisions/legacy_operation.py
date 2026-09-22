@@ -1,0 +1,318 @@
+"""Compatibility facade for the version-one motor operation.
+
+The facade keeps the historical request and receipt shapes for Civ and
+Minecraft, while ordinary execution is owned by :class:`DecisionOperation`.
+Prepared successor methods remain supplied by ``LegacySuccessorLedger``.
+"""
+
+from __future__ import annotations
+
+import json
+import time
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from threading import Event
+from typing import Any
+
+from environment_harness.errors import BudgetExceeded, Conflict, Forbidden
+from environment_harness.operations import EnvironmentOperation
+from environment_harness.contracts import OperationSpec
+
+from .contracts import (
+    Admission,
+    Answer,
+    AuthorityBinding,
+    BoundedInvocation,
+    CompiledCommand,
+    DecisionPolicy,
+    DecisionQuestion,
+    DecisionReceipt,
+    DecisionSet,
+    InvocationLimits,
+    NativeReceipt,
+    Objective,
+    Observation,
+    Selection,
+    Verification,
+)
+from .legacy_contracts import (
+    MotorAdapter,
+    MotorCandidate,
+    MotorProfile,
+    MotorReceipt,
+    MotorRequest,
+    MotorSelection,
+)
+from .legacy_successors import LegacySuccessorLedger, _matches, _validate_candidate
+from .runtime import DecisionOperation
+
+
+class _LegacySelector:
+    """Translate the old candidate selector into shared typed selections."""
+
+    def __init__(self, selector, profile: MotorProfile):
+        self.old = selector
+        self.model = profile.selector_model or "deterministic.v1"
+        self.endpoint = getattr(selector, "endpoint", "motor") if selector else "motor"
+        self.records: dict[str, MotorSelection] = {}
+
+    def model_input(self, observation, decisions):
+        return {"observation": observation.model_input, "questions": decisions.model_dump(mode="json")}
+
+    def maximum_charge_micros(self, objective, observation, decisions):
+        if self.old is None:
+            return 0
+        verified = getattr(self.old, "verified_maximum_cost", None)
+        if not callable(verified):
+            verified = getattr(self.old, "verified_charge_bound", None)
+        if not callable(verified):
+            return None
+        candidates = tuple(getattr(decisions, "_candidates", ()))
+        if not candidates:
+            return None
+        state = observation.model_input
+        value = verified(state, candidates)
+        if type(value) is not int or value < 0:
+            return None
+        return value
+
+    def select(self, selection_id, objective, observation, decisions, *, cancel, deadline):
+        candidates = tuple(getattr(decisions, "_candidates", ()))
+        if self.old is None:
+            chosen = candidates[0]
+            selected = MotorSelection(candidate_id=chosen.id, model=self.model, cost_micros=0)
+            self.records[selection_id.rsplit(":selection:", 1)[0]] = selected
+            return Selection(model=self.model, cost_micros=0,
+                             answers=(Answer(question_id="candidate", value=chosen.id),),
+                             raw_response={"candidate_id": chosen.id},
+                             model_input=self.model_input(observation, decisions),
+                             versions={"adapter": "legacy-selector.v1"})
+        if cancel.is_set() or time.monotonic() >= deadline:
+            return Selection(model=self.model, cost_micros=0, answers=(), abstention="cancelled",
+                             model_input=self.model_input(observation, decisions))
+        state = observation.model_input
+        bound = self.maximum_charge_micros(objective, observation, decisions)
+        if bound is None:
+            raise BudgetExceeded("legacy selector has no verified charge bound")
+        selected = self.old.select(state, candidates, maximum_cost_micros=bound,
+                                   cancel=cancel, deadline=deadline)
+        if not isinstance(selected, MotorSelection):
+            raise ValueError("legacy selector returned an invalid selection")
+        self.records[selection_id.rsplit(":selection:", 1)[0]] = selected
+        answers = () if selected.candidate_id is None else (
+            Answer(question_id="candidate", value=selected.candidate_id,
+                   probabilities=selected.probabilities),
+        )
+        return Selection(model=selected.model, cost_micros=selected.cost_micros, answers=answers,
+                         abstention=None if selected.candidate_id is not None else "abstention",
+                         raw_response=selected.model_dump(mode="json"), model_input=self.model_input(observation, decisions),
+                         versions={"adapter": "legacy-selector.v1"})
+
+    def lookup(self, attempt_id):
+        return None
+
+
+class _LegacyControl:
+    identity = "legacy-motor"
+
+    def __init__(self, adapter: MotorAdapter, request: MotorRequest, write: bool):
+        self.adapter, self.request, self.write = adapter, request, write
+        self.identity = adapter.implementation
+        self.implementation = adapter.implementation
+        self._candidates: dict[str, MotorCandidate] = {}
+        self._before: dict[str, dict[str, Any]] = {}
+
+    def observe(self, objective):
+        value = self.adapter.observe()
+        return Observation(revision=str(value.get("revision", self.request.observation_revision)), model_input=value)
+
+    def decisions(self, objective, observation):
+        candidates = tuple(self.adapter.plan(self.request, observation.model_input))
+        if not candidates or len({candidate.id for candidate in candidates}) != len(candidates):
+            raise ValueError("adapter supplied no valid bounded plans")
+        if any(len(candidate.steps) > self.request.max_steps for candidate in candidates):
+            raise ValueError("candidate exceeds request step limit")
+        for candidate in candidates:
+            invalid = _validate_candidate(self.request, candidate, observation.model_input)
+            if invalid:
+                raise ValueError(f"candidate violates request authority: {invalid}")
+        self._candidates = {candidate.id: candidate for candidate in candidates}
+        question = DecisionQuestion(
+            id="candidate", kind="choice", prompt="Choose one supplied motor candidate",
+            options=tuple(__import__("environment_harness_decisions").ChoiceOption(id=candidate.id, label=candidate.description)
+                          for candidate in candidates),
+        )
+        result = DecisionSet(id="legacy-candidates", observation_revision=observation.revision,
+                             questions=(question,))
+        object.__setattr__(result, "_candidates", candidates)
+        return result
+
+    def compile(self, objective, observation, decisions, selection):
+        answers = {answer.question_id: answer for answer in selection.answers}
+        candidate_id = answers.get("candidate").value if answers.get("candidate") else None
+        candidate = self._candidates.get(candidate_id)
+        if candidate is None:
+            raise ValueError("selection does not identify an authorized candidate")
+        invalid = _validate_candidate(self.request, candidate, observation.model_input)
+        if invalid:
+            raise Forbidden(f"candidate violates request authority: {invalid}")
+        if not self.write and any(step.operation != "read" for step in candidate.steps):
+            raise Forbidden("write authority required")
+        self._before[candidate.id] = observation.model_input
+        return CompiledCommand(id=candidate.id, adapter_version=self.implementation,
+                               payload={"candidate": candidate.model_dump(mode="json")})
+
+    def admit(self, execution_id, command, binding):
+        return Admission(execution_id=execution_id, binding=binding, accepted=True)
+
+    def execute(self, execution_id, command, *, before_dispatch, cancel, deadline):
+        candidate = MotorCandidate.model_validate(command.payload["candidate"])
+        receipts = []
+        for index, step in enumerate(candidate.steps):
+            if cancel.is_set() or time.monotonic() >= deadline:
+                return NativeReceipt(execution_id=execution_id, outcome="cancelled", reason="deadline")
+            hook = getattr(self.adapter, "before_dispatch", None)
+            if not callable(hook):
+                raise Forbidden("legacy adapter must provide before_dispatch")
+            before_dispatch()
+            hook(execution_id, step)
+            result = self.adapter.execute(step, operation_id=f"{execution_id}:step:{index}",
+                                          cancel=cancel, deadline=deadline)
+            if not isinstance(result, dict) or result.get("status") not in {"completed", "blocked", "cancelled"}:
+                return NativeReceipt(execution_id=execution_id, outcome="unknown", reason="invalid_native_receipt")
+            receipts.append(result)
+            if result["status"] != "completed":
+                return NativeReceipt(execution_id=execution_id, outcome="rejected", reason=result.get("reason"))
+        return NativeReceipt(execution_id=execution_id, outcome="applied", evidence={"steps": receipts})
+
+    def verify(self, objective, before, after, receipt):
+        if not _matches(self.request.expected, after.model_input):
+            return Verification(status="failed", reason="postcondition_not_confirmed")
+        return Verification(status="completed", reason="postcondition_confirmed")
+
+    def stop(self):
+        self.adapter.stop()
+
+    def lookup(self, execution_id):
+        result = self.adapter.lookup(execution_id)
+        if not isinstance(result, dict):
+            return None
+        status = result.get("status")
+        outcome = "applied" if status == "completed" else "rejected" if status == "blocked" else "unknown"
+        return NativeReceipt(execution_id=execution_id, outcome=outcome, evidence=result)
+
+
+class LegacyMotorOperation(EnvironmentOperation, LegacySuccessorLedger):
+    """Old MotorExecutor facade backed by one shared DecisionOperation."""
+
+    endpoint = "motor"
+
+    def __init__(self, adapter, profile, *, journal, selector=None, discard_prepared=False):
+        LegacySuccessorLedger.__init__(self, adapter, profile, journal=journal, selector=selector,
+                                       discard_prepared=discard_prepared)
+        self.adapter, self.profile, self.selector = adapter, profile, selector
+        self.journal = Path(journal)
+        self._legacy_controls: dict[str, _LegacyControl] = {}
+        self._decision_ops: dict[str, DecisionOperation] = {}
+        self._legacy_requests: dict[str, MotorRequest] = {}
+        self._legacy_selections: dict[str, MotorSelection] = {}
+        self._legacy_receipts()
+
+    def _legacy_receipts(self):
+        import sqlite3
+        db = sqlite3.connect(self.journal)
+        db.execute("CREATE TABLE IF NOT EXISTS legacy_receipts (id TEXT PRIMARY KEY, receipt TEXT NOT NULL)")
+        db.commit(); db.close()
+
+    @property
+    def spec(self):
+        return OperationSpec(name="motor.execute", version="decision-operation.v1",
+                             config={"profile": self.profile.model_dump(mode="json"),
+                                     "adapter": self.adapter.implementation})
+
+    @property
+    def decision_policy(self):
+        return DecisionPolicy(profile=self.profile.mode, selector_model=self.profile.selector_model or "deterministic.v1",
+                              endpoint=self.endpoint, adapter_version=self.adapter.implementation)
+
+    def validate(self, request, manifest):
+        payload = MotorRequest.model_validate(request["payload"])
+        if request.get("endpoint") != self.endpoint or request.get("operation") != "motor.execute":
+            raise Forbidden("motor operation identity mismatch")
+        if manifest.get("motor") not in (None, self.profile.model_dump(mode="json")):
+            raise Forbidden("motor profile differs from frozen manifest")
+        return payload
+
+    def _invocation(self, request: MotorRequest, operation_id: str):
+        directive = request.goal_context.revision if request.goal_context else request.goal_revision
+        objective = Objective(id=request.skill, revision=directive, authorized_scope=("motor",),
+                              completion_conditions=("expected postcondition",),
+                              limits=InvocationLimits(max_steps=request.max_steps, timeout_ms=request.timeout_ms,
+                                                      max_cost_micros=2**63 - 1,
+                                                      max_corrections=request.max_recovery_attempts))
+        control = _LegacyControl(self.adapter, request, True)
+        self._legacy_controls[operation_id] = control
+        binding = AuthorityBinding(environment_id=control.identity, session_revision=request.goal_revision,
+                                   directive_revision=directive, observation_revision=request.observation_revision,
+                                   recovery_generation=0, owner="legacy", stop_epoch=request.stop_epoch)
+        expires = datetime.now(timezone.utc) + timedelta(milliseconds=request.timeout_ms)
+        return objective, control, BoundedInvocation(objective=objective, binding=binding, expires_at=expires)
+
+    def execute(self, operation_id, request, maximum_cost_micros, *, authority):
+        payload = self.validate(request, {})
+        import sqlite3
+        db = sqlite3.connect(self.journal); row = db.execute("SELECT receipt FROM legacy_receipts WHERE id=?", (operation_id,)).fetchone(); db.close()
+        if row:
+            return json.loads(row[0])
+        objective, control, invocation = self._invocation(payload, operation_id)
+        selector = _LegacySelector(self.selector, self.profile)
+        decision = DecisionOperation(control, selector, journal=self.journal.with_name(self.journal.stem + ".decision.sqlite"),
+                                     policy=self.decision_policy)
+        self._decision_ops[operation_id] = decision
+        self._legacy_requests[operation_id] = payload
+        started = time.monotonic()
+        receipt = decision.execute(operation_id, {"payload": invocation.model_dump(mode="json")},
+                                   maximum_cost_micros, authority=authority)
+        result = self._project(operation_id, payload, receipt, started)
+        if operation_id in selector.records:
+            self._legacy_selections[operation_id] = selector.records[operation_id]
+            result = self._project(operation_id, payload, receipt, started)
+        db = sqlite3.connect(self.journal); db.execute("INSERT OR REPLACE INTO legacy_receipts VALUES (?,?)", (operation_id, json.dumps(result))); db.commit(); db.close()
+        return result
+
+    def _project(self, operation_id, request, receipt, started):
+        status = receipt["status"]
+        old_status = "completed" if status == "completed" else "cancelled" if status == "cancelled" else "blocked"
+        outcome = "completed" if status == "completed" else "cancelled" if status == "cancelled" else "rejected"
+        selection = self._legacy_selections.get(operation_id)
+        return MotorReceipt(operation_id=operation_id, status=old_status, outcome=outcome,
+                            effect="applied" if status == "completed" else "none", cost_micros=receipt["cost_micros"],
+                            profile=self.profile, request=request, reason=receipt["reason"], selection=selection,
+                            elapsed_ms=(time.monotonic()-started)*1000).model_dump(mode="json")
+
+    def lookup(self, operation_id):
+        import sqlite3
+        db = sqlite3.connect(self.journal); row = db.execute("SELECT receipt FROM legacy_receipts WHERE id=?", (operation_id,)).fetchone(); db.close()
+        if row:
+            return json.loads(row[0])
+        decision = self._decision_ops.get(operation_id)
+        request = self._legacy_requests.get(operation_id)
+        if decision is None or request is None:
+            return None
+        receipt = decision.lookup(operation_id)
+        if not receipt:
+            return None
+        result = self._project(operation_id, request, receipt, 0)
+        db = sqlite3.connect(self.journal); db.execute("INSERT OR REPLACE INTO legacy_receipts VALUES (?,?)", (operation_id, json.dumps(result))); db.commit(); db.close()
+        return result
+
+    def progress(self, operation_id):
+        receipt = self.lookup(operation_id)
+        return {"status": receipt["status"], "steps": list(receipt.get("steps", ())) } if receipt else None
+
+    def stop(self):
+        for control in self._legacy_controls.values():
+            control.stop()
+
+
+MotorExecutor = LegacyMotorOperation
