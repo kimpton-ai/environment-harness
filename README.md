@@ -34,8 +34,8 @@ To install an editable source checkout instead, follow the [contributing guide](
 Release candidates use PEP 440 versions such as `0.2.4rc1`. Pip excludes prereleases from ordinary installs; test one by requesting its exact version or by opting in:
 
 ```sh
-python -m pip install "environment-harness==0.2.4rc1"
-python -m pip install --pre --upgrade environment-harness
+python -m pip install "environment-harness[server]==0.2.4rc1"
+python -m pip install --pre --upgrade "environment-harness[server]"
 ```
 
 Create a synthetic review dataset and open its evidence viewer:
@@ -45,42 +45,33 @@ environment-harness --store ./environment-sessions quickstart --turns 3
 environment-harness --store ./environment-sessions serve --open
 ```
 
-The demo creates two named experiments and three named standalone environment sessions. Five frozen scenarios expand across two trials, so Home shows 10 grouped environment sessions with labels such as `Refund request · Trial 1`. The customer-support experiment uses the requested turn budget while the policy-boundary experiment uses half that budget (with a minimum of one); scenarios within each experiment correctly share its frozen budget. The standalone reviews also vary their participant rosters and recorded turn counts. Every grouped session records a deterministic synthetic comparison report with a final total, cumulative reward, and executed-action count. Each standalone review records versioned score reports, one intentionally blocked out-of-schema attempt with an attributed finding, a checkpoint, and a small public artifact. Together they exercise hierarchy, filtering, unequal-length comparison, Turns, Progression, Reports, and structured Activity without needing an account, model API key, or paid service. None of the synthetic values measure model quality or safety.
+The demo creates two experiments that expand five scenarios into 10 grouped environment sessions,
+plus three standalone sessions. It records different participant rosters, turn counts, score reports,
+a blocked invalid action, a finding, a checkpoint, and an artifact so every main viewer page has
+useful data. It requires no account, model API key, or paid service. None of its synthetic values
+measure model quality or safety.
 
-Each demo run finishes after the requested turns, so Home reports it as `Completed`. Standalone rows show the number of turns actually recorded; safety limits such as maximum turns remain in the session Overview instead of appearing as unfinished progress.
-
-`serve` starts an authenticated API and read-only viewer at `http://127.0.0.1:8765`. The loopback viewer receives local researcher access automatically; `--open` only opens it in your browser. API clients still use an explicit credential from `environment-harness token`. The server is available only on your computer and does not deploy or publish the environment session. Press `Ctrl+C` to stop it.
-
-To run the richer branch-comparison example from this release candidate:
-
-```sh
-git clone --depth 1 https://github.com/kimpton-ai/environment-harness.git
-cd environment-harness
-uv sync --extra server
-uv run python examples/branch_comparison.py --store .local/branch-demo
-uv run environment-harness --store .local/branch-demo serve --open
-```
+`quickstart` writes durable evidence to `./environment-sessions`. `serve` opens that same store through an authenticated API and read-only viewer at `http://127.0.0.1:8765`. The loopback viewer receives local researcher access automatically; `--open` only launches the browser. Refreshing the page or restarting the server does not remove recorded progress. API clients still use an explicit credential from `environment-harness token`. The server binds only to your computer and does not deploy or publish the environment sessions. Press `Ctrl+C` to stop it.
 
 The running service publishes its generated OpenAPI document at `/openapi.json` and interactive reference at `/docs`. The repository checks the committed [`contracts/openapi.json`](contracts/openapi.json) and versioned JSON Schemas in [`contracts/`](contracts/) for drift. [`docs/API-REFERENCE.md`](docs/API-REFERENCE.md) documents endpoints and examples; [`docs/PROTOCOL.md`](docs/PROTOCOL.md) defines the authority, lifecycle, activity-stream, recovery, and evidence semantics that OpenAPI alone cannot express.
 
-![EnvironmentHarness local evidence viewer showing original and branched environment sessions with a participant timeline](https://raw.githubusercontent.com/kimpton-ai/environment-harness/main/docs/assets/environment-session-viewer.png)
+![EnvironmentHarness Home showing grouped experiments and their environment sessions](https://raw.githubusercontent.com/kimpton-ai/environment-harness/main/docs/assets/environment-harness-home.png)
 
-The viewer answers three questions:
+Use the viewer from broad context to specific evidence:
 
-1. Which original or branched environment session am I inspecting?
-2. What did each participant observe, attempt, and cause at each state revision?
-3. What intervention and recorded results differ when I compare two sessions?
+1. **Home** groups related environment sessions under their experiment and keeps standalone sessions visible.
+2. **Experiment** records the shared scenarios, trials, participants, environment, operations, policy, and scoring configuration.
+3. **Session** separates frozen configuration, turn-by-turn evidence, progression, and versioned reports.
 
-The screenshot uses the repository's richer [branch comparison example](https://github.com/kimpton-ai/environment-harness/blob/main/examples/branch_comparison.py). Its original total of `10` and branched total of `24` are synthetic counter values, not agent-quality scores or independent statistical results.
+All screenshots use the repository's synthetic examples. Their counters, rewards, and findings demonstrate the data model; they are not model-quality or safety measurements.
 
-## Use your own agent
+## Run from Python
 
-A Python agent implements `act(observation) -> dict`. Its action must match the environment's action schema, and its `implementation` must match the identifier registered in `AgentSpec`.
+A Python agent implements `act(observation) -> dict`. `EnvironmentHarness` creates a fresh environment and agent for each environment session, runs them in a bounded thread pool, and records progress in the store you provide.
 
 ```python
-from environment_harness import AgentSpec, EvidenceStore, Principal
-from environment_harness.advanced import EnvironmentSession, ExperimentSpec, run
-from environment_harness.fixtures import SyntheticEnvironment
+from environment_harness import EnvironmentHarness, Scenario
+from environment_harness.fixtures import SyntheticEnvironment, SyntheticScenarioInput
 
 
 class IncrementAgent:
@@ -90,32 +81,33 @@ class IncrementAgent:
         return {"value": 1}
 
 
-environment = SyntheticEnvironment()
-session = EnvironmentSession(EvidenceStore(".local/experiment"), environment)
-researcher = Principal(tenant="local", subject="researcher", role="researcher")
-experiment = ExperimentSpec(
-    environment=environment.spec,
-    participants=(
-        AgentSpec(id="alice", implementation="increment-agent@1", policy_version="1"),
-    ),
+harness = EnvironmentHarness(
+    ".local/my-environment",
+    environment_factory=SyntheticEnvironment,
+    agent_factories={"alice": IncrementAgent},
 )
 
-environment_session = session.create(experiment, researcher)
-result = run(
-    session,
-    environment_session["id"],
-    researcher,
-    {"alice": IncrementAgent()},
+environment_session = harness.run(
+    Scenario(
+        id="first-run",
+        input=SyntheticScenarioInput(starting_total=0),
+    ),
     turns=5,
 )
-print(result["revision"])
+print(environment_session.id, environment_session.status)
 ```
 
-This prints `5`. Your integration keeps ownership of prompts, model providers, tools, credentials, and spending limits. External JSON programs can use `CommandAgent`; see the [complete source example](https://github.com/kimpton-ai/environment-harness/blob/main/examples/custom_agent.py).
+Open the recorded environment session with the same store:
+
+```sh
+environment-harness --store .local/my-environment serve --open
+```
+
+The `implementation` string is a versioned identifier recorded with the evidence so a resumed environment session cannot silently run different agent code. Your integration keeps ownership of prompts, model providers, tools, credentials, and spending limits. External JSON programs can use `CommandAgent`; see the [complete source example](https://github.com/kimpton-ai/environment-harness/blob/main/examples/custom_agent.py).
 
 The local Python API and command subprocess are trusted interfaces, not operating-system security sandboxes. Run hostile programs in an isolated backend with explicitly scoped network access.
 
-## Run typed scenarios concurrently
+## Run an experiment
 
 `EnvironmentHarness` accepts factories so every environment session receives a fresh environment and fresh agents. A `Scenario[T]` freezes its validated input, optional JSON reference, and metadata. Experiments expand one frozen configuration across every scenario and trial while enforcing shared concurrency limits.
 
@@ -155,12 +147,18 @@ The example prints the experiment ID, every environment-session ID, scenario/tri
 
 Use `experiment.start()`, `wait()`, `stop()`, and explicit `resume()` for lifecycle control. Standalone environment sessions use `harness.start(...)` or `harness.run(...)`. The low-level coordinator, explicit `ExperimentSpec`, and branching workflow remain available from `environment_harness.advanced`.
 
-## Extend an environment and review the results
+## Extend an environment
 
-The complete [custom environment experiment](examples/custom_environment_experiment.py) shows the
-extension path in one runnable file. It adds an `EnvironmentOperation`, interleaves that operation
-with normal turns through the typed Python `SessionRunner` seam, runs two scenarios across two trials,
-and records comparable metrics plus evidence-linked findings for every environment session.
+An environment package owns four ordinary Python methods: `initialize`, `observe`, `resolve`, and
+`intervene`, plus a stable `EnvironmentSpec`. Add an `EnvironmentOperation` when the environment
+also needs imperative work such as controlling a game, reading a simulator, or calling an engine.
+Runtime clients and credentials stay on the Python object; only the operation's name, version, and
+JSON configuration are frozen into evidence.
+
+The complete [custom environment experiment](examples/custom_environment_experiment.py) is a
+runnable extension example. It defines an operation, interleaves it with normal turns through the
+typed `SessionRunner` seam, runs two scenarios across two trials, and records comparable metrics plus
+evidence-linked findings for every environment session.
 
 ```sh
 python examples/custom_environment_experiment.py \
@@ -171,12 +169,25 @@ environment-harness \
   serve --open
 ```
 
-Open the experiment path printed by the example. Home groups all four environment sessions under
-one experiment. A session's Overview shows the frozen operation configuration, Turns describes
-the operation receipt alongside agent and environment evidence, Progression plots the recorded
-metrics, and Reports summarizes the deterministic score and linked finding. The same operation
-class also works with the low-level single-session API; experiment grouping is an orchestration
-choice, not a different environment type.
+Open the experiment path printed by the example. The experiment page shows the configuration shared
+by all four environment sessions, including the supplied operation and scoring version.
+
+![EnvironmentHarness experiment page showing frozen execution, environment, evaluation, and participant configuration](https://raw.githubusercontent.com/kimpton-ai/environment-harness/main/docs/assets/environment-harness-experiment.png)
+
+A session's Overview shows its frozen configuration, Turns describes operation receipts alongside
+agent and environment evidence, and Progression plots recorded signals over the selected turn range.
+
+![EnvironmentHarness Progression page showing a recorded signal across eight turns](https://raw.githubusercontent.com/kimpton-ai/environment-harness/main/docs/assets/environment-harness-progression.png)
+
+Reports summarizes versioned scores, uncertainty, and evidence-linked findings.
+
+![EnvironmentHarness session report showing versioned metrics and uncertainty](https://raw.githubusercontent.com/kimpton-ai/environment-harness/main/docs/assets/environment-harness-reports.png)
+
+The same operation class works in a standalone environment session or a grouped experiment;
+grouping is an orchestration choice, not a different environment type. Start with the
+[environment authoring guide](docs/AUTHORING.md), then use the
+[external simulator example](examples/external_environment_experiment.py) when your implementation
+owns a long-lived process or engine connection.
 
 ## Documentation
 
@@ -186,6 +197,7 @@ choice, not a different environment type.
 | Implement environment rules and custom operation classes | [Environment authoring](https://github.com/kimpton-ai/environment-harness/blob/main/docs/AUTHORING.md) · [Complete experiment](https://github.com/kimpton-ai/environment-harness/blob/main/examples/custom_environment_experiment.py) |
 | Connect an external simulator or engine | [External simulator experiment](https://github.com/kimpton-ai/environment-harness/blob/main/examples/external_environment_experiment.py) |
 | Understand checkpoints, branches, and coordinated sessions | [Coordinated sessions](https://github.com/kimpton-ai/environment-harness/blob/main/docs/coordinated-sessions.md) |
+| Branch and compare environment sessions | [Branch comparison example](https://github.com/kimpton-ai/environment-harness/blob/main/examples/branch_comparison.py) |
 | Run environments behind a trusted supervisor | [Remote workers and external agents](https://github.com/kimpton-ai/environment-harness/blob/main/docs/REMOTE-WORKERS.md) |
 | Use the authenticated HTTP API | [API reference](https://github.com/kimpton-ai/environment-harness/blob/main/docs/API-REFERENCE.md) · [Protocol semantics](https://github.com/kimpton-ai/environment-harness/blob/main/docs/PROTOCOL.md) |
 | Use the TypeScript client | [TypeScript package](https://github.com/kimpton-ai/environment-harness/blob/main/packages/typescript/README.md) |
