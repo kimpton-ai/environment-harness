@@ -248,7 +248,7 @@ class JevDecisionSelector:
                 body,
                 max(0.001, deadline - time.monotonic()),
             )
-        except JevProviderFailure:
+        except _SharedProviderFailure:
             raise
         except Exception as exc:
             raise JevProviderFailure("Jev request outcome is unknown", submitted=True, uncharged=False) from exc

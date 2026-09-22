@@ -3,7 +3,7 @@ import time
 
 import pytest
 
-from environment_harness_decisions.contracts import ChoiceOption, DecisionQuestion, DecisionSet, Observation
+from environment_harness_decisions.contracts import ChoiceOption, DecisionQuestion, DecisionSet, Observation, ProviderFailure
 from environment_harness_decisions.jev import JevBudgetError, JevDecisionSelector, JevResponseError
 
 
@@ -145,3 +145,14 @@ def test_fractional_score_requires_explicit_discrete_levels():
     selector = JevDecisionSelector(api_key="x", transport=lambda *_: _response())
     with pytest.raises(ValueError, match="fractional bounds"):
         selector.model_input(Observation(revision="obs-1", model_input={}), decisions)
+
+
+def test_proven_pre_submit_provider_failure_is_not_reclassified():
+    failure = ProviderFailure("connection failed before submit", submitted=False, uncharged=True)
+    selector = JevDecisionSelector(api_key="x", transport=lambda *_: (_ for _ in ()).throw(failure))
+    with pytest.raises(ProviderFailure) as caught:
+        selector.select(
+            "s", None, Observation(revision="obs-1", model_input={}), _decisions(),
+            cancel=threading.Event(), deadline=time.monotonic() + 2,
+        )
+    assert caught.value is failure
