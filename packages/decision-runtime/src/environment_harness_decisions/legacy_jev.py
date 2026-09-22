@@ -120,9 +120,11 @@ class JevSelector:
 
     def _decisions(self, candidates):
         options = tuple(ChoiceOption(id=candidate.id, label=candidate.description) for candidate in candidates)
-        options += (ChoiceOption(id=ABSTAIN_ID, label="Defer to the planner"),)
+        options += (ChoiceOption(id=ABSTAIN_ID, label="Do not execute a motor candidate; defer to the planner."),)
         return DecisionSet(id="motor", observation_revision="legacy", questions=(DecisionQuestion(
-            id="motor", kind="choice", prompt="Choose a supplied motor candidate or abstain", options=options),))
+            id="motor", kind="choice",
+            prompt="Which supplied motor candidate should execute next? Choose a candidate ID, or abstain if none should execute.",
+            options=options),))
 
     def select(self, state, candidates, *, maximum_cost_micros, cancel, deadline):
         try:

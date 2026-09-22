@@ -29,6 +29,7 @@ def test_legacy_surface_uses_mutable_transport_and_retains_evidence():
     assert selector.last_model_input["state"] == {"observation": "fixture"}
     assert selector.last_raw_response == response()
     assert len(calls) == 1
+    assert calls[0][2] == selector._body({"observation": "fixture"}, candidates())
     selector.transport = lambda *args: {**response(), "answers": {"motor": {**response()["answers"]["motor"], "choice": "__abstain__"}}}
     assert selector.select({}, candidates(), maximum_cost_micros=10, cancel=threading.Event(), deadline=time.monotonic() + 2).candidate_id is None
 
