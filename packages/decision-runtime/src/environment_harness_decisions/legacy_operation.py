@@ -46,6 +46,7 @@ from .legacy_contracts import (
     MotorReceipt,
     MotorRequest,
     MotorSelection,
+    MotorStep,
 )
 from .legacy_successors import LegacySuccessorLedger, _matches, _validate_candidate
 from .runtime import DecisionOperation
@@ -263,6 +264,10 @@ class _LegacyControl:
         receipts = []
         self.last_receipts = receipts
         for index, step in enumerate(candidate.steps):
+            # Compiled commands are immutable contract records. Legacy
+            # adapters mutate and deepcopy their step payloads, so hand them
+            # a validated mutable projection at the native boundary.
+            step = MotorStep.model_validate(_mutable(step.model_dump(mode="json")))
             if cancel.is_set() or time.monotonic() >= deadline:
                 return NativeReceipt(execution_id=execution_id, outcome="cancelled", reason="deadline")
             admitted = False
@@ -536,6 +541,8 @@ class LegacyMotorOperation(EnvironmentOperation, LegacySuccessorLedger):
                 (known for known in ("protection_changed", "no_plan") if known in detail),
                 reason_code,
             )
+        if isinstance(reason_code, str) and "no valid bounded plans" in reason_code:
+            reason_code = "no_plan"
         return MotorReceipt(
             operation_id=operation_id,
             status=old_status,
