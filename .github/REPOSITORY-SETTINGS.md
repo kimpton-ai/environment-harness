@@ -9,8 +9,8 @@ GitHub settings are part of the security boundary and cannot be enforced by file
   the protected workflow gate, while blocking update, deletion, and every other bypass path;
 - a protected `release-tag` environment requiring approval by a security/release maintainer other
   than the release PR author or workflow initiator, with administrator bypass disabled;
-- protected `github-release` environment approval by a security/release maintainer other than the release PR author, with administrator bypass disabled;
-- a protected `pypi` environment with the same independent-review requirement and administrator bypass disabled;
+- branch-restricted `github-release` and `pypi` environments with administrator bypass disabled,
+  but no additional required reviewers after the `release-tag` approval;
 - GitHub Actions restricted to GitHub-owned actions and the explicitly approved third-party actions already used by the workflows, with full commit-SHA pinning required;
 - Dependabot alerts and security updates, immutable GitHub Releases, and GitHub Private Vulnerability Reporting; and
 - permission for the CODEOWNER-protected `release-prepare.yml` workflow to create branches and pull
@@ -46,9 +46,10 @@ Merge the release PR only after every intended code and documentation change. Th
 GitHub release** on `main` and enter the merged release PR number. The workflow requires that PR's
 merge commit to be the exact current `main` commit, derives the version and tag without operator
 input, builds and attests the artifacts, and pauses for independent `release-tag` approval before
-creating the tag. It then waits for `github-release` approval and `pypi` approval. PyPI release
-candidates are real immutable releases, but ordinary `pip install environment-harness` excludes
-them; testers should request the exact RC or use `--pre`.
+creating the tag. The approved workflow then creates the GitHub release and publishes to PyPI
+without repeating the same manual approval. PyPI release candidates are real immutable releases,
+but ordinary `pip install environment-harness` excludes them; testers should request the exact RC
+or use `--pre`.
 
 The publisher requires the resolved PR merge commit, checked-out `HEAD`, and workflow `GITHUB_SHA`
 to be the same current commit on `main`; its package metadata determines the tag, and its first
@@ -56,5 +57,5 @@ parent must carry an older package version. This prevents a later `main` commit 
 substituted for the reviewed release merge. Provenance therefore identifies the commit that
 supplied the released files, and reruns accept an existing tag only when it still targets that exact
 commit. PyPI never permits replacing a published version, so a failed or incorrect candidate must
-be followed by a newer candidate. Keep all three environment approvals independent of the release
-PR author and automation initiator.
+be followed by a newer candidate. Keep the `release-tag` approval independent of the release PR
+author and automation initiator.

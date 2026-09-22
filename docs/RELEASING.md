@@ -152,18 +152,19 @@ The build checks out the workflow's current `GITHUB_SHA` directly and verifies i
 resolved PR merge commit. Operator input and job outputs are never used as executable checkout
 refs in the privileged publisher.
 
-### 2. Approve publication independently
+### 2. Approve publication once
 
 The workflow:
 
 1. resolves the merged release PR and derives its version and tag;
 2. rebuilds, validates, and attests the coordinated artifacts before creating a public ref;
 3. waits for independent approval in `release-tag`, then creates the immutable tag;
-4. waits for independent approval in `github-release`, then creates the immutable GitHub release;
-   and
-5. waits for independent approval in `pypi` before Trusted Publishing.
+4. creates the immutable GitHub release from the same attested artifacts; and
+5. publishes the reviewed Python distributions through PyPI Trusted Publishing.
 
-The approver must not be the release pull request author or automation initiator.
+The single approver must not be the release pull request author or automation initiator. The
+branch-restricted `github-release` and `pypi` environments retain their security boundaries without
+requiring the same reviewer to approve the same artifact identity again.
 Never move, replace, or rebuild artifacts under an existing release tag or PyPI version.
 
 ## Verify a published candidate
