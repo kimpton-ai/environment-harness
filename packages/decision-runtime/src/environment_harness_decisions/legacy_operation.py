@@ -8,6 +8,8 @@ Prepared successor methods remain supplied by ``LegacySuccessorLedger``.
 from __future__ import annotations
 
 import json
+import inspect
+import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -24,6 +26,7 @@ from .contracts import (
     AuthorityBinding,
     BoundedInvocation,
     CompiledCommand,
+    ChoiceOption,
     DecisionPolicy,
     DecisionQuestion,
     DecisionReceipt,
@@ -50,14 +53,24 @@ from .runtime import DecisionOperation
 class _LegacySelector:
     """Translate the old candidate selector into shared typed selections."""
 
-    def __init__(self, selector, profile: MotorProfile):
+    def __init__(self, selector, profile: MotorProfile, adapter, request):
         self.old = selector
         self.model = profile.selector_model or "deterministic.v1"
         self.endpoint = getattr(selector, "endpoint", "motor") if selector else "motor"
         self.records: dict[str, MotorSelection] = {}
+        self.adapter, self.request = adapter, request
+
+    def _state(self, observation):
+        projection = getattr(self.adapter, "selection_observation", None)
+        if not callable(projection):
+            raise Forbidden("legacy adapter must provide selection_observation")
+        state = projection(self.request, observation.model_input)
+        if not isinstance(state, dict):
+            raise Forbidden("selection_observation must return an object")
+        return state
 
     def model_input(self, observation, decisions):
-        return {"observation": observation.model_input, "questions": decisions.model_dump(mode="json")}
+        return {"observation": self._state(observation), "questions": decisions.model_dump(mode="json")}
 
     def maximum_charge_micros(self, objective, observation, decisions):
         if self.old is None:
@@ -66,11 +79,15 @@ class _LegacySelector:
         if not callable(verified):
             verified = getattr(self.old, "verified_charge_bound", None)
         if not callable(verified):
+            verified = getattr(self.old, "maximum_cost", None)
+        if not callable(verified):
             return None
         candidates = tuple(getattr(decisions, "_candidates", ()))
         if not candidates:
+            candidates = tuple(getattr(decisions.questions[0], "options", ()))
+        if not candidates:
             return None
-        state = observation.model_input
+        state = self._state(observation)
         value = verified(state, candidates)
         if type(value) is not int or value < 0:
             return None
@@ -90,7 +107,7 @@ class _LegacySelector:
         if cancel.is_set() or time.monotonic() >= deadline:
             return Selection(model=self.model, cost_micros=0, answers=(), abstention="cancelled",
                              model_input=self.model_input(observation, decisions))
-        state = observation.model_input
+        state = self._state(observation)
         bound = self.maximum_charge_micros(objective, observation, decisions)
         if bound is None:
             raise BudgetExceeded("legacy selector has no verified charge bound")
@@ -124,6 +141,7 @@ class _LegacyControl:
         self.last_candidate: MotorCandidate | None = None
         self.last_receipts: list[dict[str, Any]] = []
         self.last_observation: dict[str, Any] = {}
+        self._binding = None
 
     def observe(self, objective):
         value = self.adapter.observe()
@@ -134,6 +152,8 @@ class _LegacyControl:
         candidates = tuple(self.adapter.plan(self.request, observation.model_input))
         if not candidates or len({candidate.id for candidate in candidates}) != len(candidates):
             raise ValueError("adapter supplied no valid bounded plans")
+        if any(len(candidate.steps) != 1 for candidate in candidates):
+            raise ValueError("legacy compatibility requires one-step candidates")
         if any(len(candidate.steps) > self.request.max_steps for candidate in candidates):
             raise ValueError("candidate exceeds request step limit")
         for candidate in candidates:
@@ -143,7 +163,7 @@ class _LegacyControl:
         self._candidates = {candidate.id: candidate for candidate in candidates}
         question = DecisionQuestion(
             id="candidate", kind="choice", prompt="Choose one supplied motor candidate",
-            options=tuple(__import__("environment_harness_decisions").ChoiceOption(id=candidate.id, label=candidate.description)
+            options=tuple(ChoiceOption(id=candidate.id, label=candidate.description)
                           for candidate in candidates),
         )
         result = DecisionSet(id="legacy-candidates", observation_revision=observation.revision,
@@ -168,6 +188,20 @@ class _LegacyControl:
                                payload={"candidate": candidate.model_dump(mode="json")})
 
     def admit(self, execution_id, command, binding):
+        candidate = MotorCandidate.model_validate(command.payload["candidate"])
+        fresh = self.adapter.observe()
+        if str(fresh.get("revision", "")) != binding.observation_revision:
+            return Admission(execution_id=execution_id, binding=binding, accepted=False, reason="observation_changed")
+        revalidate = getattr(self.adapter, "revalidate", None)
+        if not callable(revalidate):
+            return Admission(execution_id=execution_id, binding=binding, accepted=False, reason="revalidation_required")
+        checked = revalidate(self.request, fresh, candidate, 0)
+        if not checked or checked[0] != candidate:
+            return Admission(execution_id=execution_id, binding=binding, accepted=False, reason="plan_changed")
+        invalid = _validate_candidate(self.request, candidate, fresh)
+        if invalid:
+            return Admission(execution_id=execution_id, binding=binding, accepted=False, reason=invalid)
+        self._binding = binding
         return Admission(execution_id=execution_id, binding=binding, accepted=True)
 
     def execute(self, execution_id, command, *, before_dispatch, cancel, deadline):
@@ -177,12 +211,10 @@ class _LegacyControl:
         for index, step in enumerate(candidate.steps):
             if cancel.is_set() or time.monotonic() >= deadline:
                 return NativeReceipt(execution_id=execution_id, outcome="cancelled", reason="deadline")
-            hook = getattr(self.adapter, "before_dispatch", None)
-            if not callable(hook):
-                raise Forbidden("legacy adapter must provide before_dispatch")
-            before_dispatch()
-            hook(execution_id, step)
-            result = self.adapter.execute(step, operation_id=f"{execution_id}:step:{index}",
+            if "before_dispatch" not in inspect.signature(self.adapter.execute).parameters:
+                raise Forbidden("legacy adapter.execute must accept before_dispatch")
+            result = self.adapter.execute(step, operation_id=execution_id,
+                                          before_dispatch=before_dispatch,
                                           cancel=cancel, deadline=deadline)
             if not isinstance(result, dict) or result.get("status") not in {"completed", "blocked", "cancelled"}:
                 return NativeReceipt(execution_id=execution_id, outcome="unknown", reason="invalid_native_receipt")
@@ -192,6 +224,8 @@ class _LegacyControl:
         return NativeReceipt(execution_id=execution_id, outcome="applied", evidence={"steps": receipts})
 
     def verify(self, objective, before, after, receipt):
+        if receipt.evidence.get("steps") and all(item.get("effect_verified") is True for item in receipt.evidence["steps"]):
+            return Verification(status="completed", reason="native_receipt_verified")
         if not _matches(self.request.expected, after.model_input):
             return Verification(status="failed", reason="postcondition_not_confirmed")
         return Verification(status="completed", reason="postcondition_confirmed")
@@ -228,6 +262,7 @@ class LegacyMotorOperation(EnvironmentOperation, LegacySuccessorLedger):
         import sqlite3
         db = sqlite3.connect(self.journal)
         db.execute("CREATE TABLE IF NOT EXISTS legacy_receipts (id TEXT PRIMARY KEY, receipt TEXT NOT NULL)")
+        db.execute("CREATE TABLE IF NOT EXISTS legacy_operations (id TEXT PRIMARY KEY, request TEXT NOT NULL, maximum INTEGER NOT NULL, invocation TEXT NOT NULL)")
         db.commit(); db.close()
 
     @property
@@ -239,17 +274,21 @@ class LegacyMotorOperation(EnvironmentOperation, LegacySuccessorLedger):
     @property
     def decision_policy(self):
         return DecisionPolicy(profile=self.profile.mode, selector_model=self.profile.selector_model or "deterministic.v1",
-                              endpoint=self.endpoint, adapter_version=self.adapter.implementation)
+                              endpoint=getattr(self.selector, "endpoint", self.endpoint) if self.selector else self.endpoint,
+                              adapter_version=self.adapter.implementation)
 
     def validate(self, request, manifest):
         payload = MotorRequest.model_validate(request["payload"])
+        # Preserve the old direct executor envelope used by legacy fixtures.
+        if request.get("endpoint") is None and request.get("operation") is None:
+            request = {**request, "endpoint": self.endpoint, "operation": "motor.execute"}
         if request.get("endpoint") != self.endpoint or request.get("operation") != "motor.execute":
             raise Forbidden("motor operation identity mismatch")
         if manifest.get("motor") not in (None, self.profile.model_dump(mode="json")):
             raise Forbidden("motor profile differs from frozen manifest")
         return payload
 
-    def _invocation(self, request: MotorRequest, operation_id: str):
+    def _invocation(self, request: MotorRequest, operation_id: str, existing=None):
         directive = request.goal_context.revision if request.goal_context else request.goal_revision
         objective = Objective(id=request.skill, revision=directive, authorized_scope=("motor",),
                               completion_conditions=("expected postcondition",),
@@ -262,16 +301,31 @@ class LegacyMotorOperation(EnvironmentOperation, LegacySuccessorLedger):
                                    directive_revision=directive, observation_revision=request.observation_revision,
                                    recovery_generation=0, owner="legacy", stop_epoch=request.stop_epoch)
         expires = datetime.now(timezone.utc) + timedelta(milliseconds=request.timeout_ms)
-        return objective, control, BoundedInvocation(objective=objective, binding=binding, expires_at=expires)
+        invocation = existing or BoundedInvocation(objective=objective, binding=binding, expires_at=expires)
+        return objective, control, invocation
 
     def execute(self, operation_id, request, maximum_cost_micros, *, authority):
         payload = self.validate(request, {})
-        import sqlite3
-        db = sqlite3.connect(self.journal); row = db.execute("SELECT receipt FROM legacy_receipts WHERE id=?", (operation_id,)).fetchone(); db.close()
+        request_identity = json.dumps({**request, "payload": payload.model_dump(mode="json")}, sort_keys=True, separators=(",", ":"))
+        db = sqlite3.connect(self.journal); row = db.execute("SELECT receipt FROM legacy_receipts WHERE id=?", (operation_id,)).fetchone()
         if row:
+            prior = db.execute("SELECT request,maximum FROM legacy_operations WHERE id=?", (operation_id,)).fetchone()
+            if prior and (prior[0] != request_identity or prior[1] != maximum_cost_micros):
+                db.close(); raise Conflict("legacy operation identifier reused with different input")
+            db.close()
             return json.loads(row[0])
-        objective, control, invocation = self._invocation(payload, operation_id)
-        selector = _LegacySelector(self.selector, self.profile)
+        prior = db.execute("SELECT request,maximum,invocation FROM legacy_operations WHERE id=?", (operation_id,)).fetchone()
+        if prior:
+            if prior[0] != request_identity or prior[1] != maximum_cost_micros:
+                db.close(); raise Conflict("legacy operation identifier reused with different input")
+            invocation = BoundedInvocation.model_validate_json(prior[2])
+            db.close()
+            objective, control, invocation = self._invocation(payload, operation_id, invocation)
+        else:
+            objective, control, invocation = self._invocation(payload, operation_id)
+            db.execute("INSERT INTO legacy_operations VALUES (?,?,?,?)", (operation_id, request_identity, maximum_cost_micros, invocation.model_dump_json()))
+            db.commit(); db.close()
+        selector = _LegacySelector(self.selector, self.profile, self.adapter, payload)
         decision = DecisionOperation(control, selector, journal=self.journal.with_name(self.journal.stem + ".decision.sqlite"),
                                      policy=self.decision_policy)
         self._decision_ops[operation_id] = decision
@@ -315,7 +369,22 @@ class LegacyMotorOperation(EnvironmentOperation, LegacySuccessorLedger):
         decision = self._decision_ops.get(operation_id)
         request = self._legacy_requests.get(operation_id)
         if decision is None or request is None:
-            return None
+            db = sqlite3.connect(self.journal)
+            row = db.execute("SELECT request,maximum,invocation FROM legacy_operations WHERE id=?", (operation_id,)).fetchone()
+            if not row:
+                db.close()
+                return None
+            envelope = json.loads(row[0])
+            request = MotorRequest.model_validate(envelope["payload"])
+            invocation = BoundedInvocation.model_validate_json(row[2])
+            db.close()
+            _, control, invocation = self._invocation(request, operation_id, invocation)
+            selector = _LegacySelector(self.selector, self.profile, self.adapter, request)
+            decision = DecisionOperation(control, selector,
+                                         journal=self.journal.with_name(self.journal.stem + ".decision.sqlite"),
+                                         policy=self.decision_policy)
+            self._decision_ops[operation_id] = decision
+            self._legacy_requests[operation_id] = request
         receipt = decision.lookup(operation_id)
         if not receipt:
             return None

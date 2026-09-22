@@ -30,10 +30,15 @@ class Adapter:
             MotorStep(operation="move", target=request.target, arguments=request.arguments),
         )),)
 
-    def before_dispatch(self, execution_id, step):
-        self.before_dispatches.append((execution_id, step.operation))
+    def selection_observation(self, request, observation):
+        return {"revision": observation["revision"]}
 
-    def execute(self, step, *, operation_id, cancel, deadline):
+    def revalidate(self, request, observation, selected, completed_index=0):
+        return (selected,)
+
+    def execute(self, step, *, operation_id, before_dispatch, cancel, deadline):
+        before_dispatch()
+        self.before_dispatches.append((operation_id, step.operation))
         self.submissions.append(operation_id)
         self.revision += 1
         result = {"operation_id": operation_id, "status": "completed", "revision": str(self.revision)}
@@ -70,6 +75,7 @@ def test_legacy_facade_executes_one_native_step_and_projects_receipt(tmp_path):
     assert receipt["status"] == "completed"
     assert receipt["request"]["goal_revision"] == "session-7"
     assert receipt["selection"]["candidate_id"] == "step"
+    assert "position" not in receipt["selection"].get("model_input", {}).get("observation", {})
     assert receipt["steps"][0]["receipt"]["status"] == "completed"
     assert len(adapter.submissions) == 1
     assert len(adapter.before_dispatches) == 1
@@ -78,7 +84,9 @@ def test_legacy_facade_executes_one_native_step_and_projects_receipt(tmp_path):
 
 def test_legacy_facade_requires_immediate_native_hook(tmp_path):
     adapter = Adapter()
-    adapter.before_dispatch = None
+    def execute_without_hook(step, *, operation_id, cancel, deadline):
+        return {"operation_id": operation_id, "status": "completed"}
+    adapter.execute = execute_without_hook
     operation, _ = make_operation(tmp_path, adapter)
     with pytest.raises(Exception):
         operation.execute(
@@ -90,7 +98,8 @@ def test_legacy_facade_requires_immediate_native_hook(tmp_path):
 
 def test_legacy_facade_retains_unknown_native_effect_without_resubmitting(tmp_path):
     class UnknownAdapter(Adapter):
-        def execute(self, step, *, operation_id, cancel, deadline):
+        def execute(self, step, *, operation_id, before_dispatch, cancel, deadline):
+            before_dispatch()
             self.submissions.append(operation_id)
             self.revision += 1
             self.receipts[operation_id] = {"operation_id": operation_id, "status": "completed",
@@ -109,6 +118,9 @@ def test_legacy_facade_retains_unknown_native_effect_without_resubmitting(tmp_pa
             10, authority=lambda binding: None,
         )
     assert len(adapter.submissions) == 1
+    restarted = LegacyMotorOperation(adapter, MotorProfile(mode="deterministic", adapter=adapter.implementation), journal=tmp_path / "motor.sqlite")
+    recovered = restarted.lookup("motor:1")
+    assert recovered is not None and len(adapter.submissions) == 1
 
 
 def test_legacy_stop_advances_legacy_epoch(tmp_path):
