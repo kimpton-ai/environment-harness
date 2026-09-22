@@ -325,6 +325,8 @@ def check_release_workflow_binding() -> None:
     prepare = (ROOT / ".github/workflows/release-prepare.yml").read_text()
     if re.search(r"(?m)^\s*push\s*:", release):
         raise PolicyError("release.yml must remain a manual-only publisher")
+    if "ref: ${{ needs.resolve.outputs.release_sha }}" in release:
+        raise PolicyError("release.yml must not checkout a job-output release ref")
     release_required = {
         "workflow_dispatch:": "manual release dispatch",
         "release_pr:": "merged release PR input",

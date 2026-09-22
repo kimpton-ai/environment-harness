@@ -148,6 +148,10 @@ The workflow fails before creating a tag unless the pull request:
 - introduces a version newer than its first parent; and
 - names a version and tag that do not conflict with a different release commit.
 
+The build checks out the workflow's current `GITHUB_SHA` directly and verifies it against the
+resolved PR merge commit. Operator input and job outputs are never used as executable checkout
+refs in the privileged publisher.
+
 ### 2. Approve publication independently
 
 The workflow:

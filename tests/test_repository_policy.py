@@ -133,6 +133,24 @@ def test_release_workflow_requires_commit_binding(tmp_path, monkeypatch):
         check_repository.check_release_workflow_binding()
 
 
+def test_release_workflow_cannot_checkout_a_job_output_ref(tmp_path, monkeypatch):
+    workflows = configure_release_workflows(tmp_path)
+    release = workflows / "release.yml"
+    release.write_text(
+        release.read_text().replace(
+            "          fetch-depth: 0\n          persist-credentials: false\n",
+            "          ref: ${{ needs.resolve.outputs.release_sha }}\n"
+            "          fetch-depth: 0\n"
+            "          persist-credentials: false\n",
+            1,
+        )
+    )
+    monkeypatch.setattr(check_repository, "ROOT", tmp_path)
+
+    with pytest.raises(check_repository.PolicyError, match="job-output release ref"):
+        check_repository.check_release_workflow_binding()
+
+
 def test_release_workflow_cannot_publish_from_a_tag_push(tmp_path, monkeypatch):
     workflows = configure_release_workflows(tmp_path)
     release = workflows / "release.yml"
