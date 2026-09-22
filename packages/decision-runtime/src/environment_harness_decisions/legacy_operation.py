@@ -7,37 +7,37 @@ Prepared successor methods remain supplied by ``LegacySuccessorLedger``.
 
 from __future__ import annotations
 
-import json
 import inspect
+import json
 import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from threading import Event
 from typing import Any
 
+from environment_harness.contracts import OperationSpec
 from environment_harness.errors import BudgetExceeded, Conflict, Forbidden
 from environment_harness.operations import EnvironmentOperation
-from environment_harness.contracts import OperationSpec
 
 from .contracts import (
     Admission,
     Answer,
     AuthorityBinding,
     BoundedInvocation,
-    CompiledCommand,
     ChoiceOption,
+    CompiledCommand,
     DecisionPolicy,
     DecisionQuestion,
-    DecisionReceipt,
     DecisionSet,
     InvocationLimits,
     NativeReceipt,
     Objective,
     Observation,
-    OutcomeUncertain as _OutcomeUncertain,
     Selection,
     Verification,
+)
+from .contracts import (
+    OutcomeUncertain as _OutcomeUncertain,
 )
 from .legacy_contracts import (
     MotorAdapter,
@@ -47,7 +47,7 @@ from .legacy_contracts import (
     MotorRequest,
     MotorSelection,
 )
-from .legacy_successors import LegacySuccessorLedger, MotorOutcomeUnknown, _matches, _validate_candidate
+from .legacy_successors import LegacySuccessorLedger, _matches, _validate_candidate
 from .runtime import DecisionOperation
 
 
@@ -364,17 +364,37 @@ class LegacyMotorOperation(EnvironmentOperation, LegacySuccessorLedger):
         selection = self._legacy_selections.get(operation_id)
         control = self._legacy_controls.get(operation_id)
         steps = []
+        applied = False
+        possible = False
+        decision = self._decision_ops.get(operation_id)
+        if decision is not None:
+            with decision.ledger.db() as db:
+                effects = db.execute("SELECT command,native_receipt,status FROM effects WHERE invocation=? ORDER BY rowid", (operation_id,)).fetchall()
+            for effect in effects:
+                native = json.loads(effect["native_receipt"]) if effect["native_receipt"] else None
+                if native is None or native.get("outcome") == "unknown":
+                    possible = True
+                    continue
+                command = json.loads(effect["command"])
+                candidate = command.get("payload", {}).get("candidate", {})
+                native_steps = native.get("evidence", {}).get("steps", ())
+                for index, step in enumerate(candidate.get("steps", ())):
+                    if index < len(native_steps):
+                        value = dict(step); value["receipt"] = native_steps[index]; steps.append(value)
+                if native.get("outcome") == "applied":
+                    applied = True
+                elif native.get("outcome") == "unknown":
+                    possible = True
         if control and control.last_candidate:
-            for index, step in enumerate(control.last_candidate.steps):
-                value = step.model_dump(mode="json")
-                if index < len(control.last_receipts):
-                    value["receipt"] = control.last_receipts[index]
-                steps.append(value)
+            if not steps:
+                for index, step in enumerate(control.last_candidate.steps):
+                    if index < len(control.last_receipts):
+                        value = step.model_dump(mode="json"); value["receipt"] = control.last_receipts[index]; steps.append(value)
         before = control._before.get(control.last_candidate.id, {}) if control and control.last_candidate else {}
         after = control.last_observation if control else {}
         reason_code = receipt.get("reason") if status == "rejected" and receipt.get("effects_resolved") else None
         return MotorReceipt(operation_id=operation_id, status=old_status, outcome=outcome,
-                            effect="applied" if status == "completed" else "none", cost_micros=receipt["cost_micros"],
+                            effect="applied" if applied or status == "completed" else "possible" if possible else "none", cost_micros=receipt["cost_micros"],
                             profile=self.profile, request=request, reason=receipt["reason"], reason_code=reason_code, selection=selection,
                             before=before, after=after, steps=tuple(steps),
                             elapsed_ms=(time.monotonic()-started)*1000).model_dump(mode="json")
@@ -428,3 +448,8 @@ MotorExecutor = LegacyMotorOperation
 # Historical callers used this name for unresolved native outcomes.
 MotorOutcomeUnknown = _OutcomeUncertain
 OutcomeUncertain = MotorOutcomeUnknown
+
+# Successor methods resolve this module global when called. Keep their
+# historical exception name identical to the facade's exported identity.
+from . import legacy_successors as _legacy_successors
+_legacy_successors.MotorOutcomeUnknown = MotorOutcomeUnknown

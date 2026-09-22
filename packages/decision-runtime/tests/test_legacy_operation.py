@@ -1,12 +1,14 @@
-from pathlib import Path
 
 import pytest
 
 from environment_harness_decisions.legacy_contracts import (
-    GoalContext, MotorCandidate, MotorProfile, MotorRequest, MotorStep,
+    GoalContext,
+    MotorCandidate,
+    MotorProfile,
+    MotorRequest,
+    MotorStep,
 )
 from environment_harness_decisions.legacy_operation import LegacyMotorOperation
-from environment_harness_decisions.legacy_errors import MotorOutcomeUnknown
 
 
 class Adapter:
