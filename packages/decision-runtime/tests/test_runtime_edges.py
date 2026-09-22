@@ -4,7 +4,12 @@ import threading
 import time
 
 import pytest
-from environment_harness_decisions import Answer, DecisionSet, OutcomeUncertain, ProviderFailure, Selection
+from environment_harness.errors import Forbidden
+from datetime import datetime, timedelta, timezone
+
+from environment_harness_decisions import (
+    Answer, CompiledCommand, DecisionSet, OutcomeUncertain, PreparedSuccessor, ProviderFailure,
+)
 
 from test_runtime import Browser, execute, setup as make_setup
 
@@ -49,3 +54,20 @@ def test_reserved_attempt_is_not_acknowledged_as_zero_on_lookup(tmp_path):
     with op.ledger.db() as db:
         attempt = db.execute("SELECT status,cost FROM attempts").fetchone()
         assert attempt[0] != "resolved" or attempt[1] != 0
+
+
+def test_prepared_successor_is_invalidated_by_stop(tmp_path):
+    op, invocation = make_setup(tmp_path)
+    op.policy = op.policy.model_copy(update={"prepared_successor": True})
+    op.control.native_admits_prepared_successors = True
+    assert execute(op, invocation)["status"] == "completed"
+    successor = PreparedSuccessor(
+        id="successor-1", operation_id="session:op-1", predecessor_execution_id="session:op-1:execution:0",
+        execution_id="session:op-1:execution:1", expires_at=datetime.now(timezone.utc) + timedelta(minutes=1),
+        binding=invocation.binding, command=CompiledCommand(
+            id="click", adapter_version=op.control.implementation, payload={"click": "save"}),
+    )
+    op.prepare_successor(successor)
+    op.stop()
+    with pytest.raises(Forbidden):
+        op.admit_successor("successor-1", authority=lambda _: None)
