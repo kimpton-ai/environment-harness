@@ -195,16 +195,16 @@ class _LegacyControl:
         candidate = MotorCandidate.model_validate(command.payload["candidate"])
         fresh = self.adapter.observe()
         if str(fresh.get("revision", "")) != binding.observation_revision:
-            return Admission(execution_id=execution_id, binding=binding, accepted=False, reason="observation_changed")
+            return Admission(execution_id=execution_id, binding=binding, accepted=False, reason="stale_observation_revision")
         revalidate = getattr(self.adapter, "revalidate", None)
         if not callable(revalidate):
-            return Admission(execution_id=execution_id, binding=binding, accepted=False, reason="revalidation_required")
+            return Admission(execution_id=execution_id, binding=binding, accepted=False, reason="illegal_at_dispatch")
         checked = revalidate(self.request, fresh, candidate, 0)
         if not checked or not any(item == candidate for item in checked):
-            return Admission(execution_id=execution_id, binding=binding, accepted=False, reason="plan_changed")
+            return Admission(execution_id=execution_id, binding=binding, accepted=False, reason="illegal_at_dispatch")
         invalid = _validate_candidate(self.request, candidate, fresh)
         if invalid:
-            return Admission(execution_id=execution_id, binding=binding, accepted=False, reason=invalid)
+            return Admission(execution_id=execution_id, binding=binding, accepted=False, reason="illegal_at_dispatch")
         self._binding = binding
         return Admission(execution_id=execution_id, binding=binding, accepted=True)
 
@@ -372,9 +372,10 @@ class LegacyMotorOperation(EnvironmentOperation, LegacySuccessorLedger):
                 steps.append(value)
         before = control._before.get(control.last_candidate.id, {}) if control and control.last_candidate else {}
         after = control.last_observation if control else {}
+        reason_code = receipt.get("reason") if status == "rejected" and receipt.get("effects_resolved") else None
         return MotorReceipt(operation_id=operation_id, status=old_status, outcome=outcome,
                             effect="applied" if status == "completed" else "none", cost_micros=receipt["cost_micros"],
-                            profile=self.profile, request=request, reason=receipt["reason"], selection=selection,
+                            profile=self.profile, request=request, reason=receipt["reason"], reason_code=reason_code, selection=selection,
                             before=before, after=after, steps=tuple(steps),
                             elapsed_ms=(time.monotonic()-started)*1000).model_dump(mode="json")
 

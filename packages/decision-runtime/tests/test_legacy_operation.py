@@ -21,11 +21,14 @@ class Adapter:
         self.submissions = []
         self.before_dispatches = []
         self.receipts = {}
+        self.advance_on_plan = False
 
     def observe(self):
         return {"revision": str(self.revision), "position": self.revision}
 
     def plan(self, request, observation):
+        if self.advance_on_plan:
+            self.revision += 1
         return (MotorCandidate(id="step", description="advance", steps=(
             MotorStep(operation="move", target=request.target, arguments=request.arguments),
         )),)
@@ -89,6 +92,19 @@ def test_legacy_facade_supports_sequential_invocations(tmp_path):
     second = operation.execute("motor:2", {"endpoint": "motor", "operation": "motor.execute", "payload": second_request, "write": True}, 10, authority=lambda _: None)
     assert first["status"] == second["status"] == "completed"
     assert len(adapter.submissions) == 2
+
+
+def test_stale_native_observation_projects_effect_free_reason(tmp_path):
+    operation, adapter = make_operation(tmp_path)
+    adapter.advance_on_plan = True
+    receipt = operation.execute(
+        "motor:stale", {"endpoint": "motor", "operation": "motor.execute", "payload": request(), "write": True},
+        10, authority=lambda _: None,
+    )
+    assert receipt["status"] == "blocked"
+    assert receipt["effect"] == "none"
+    assert receipt["reason_code"] == "stale_observation_revision"
+    assert adapter.submissions == []
 
 
 def test_legacy_facade_requires_immediate_native_hook(tmp_path):
