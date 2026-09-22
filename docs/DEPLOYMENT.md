@@ -185,7 +185,8 @@ See [Protocol](PROTOCOL.md), [Coordinated persistent sessions](coordinated-sessi
 ### A refreshed route returns 404
 
 Run the packaged EnvironmentHarness server. It serves the viewer shell for `/home`, `/compare`,
-`/experiment/{id}`, `/experiment/{id}/scenarios/{scenario}`, `/experiment/{id}/sessions`, and
+`/experiment/{id}`, `/experiment/{id}/scenarios`, `/experiment/{id}/scenarios/{scenario}`,
+`/experiment/{id}/sessions`, and
 supported `/session/{id}/{section}` deep links. A generic static-file server does not know those routes.
 
 `/experiment/{id}` restores the frozen experiment overview. Its Scenarios tab appears only for

@@ -2,7 +2,7 @@
 
 An environment owns its rules and serializable environment state. EnvironmentHarness owns the session journal, participant delivery, checkpoint storage and execution coordination. The included [SyntheticEnvironment](../src/environment_harness/fixtures.py) is a complete, small reference implementation.
 
-Implement these five members:
+Implement these members (`operations` is optional):
 
 | Member | Purpose |
 | --- | --- |

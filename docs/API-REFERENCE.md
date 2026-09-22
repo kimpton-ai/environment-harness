@@ -13,7 +13,9 @@ export EH_TOKEN="$(environment-harness --store .local/demo token)"
 export EH_URL="http://127.0.0.1:8765"
 ```
 
-Every route except `GET /health` requires an opaque bearer credential:
+Every `/v1` route requires an opaque bearer credential. `GET /health`, the OpenAPI pages, and the
+packaged viewer shell are public; the viewer obtains its API credential through the local or
+supplier authentication flow described in [Deployment](DEPLOYMENT.md).
 
 ```http
 Authorization: Bearer <credential>
