@@ -121,9 +121,13 @@ class _LegacyControl:
         self.implementation = adapter.implementation
         self._candidates: dict[str, MotorCandidate] = {}
         self._before: dict[str, dict[str, Any]] = {}
+        self.last_candidate: MotorCandidate | None = None
+        self.last_receipts: list[dict[str, Any]] = []
+        self.last_observation: dict[str, Any] = {}
 
     def observe(self, objective):
         value = self.adapter.observe()
+        self.last_observation = value
         return Observation(revision=str(value.get("revision", self.request.observation_revision)), model_input=value)
 
     def decisions(self, objective, observation):
@@ -159,6 +163,7 @@ class _LegacyControl:
         if not self.write and any(step.operation != "read" for step in candidate.steps):
             raise Forbidden("write authority required")
         self._before[candidate.id] = observation.model_input
+        self.last_candidate = candidate
         return CompiledCommand(id=candidate.id, adapter_version=self.implementation,
                                payload={"candidate": candidate.model_dump(mode="json")})
 
@@ -168,6 +173,7 @@ class _LegacyControl:
     def execute(self, execution_id, command, *, before_dispatch, cancel, deadline):
         candidate = MotorCandidate.model_validate(command.payload["candidate"])
         receipts = []
+        self.last_receipts = receipts
         for index, step in enumerate(candidate.steps):
             if cancel.is_set() or time.monotonic() >= deadline:
                 return NativeReceipt(execution_id=execution_id, outcome="cancelled", reason="deadline")
@@ -285,9 +291,20 @@ class LegacyMotorOperation(EnvironmentOperation, LegacySuccessorLedger):
         old_status = "completed" if status == "completed" else "cancelled" if status == "cancelled" else "blocked"
         outcome = "completed" if status == "completed" else "cancelled" if status == "cancelled" else "rejected"
         selection = self._legacy_selections.get(operation_id)
+        control = self._legacy_controls.get(operation_id)
+        steps = []
+        if control and control.last_candidate:
+            for index, step in enumerate(control.last_candidate.steps):
+                value = step.model_dump(mode="json")
+                if index < len(control.last_receipts):
+                    value["receipt"] = control.last_receipts[index]
+                steps.append(value)
+        before = control._before.get(control.last_candidate.id, {}) if control and control.last_candidate else {}
+        after = control.last_observation if control else {}
         return MotorReceipt(operation_id=operation_id, status=old_status, outcome=outcome,
                             effect="applied" if status == "completed" else "none", cost_micros=receipt["cost_micros"],
                             profile=self.profile, request=request, reason=receipt["reason"], selection=selection,
+                            before=before, after=after, steps=tuple(steps),
                             elapsed_ms=(time.monotonic()-started)*1000).model_dump(mode="json")
 
     def lookup(self, operation_id):

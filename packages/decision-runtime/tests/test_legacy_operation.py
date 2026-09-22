@@ -70,6 +70,7 @@ def test_legacy_facade_executes_one_native_step_and_projects_receipt(tmp_path):
     assert receipt["status"] == "completed"
     assert receipt["request"]["goal_revision"] == "session-7"
     assert receipt["selection"]["candidate_id"] == "step"
+    assert receipt["steps"][0]["receipt"]["status"] == "completed"
     assert len(adapter.submissions) == 1
     assert len(adapter.before_dispatches) == 1
     assert operation.lookup("motor:1") == receipt
