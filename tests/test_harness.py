@@ -368,6 +368,25 @@ def test_activity_snapshot_groups_experiments_and_keeps_standalone_sessions_top_
     assert snapshot["experiments"][0]["id"] == grouped.id
     assert snapshot["experiments"][0]["kind"] == "experiment"
     assert snapshot["experiments"][0]["progress"] == {"completed": 2, "total": 2}
+    frozen = snapshot["experiments"][0]["frozen"]
+    assert frozen["environment"]["implementation"] == "scenario-environment@1"
+    assert frozen["participants"] == [
+        {
+            "id": "agent",
+            "implementation": "scenario-agent@1",
+            "policy_version": "1",
+            "config": {},
+            "checkpoint": False,
+        }
+    ]
+    assert frozen["execution"] == {
+        "seed": 0,
+        "trials": 2,
+        "turns": 1,
+        "max_concurrency": 4,
+    }
+    assert frozen["policy"]["max_turns"] == 1
+    assert frozen["scoring_versions"] == []
     assert len(snapshot["experiments"][0]["sessions"]) == 2
     scenario = snapshot["experiments"][0]["scenarios"][0]
     assert scenario == {

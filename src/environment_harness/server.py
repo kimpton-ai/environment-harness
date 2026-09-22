@@ -762,6 +762,18 @@ def create_app(session, *, local_access=None):
         del experiment
         return FileResponse(Path(__file__).parent / "viewer" / "index.html")
 
+    @app.get("/experiment/{experiment}/scenarios/{scenario}", include_in_schema=False)
+    def viewer_experiment_scenario(experiment: str, scenario: str):
+        del experiment, scenario
+        return FileResponse(Path(__file__).parent / "viewer" / "index.html")
+
+    @app.get("/experiment/{experiment}/{section}", include_in_schema=False)
+    def viewer_experiment_section(experiment: str, section: str):
+        del experiment
+        if section not in ("scenarios", "sessions"):
+            raise HTTPException(404)
+        return FileResponse(Path(__file__).parent / "viewer" / "index.html")
+
     @app.get("/viewer/{file}", include_in_schema=False)
     def asset(file: str):
         if file not in ("app.js", "timeline.js", "client.js", "types.js", "style.css"):

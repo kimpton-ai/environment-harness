@@ -9,6 +9,11 @@
           "title": "Failed",
           "type": "integer"
         },
+        "frozen": {
+          "additionalProperties": true,
+          "title": "Frozen",
+          "type": "object"
+        },
         "id": {
           "title": "Id",
           "type": "string"

@@ -61,7 +61,7 @@ Commands have shape `{"operation":"checkpoint","arguments":{"lease":{"owner":"wo
 
 Events support JSON pages and finite server-sent-event pages. Reconnect with `Last-Event-ID`; an empty page means caught up. Cursors expose ordering gaps but never hidden event payloads. A viewer can disconnect without blocking evidence writes. Artifact access is authorized against its environment and audience before retrieving any bytes.
 
-Activity feeds use a transactional outbox and global cursor. They cover experiment status and environment-session evidence without exposing the scheduler queue as an authority. SSE pages include a reconnect delay and heartbeat; clients tolerate duplicate IDs and recover from the activity snapshot after reconnecting. Global, experiment and environment-session scopes all require an authenticated tenant principal.
+Activity feeds use a transactional outbox and global cursor. They cover experiment status and environment-session evidence without exposing the scheduler queue as an authority. The recovery snapshot includes the experiment's frozen shared configuration and each scenario's immutable input, reference, and metadata. SSE pages include a reconnect delay and heartbeat; clients tolerate duplicate IDs and recover from the activity snapshot after reconnecting. Global, experiment and environment-session scopes all require an authenticated tenant principal.
 
 The checked-in `ActivityPage` and `ActivitySnapshot` JSON Schemas are the durable JSON response
 contracts for those feeds. The generated OpenAPI document references the same response models and

@@ -369,6 +369,25 @@ class EnvironmentHarness:
         environment = self.environment_factory()
         runtime_operations = environment_operations(environment)
         preview_agents = {participant: factory() for participant, factory in self.agent_factories.items()}
+        operations = [
+            runtime_operations[declaration.name].spec for declaration in environment.spec.operations
+        ]
+        policy = self.policy.model_copy(
+            update={
+                "max_turns": experiment.turns,
+                "allowed_endpoints": tuple(
+                    dict.fromkeys(
+                        (
+                            *self.policy.allowed_endpoints,
+                            *(runtime_operations[item.name].endpoint for item in operations),
+                        )
+                    )
+                ),
+                "allowed_operations": tuple(
+                    dict.fromkeys((*self.policy.allowed_operations, *(item.name for item in operations)))
+                ),
+            }
+        )
         config = {
             "environment": environment.spec.model_dump(mode="json"),
             "participants": [
@@ -376,11 +395,14 @@ class EnvironmentHarness:
                 for name, agent in preview_agents.items()
             ],
             "scoring_versions": list(self.scoring_versions),
-            "operations": [
-                runtime_operations[declaration.name].spec.model_dump(mode="json")
-                for declaration in environment.spec.operations
-            ],
-            "turns": experiment.turns,
+            "operations": [operation.model_dump(mode="json") for operation in operations],
+            "policy": policy.model_dump(mode="json"),
+            "execution": {
+                "seed": experiment.seed,
+                "trials": experiment.trials,
+                "turns": experiment.turns,
+                "max_concurrency": self.max_concurrency,
+            },
         }
         now = time.time()
         jobs: list[dict[str, Any]] = []

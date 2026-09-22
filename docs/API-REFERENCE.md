@@ -358,7 +358,7 @@ curl --fail-with-body -H "Authorization: Bearer $EH_TOKEN" \
   "$EH_URL/v1/activity/snapshot"
 ```
 
-The response contains current experiment, scenario, and environment-session records plus the current global activity cursor. It is the recovery source for clients that miss activity events.
+The response contains current experiment, scenario, and environment-session records plus the current global activity cursor. Experiment records include the frozen environment, participant, execution, policy, operation, and scoring configuration shared by their sessions. Scenario records preserve their immutable input, reference, and metadata snapshots. It is the recovery source for clients that miss activity events.
 Its machine-readable response contract is
 [`ActivitySnapshot.schema.json`](../contracts/ActivitySnapshot.schema.json).
 

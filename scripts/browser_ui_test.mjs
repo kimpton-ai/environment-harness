@@ -452,14 +452,66 @@ try {
   await waitFor(`location.pathname.startsWith('/experiment/')`);
   assert.deepEqual(
     await evaluate(`[
-      location.pathname.startsWith('/experiment/'),
+      /^\\/experiment\\/[^/]+$/.test(location.pathname),
       document.querySelector('.home-heading h1')?.textContent,
-      document.querySelector('.home-list-heading h2')?.textContent,
-      document.querySelectorAll('.experiment-parent').length,
+      Array.from(document.querySelectorAll('#experiment-tabs [role=tab]')).map(tab => tab.textContent),
+      document.querySelector('#experiment-tabs')?.hidden,
+      document.querySelector('#experiment-overview')?.hidden,
+      document.querySelector('#home-list-content')?.hidden,
+      document.querySelector('#experiment-frozen-summary')?.textContent.includes('synthetic-protocol@1'),
+      getComputedStyle(document.querySelector('#home-view')).backgroundColor,
     ]`),
-    [true, 'Support response evaluation', 'Experiment Sessions', 1],
-    'the experiment name opens a dedicated detail route for that experiment',
+    [true, 'Support response evaluation', ['Overview', 'Scenarios', 'Sessions'], false, false, true, true, 'rgb(255, 255, 255)'],
+    'the experiment name opens its configuration overview with subordinate navigation on the session canvas',
   );
+  await evaluate(`document.querySelector('[data-experiment-tab="scenarios"]').click()`);
+  await waitFor(`location.pathname.endsWith('/scenarios')`);
+  assert.deepEqual(
+    await evaluate(`[
+      document.querySelectorAll('.experiment-scenario-row').length,
+      document.querySelector('.experiment-scenario-row')?.textContent.includes('Routine request'),
+      document.querySelector('[data-experiment-tab="scenarios"]')?.getAttribute('aria-selected'),
+    ]`),
+    [2, true, 'true'],
+    'meaningful scenario snapshots have a dedicated experiment page',
+  );
+  await evaluate(`document.querySelector('.experiment-scenario-row').click()`);
+  await waitFor(`location.pathname.includes('/scenarios/easy-case')`);
+  assert.deepEqual(
+    await evaluate(`[
+      document.querySelector('#scenario-detail-title')?.textContent,
+      document.querySelector('#scenario-detail')?.textContent.includes('Input'),
+      document.querySelector('#scenario-detail')?.textContent.includes('Metadata'),
+      document.querySelector('#scenario-view-sessions')?.textContent,
+    ]`),
+    ['Routine request', true, true, 'View Sessions'],
+    'a scenario opens its immutable inputs and navigation to produced sessions',
+  );
+  await evaluate(`document.querySelector('#scenario-view-sessions').click()`);
+  await waitFor(`location.pathname.endsWith('/sessions')`);
+  assert.deepEqual(
+    await evaluate(`[
+      document.querySelector('.home-list-heading h2')?.textContent,
+      document.querySelectorAll('.scenario-session[data-session-id]').length,
+      document.querySelector('#session-search')?.value,
+    ]`),
+    ['Experiment Sessions', 2, 'easy-case'],
+    'View Sessions opens the session list filtered to the selected scenario',
+  );
+  await evaluate(`document.querySelector('.scenario-session .session-name').click()`);
+  await waitFor(`location.pathname.startsWith('/session/')`);
+  assert.deepEqual(
+    await evaluate(`[
+      location.pathname.endsWith('/overview'),
+      document.querySelector('.breadcrumb-link')?.textContent,
+      document.querySelector('.breadcrumb-link')?.getAttribute('href')?.startsWith('/experiment/'),
+      document.querySelector('.breadcrumb-current')?.textContent,
+    ]`),
+    [true, 'Support response evaluation', true, 'Routine request · Trial 1'],
+    'a produced session keeps its canonical route and links back to its parent experiment',
+  );
+  await evaluate(`document.querySelector('.breadcrumb-link').click()`);
+  await waitFor(`/^\\/experiment\\/[^/]+$/.test(location.pathname)`);
   if (process.env.BROWSER_UI_SCREENSHOT_DIR) {
     const screenshot = await command('Page.captureScreenshot', {format: 'png', captureBeyondViewport: false});
     writeFileSync(`${process.env.BROWSER_UI_SCREENSHOT_DIR}/experiment.png`, screenshot.data, 'base64');
@@ -598,7 +650,7 @@ try {
       document.querySelector('#home span')?.textContent,
       getComputedStyle(document.querySelector('.navbar-actions')).display,
       Array.from(document.querySelectorAll('#breadcrumb-trail > *')).map(node => node.textContent).join(''),
-      document.querySelector('.session-tabs')?.previousElementSibling?.classList.contains('page-context'),
+      document.querySelector('[aria-label="Selected Session Navigation"]')?.previousElementSibling?.classList.contains('page-context'),
       document.querySelector('#home svg') === null,
       getComputedStyle(document.querySelector('#home')).fontSize,
       getComputedStyle(document.querySelector('.breadcrumb-current')).fontSize,

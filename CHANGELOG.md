@@ -13,6 +13,9 @@ The viewer now expands experiment rows directly into environment sessions instea
 label-only scenario layer. Session rows show scenario and trial identity, status, turn progress,
 participants and latest activity; experiment names open stable detail routes. Activity pages and
 snapshots now have checked-in JSON Schemas and concrete OpenAPI response models.
+Experiment detail routes now separate shared frozen configuration, clickable scenario snapshots,
+and environment sessions. Empty/default scenarios do not add navigation; meaningful scenarios
+show structured input, reference, metadata, progress, and a filtered path to their sessions.
 
 Environment packages can now expose typed `EnvironmentOperation` classes for
 engine-specific or imperative capabilities. Environment and experiment manifests
@@ -28,6 +31,9 @@ evidence-linked findings, and the CLI/browser timelines describe operation activ
 The public `SessionRunner` protocol documents this extension boundary. Experiment startup now
 validates environment operations before queueing work, runner results must identify the current
 environment-session record, and conformance reports how many operation classes it checked.
+An external-simulator example keeps the domain client and operation outside core while exercising
+a real subprocess connection, explicit external-write policy, idempotent receipts, scoring,
+findings and the same multi-session viewer workflow.
 
 Native implementations can run behind authenticated HTTP workers while a trusted
 supervisor retains the evidence store. External participants can advance ready

@@ -394,6 +394,7 @@ class EvidenceStore:
                         "failed": experiment["failed"],
                         "latest_activity": latest["latest_activity"] if latest else None,
                         "score_summary": scores,
+                        "frozen": json.loads(experiment["config"]),
                         "scenarios": scenarios,
                         "sessions": children,
                         "updated": experiment["updated"],

@@ -225,6 +225,7 @@ class ActivityExperiment(Record):
     failed: int = Field(ge=0)
     latest_activity: str | None = None
     score_summary: dict[str, float] = Field(default_factory=dict)
+    frozen: Json = Field(default_factory=dict)
     scenarios: tuple[ActivityScenario, ...] = ()
     sessions: tuple[ActivitySession, ...] = ()
     updated: float

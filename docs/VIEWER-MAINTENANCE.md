@@ -40,6 +40,8 @@ The FastAPI application serves the same viewer shell at:
 - `/` and `/home`;
 - `/compare`;
 - `/experiment/{experiment}`;
+- `/experiment/{experiment}/scenarios` and `/experiment/{experiment}/scenarios/{scenario}`;
+- `/experiment/{experiment}/sessions`;
 - `/session/{environment}`; and
 - `/session/{environment}/overview`, `/turns`, `/progression`, or `/reports`.
 
@@ -63,9 +65,11 @@ screenshots. All `/v1` routes remain authenticated in both modes.
 ### Live updates
 
 Home loads the environment-session list and activity snapshot together. Experiment disclosures
-expand directly into their environment sessions; the experiment name separately opens the stable
-`/experiment/{experiment}` detail route. Child rows expose scenario and trial identity, status,
-turn progress, participants and latest activity without a label-only intermediate row. It then reads finite
+expand directly into their environment sessions; the experiment name separately opens its stable
+Overview route. Meaningful scenarios have a dedicated experiment tab and clickable detail routes;
+an empty/default scenario does not add navigation. `View Sessions` moves to the experiment's flat
+session list with a scenario filter instead of inserting a label-only layer. Child rows expose scenario
+and trial identity, status, turn progress, participants and latest activity. It then reads finite
 server-sent-event activity pages. After three activity-stream failures it falls back to the JSON
 activity endpoint with backoff. Changes refresh the list and any selected environment session.
 
