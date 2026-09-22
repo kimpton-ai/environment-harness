@@ -11,23 +11,26 @@ def _wal_database(path):
     db.execute("CREATE TABLE evidence(value TEXT NOT NULL)")
     db.execute("INSERT INTO evidence VALUES ('committed-in-wal')")
     db.commit()
-    db.close()
+    return db
 
 
 def test_sqlite_backup_copies_committed_wal_state(tmp_path):
     source = tmp_path / "run.sqlite"
     destination = tmp_path / "backup.sqlite"
-    _wal_database(source)
+    source_db = _wal_database(source)
+    assert (source.parent / (source.name + "-wal")).exists()
     sqlite_backup(source, destination)
     db = sqlite3.connect(destination)
     assert db.execute("SELECT value FROM evidence").fetchone()[0] == "committed-in-wal"
     assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     db.close()
+    source_db.close()
 
 
 def test_migration_report_is_read_only_and_apply_resumes_after_interruption(tmp_path):
     source = tmp_path / "run.sqlite"
-    _wal_database(source)
+    source_db = _wal_database(source)
+    source_db.close()
     transaction = MigrationTransaction(
         tmp_path, version="runtime.v1", source_identity={"run": "legacy"},
         destination_identity={"sdk": "decisions"}, source_files=[source],
@@ -63,7 +66,8 @@ def test_migration_report_is_read_only_and_apply_resumes_after_interruption(tmp_
 
 def test_migration_blocks_when_original_changes_after_backup(tmp_path):
     source = tmp_path / "run.sqlite"
-    _wal_database(source)
+    source_db = _wal_database(source)
+    source_db.close()
     transaction = MigrationTransaction(
         tmp_path, version="runtime.v1", source_identity={"run": "legacy"},
         destination_identity={"sdk": "decisions"}, source_files=[source],

@@ -37,7 +37,7 @@ def test_crash_after_native_submit_is_reconciled_without_resubmission(tmp_path):
     assert len(op.control.submissions) == 1
 
 
-def test_reserved_attempt_is_not_acknowledged_as_zero_on_lookup(tmp_path):
+def test_pre_submission_reservation_can_settle_zero_without_provider_call(tmp_path):
     class BlockedSelector:
         model = "fixture.v1"
         def maximum_charge_micros(self, *args):
@@ -48,15 +48,43 @@ def test_reserved_attempt_is_not_acknowledged_as_zero_on_lookup(tmp_path):
     op, invocation = make_setup(tmp_path, selector=BlockedSelector())
     with pytest.raises(RuntimeError):
         execute(op, invocation)
-    assert op.lookup("session:op-1") is None
-    # The provider response has not settled yet, so a restart/lookup cannot
-    # invent a zero charge merely because a reservation was written.
+    receipt = op.lookup("session:op-1")
+    assert receipt["cost_micros"] == 0
     with op.ledger.db() as db:
         attempt = db.execute("SELECT status,cost FROM attempts").fetchone()
-        assert attempt[0] != "resolved" or attempt[1] != 0
+        assert attempt[0] == "resolved" and attempt[1] == 0
 
 
-def test_prepared_successor_is_invalidated_by_stop(tmp_path):
+def test_submitted_marker_crash_retains_unknown_charge(tmp_path):
+    class CrashSelector:
+        model = "fixture.v1"
+        def maximum_charge_micros(self, *args):
+            return 4
+        def model_input(self, observation, decisions):
+            return {"state": observation.model_input}
+        def select(self, *args, **kwargs):
+            raise RuntimeError("crash after submitted marker")
+
+    op, invocation = make_setup(tmp_path, selector=CrashSelector())
+    with pytest.raises(RuntimeError):
+        execute(op, invocation)
+    assert op.lookup("session:op-1") is None
+    with op.ledger.db() as db:
+        attempt = db.execute("SELECT status,cost,reservation FROM attempts").fetchone()
+        assert attempt[0] == "unknown" and attempt[1] is None and attempt[2] == 4
+
+
+def test_persisted_expiry_is_not_extended_after_restart(tmp_path):
+    op, invocation = make_setup(tmp_path)
+    expired = invocation.model_copy(update={
+        "expires_at": datetime.now(timezone.utc) - timedelta(seconds=1),
+    })
+    receipt = execute(op, expired)
+    assert receipt["status"] == "cancelled"
+    assert op.lookup("session:op-1") == receipt
+
+
+def test_prepared_successor_requires_live_predecessor(tmp_path):
     op, invocation = make_setup(tmp_path)
     op.policy = op.policy.model_copy(update={"prepared_successor": True})
     op.control.native_admits_prepared_successors = True
@@ -67,7 +95,5 @@ def test_prepared_successor_is_invalidated_by_stop(tmp_path):
         binding=invocation.binding, command=CompiledCommand(
             id="click", adapter_version=op.control.implementation, payload={"click": "save"}),
     )
-    op.prepare_successor(successor)
-    op.stop()
     with pytest.raises(Forbidden):
-        op.admit_successor("successor-1", authority=lambda _: None)
+        op.prepare_successor(successor)
