@@ -19,6 +19,7 @@ PEP440_RELEASE = re.compile(
 STAGE_ORDER = {"a": 0, "b": 1, "rc": 2, None: 3}
 STAGE_NAMES = {"alpha": "a", "beta": "b", "rc": "rc"}
 NPM_STAGE_NAMES = {"a": "alpha", "b": "beta", "rc": "rc"}
+FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
 class ReleaseError(RuntimeError):
@@ -278,6 +279,41 @@ def select_release_tag(version: str, tags: list[str], changelog: str) -> str | N
     return f"v{version}"
 
 
+def _git_project_version(root: Path, revision: str) -> str:
+    result = subprocess.run(
+        ["git", "show", f"{revision}:pyproject.toml"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise ReleaseError(f"release commit {revision!r} lacks readable project metadata")
+    try:
+        version = tomllib.loads(result.stdout).get("project", {}).get("version")
+        if not isinstance(version, str):
+            raise ReleaseError(f"release commit {revision!r} lacks a project version")
+        parse_version(version)
+    except tomllib.TOMLDecodeError as error:
+        raise ReleaseError(f"release commit {revision!r} has malformed project metadata") from error
+    return version
+
+
+def validate_release_commit(release_tag: str, revision: str = "HEAD", root: Path = ROOT) -> None:
+    version = current_version(root)
+    commit_version = _git_project_version(root, f"{revision}^{{commit}}")
+    parent_version = _git_project_version(root, f"{revision}^{{commit}}^1")
+    if version != commit_version or release_tag != f"v{commit_version}":
+        raise ReleaseError(
+            f"release tag {release_tag!r}, working metadata {version}, and commit metadata "
+            f"{commit_version} do not match"
+        )
+    if parse_version(parent_version).key >= parse_version(commit_version).key:
+        raise ReleaseError(
+            "release commit must introduce a version newer than its first parent: "
+            f"{parent_version} -> {commit_version}"
+        )
+
+
 def detect_release_tag(root: Path = ROOT) -> str | None:
     tags = subprocess.run(
         ["git", "tag", "--list", "v*"],
@@ -286,14 +322,63 @@ def detect_release_tag(root: Path = ROOT) -> str | None:
         capture_output=True,
         text=True,
     ).stdout.splitlines()
-    return select_release_tag(current_version(root), tags, (root / "CHANGELOG.md").read_text())
+    tag = select_release_tag(current_version(root), tags, (root / "CHANGELOG.md").read_text())
+    if tag:
+        validate_release_commit(tag, root=root)
+    return tag
 
 
-def validate_release_tag(release_tag: str, root: Path = ROOT) -> None:
+def validate_release_tag(release_tag: str, root: Path = ROOT, *, release_commit: str | None = None) -> None:
     version = current_version(root)
     if release_tag != f"v{version}":
         raise ReleaseError(f"release tag {release_tag!r} does not match metadata version v{version}")
     select_release_tag(version, [], (root / "CHANGELOG.md").read_text())
+    if release_commit:
+        validate_release_commit(release_tag, release_commit, root)
+
+
+def resolve_release_pr(
+    pull_request: dict[str, object], workflow_sha: str, root: Path = ROOT
+) -> dict[str, str]:
+    number = pull_request.get("number")
+    base = pull_request.get("base")
+    merge_commit = pull_request.get("merge_commit_sha")
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    if (
+        not isinstance(number, int)
+        or number < 1
+        or pull_request.get("state") != "closed"
+        or not isinstance(pull_request.get("merged_at"), str)
+        or not isinstance(base, dict)
+        or base.get("ref") != "main"
+    ):
+        raise ReleaseError("release PR must be merged into main")
+    if not FULL_SHA.fullmatch(workflow_sha) or merge_commit != workflow_sha or head != workflow_sha:
+        raise ReleaseError("workflow must run from the exact merged release PR commit")
+    tag = detect_release_tag(root)
+    if tag is None:
+        tag = f"v{current_version(root)}"
+        existing = subprocess.run(
+            ["git", "rev-parse", f"{tag}^{{commit}}"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+        )
+        if existing.returncode != 0 or existing.stdout.strip() != workflow_sha:
+            raise ReleaseError("release version already has a tag at a different commit")
+        validate_release_commit(tag, root=root)
+    return {
+        "pr": str(number),
+        "revision": workflow_sha,
+        "tag": tag,
+        "version": current_version(root),
+    }
 
 
 def _write_outputs(path: Path | None, values: dict[str, str]) -> None:
@@ -317,6 +402,11 @@ def main() -> None:
     detect.add_argument("--github-output", type=Path)
     validate = subparsers.add_parser("validate")
     validate.add_argument("--release-tag", required=True)
+    validate.add_argument("--release-commit")
+    resolve = subparsers.add_parser("resolve")
+    resolve.add_argument("--pull-request-file", type=Path, required=True)
+    resolve.add_argument("--workflow-sha", required=True)
+    resolve.add_argument("--github-output", type=Path)
     args = parser.parse_args()
 
     if args.command == "prepare":
@@ -336,8 +426,16 @@ def main() -> None:
             args.github_output,
             {"create": "true" if tag else "false", "tag": tag or ""},
         )
+    elif args.command == "validate":
+        validate_release_tag(args.release_tag, release_commit=args.release_commit)
     else:
-        validate_release_tag(args.release_tag)
+        pull_request = json.loads(args.pull_request_file.read_text())
+        if not isinstance(pull_request, dict):
+            raise ReleaseError("pull request response must be a JSON object")
+        _write_outputs(
+            args.github_output,
+            resolve_release_pr(pull_request, args.workflow_sha),
+        )
 
 
 if __name__ == "__main__":

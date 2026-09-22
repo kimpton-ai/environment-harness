@@ -21,8 +21,8 @@ The TypeScript client is currently a GitHub release asset, not an npm registry p
 Use Python 3.12 or later, uv 0.12.0, Node.js 22, and npm 11.17. Start from a clean release branch
 whose `dist/` directory contains no artifacts from another version.
 
-Repository administrators must first configure the protected branch, tag, `github-release`
-environment, `pypi` environment, and PyPI Trusted Publisher described in
+Repository administrators must first configure the protected branch, tag, `release-tag`,
+`github-release`, and `pypi` environments plus the PyPI Trusted Publisher described in
 [Required repository settings](../.github/REPOSITORY-SETTINGS.md). The publisher must target:
 
 - GitHub owner: `kimpton-ai`
@@ -54,6 +54,18 @@ the stable version. PyPI prereleases are immutable production-PyPI releases, but
 
 ## Prepare a release candidate
 
+Release preparation is an explicitly dispatched workflow that changes the coordinated version on a
+new branch and opens the required pull request. Run **Prepare release pull request** from GitHub
+Actions on `main`, then choose:
+
+- `bump`: `patch`, `minor`, or `major` for the first candidate on a release line; use `none` when
+  advancing or finalizing an existing prerelease; and
+- `stage`: `alpha`, `beta`, `rc`, `stable`, or `final`.
+
+The workflow never merges or publishes. It runs the same `release_version.py prepare` command
+documented below, commits only the coordinated version surfaces, and opens a `release/vX.Y.Z...`
+branch for normal CI, CODEOWNER review, and independent approval.
+
 ### 1. Finish the changelog
 
 Put every user-facing change under `## Unreleased` in `CHANGELOG.md`. Include compatibility or
@@ -61,7 +73,7 @@ migration guidance for intentionally incompatible changes.
 
 ### 2. Synchronize the release version
 
-For the first candidate on a new release line, choose the semantic version bump:
+For local validation or recovery, the equivalent first-candidate command is:
 
 ```sh
 python scripts/release_version.py prepare --bump patch --prerelease rc
@@ -78,7 +90,7 @@ Use `minor` or `major` when appropriate. The command synchronizes:
 
 Do not edit those versions separately.
 
-For another candidate on the same release line after adding new `Unreleased` notes:
+The equivalent command for another candidate on the same release line is:
 
 ```sh
 python scripts/release_version.py prepare --prerelease rc
@@ -113,52 +125,42 @@ dependency, and audit checks.
 The PostgreSQL integration test runs in CI against its configured service. Do not claim a local
 PostgreSQL pass when `ENVIRONMENT_HARNESS_POSTGRES_URL` was absent and the test was skipped.
 
-### 5. Review and merge the release pull request
+### 5. Review and merge the release pull request last
 
 Use the normal protected-branch process. At least one independent maintainer and every applicable
-CODEOWNER must review the complete commit range. Do not create the tag before the release pull
-request merges.
+CODEOWNER must review the complete commit range. Merge all intended code and documentation before
+the release pull request. The publishing workflow requires the release PR merge commit to remain the
+current `main` commit; if later work lands, prepare a newer candidate instead of tagging that later
+commit.
 
 ## Publish the reviewed commit
 
-### 1. Record the release merge commit
+### 1. Dispatch the reviewed release PR
 
-Copy the release pull request's merge commit SHA from GitHub. If later work has landed on `main`, do
-not replace it with the newest commit.
+Run **Attested GitHub release** from GitHub Actions on `main` and enter only the merged release pull
+request number. Do not type a version or create a tag locally. The workflow reads the coordinated
+version from the reviewed merge commit and derives the tag.
 
-### 2. Detect the expected tag at that commit
+The workflow fails before creating a tag unless the pull request:
 
-Fetch `main` and tags, then detach at the recorded merge commit:
+- is merged into `main`;
+- produced the exact commit running the workflow;
+- introduces a version newer than its first parent; and
+- names a version and tag that do not conflict with a different release commit.
 
-```sh
-git fetch origin main --tags
-git switch --detach RELEASE_MERGE_SHA
-python scripts/release_version.py detect
-```
+### 2. Approve publication independently
 
-The command reports whether a tag should be created and its exact name.
+The workflow:
 
-### 3. Create and push only the protected tag
-
-```sh
-git tag vX.Y.ZrcN RELEASE_MERGE_SHA
-git push origin refs/tags/vX.Y.ZrcN
-```
-
-Never move, replace, or rebuild artifacts under an existing release tag or PyPI version.
-
-### 4. Approve publication independently
-
-The tag starts `.github/workflows/release.yml`. The workflow:
-
-1. proves that the tag target, checked-out commit, and workflow SHA are the same commit on `main`;
-2. rebuilds and validates the coordinated artifacts;
-3. creates build-provenance attestations;
-4. waits for independent approval in `github-release`;
-5. creates an immutable GitHub release; and
-6. waits for independent approval in `pypi` before Trusted Publishing.
+1. resolves the merged release PR and derives its version and tag;
+2. rebuilds, validates, and attests the coordinated artifacts before creating a public ref;
+3. waits for independent approval in `release-tag`, then creates the immutable tag;
+4. waits for independent approval in `github-release`, then creates the immutable GitHub release;
+   and
+5. waits for independent approval in `pypi` before Trusted Publishing.
 
 The approver must not be the release pull request author or automation initiator.
+Never move, replace, or rebuild artifacts under an existing release tag or PyPI version.
 
 ## Verify a published candidate
 
@@ -187,7 +189,8 @@ candidate instead.
 
 ## Finalize the release
 
-After the candidate is approved, add any final user-facing notes under `Unreleased`, then run:
+After the candidate is approved, add any final user-facing notes under `Unreleased`, then run
+**Prepare release pull request** with bump `none` and stage `final`. The equivalent local command is:
 
 ```sh
 python scripts/release_version.py prepare --final
@@ -203,7 +206,8 @@ needed.
 | Failure | Response |
 | --- | --- |
 | A release check fails before merge | Fix it in the release pull request and rerun all affected checks |
-| The tag points at the wrong commit | Do not bypass the workflow; create the correct new version after maintainer review |
+| A manually created tag points at the wrong commit | It cannot start publication; leave it immutable and prepare the next candidate |
+| The release PR is no longer the current `main` commit | Merge no unrelated commit into the release; prepare the next candidate through a new release PR |
 | GitHub publication fails before creating a release | Fix the workflow or environment and rerun only after confirming the artifact identity contract |
 | A published candidate is incorrect | Leave it immutable and publish the next candidate |
 | The final version is incorrect on PyPI | Do not overwrite it; follow PyPI incident policy and prepare a new patch release |

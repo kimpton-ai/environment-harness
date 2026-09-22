@@ -33,6 +33,7 @@ def configure_release_workflows(tmp_path):
     workflows.mkdir(parents=True)
     source = Path(__file__).resolve().parents[1] / ".github/workflows"
     shutil.copyfile(source / "release.yml", workflows / "release.yml")
+    shutil.copyfile(source / "release-prepare.yml", workflows / "release-prepare.yml")
     return workflows
 
 
@@ -125,10 +126,25 @@ def test_release_commit_accepts_version_introducing_parent(monkeypatch):
 def test_release_workflow_requires_commit_binding(tmp_path, monkeypatch):
     workflows = configure_release_workflows(tmp_path)
     release = workflows / "release.yml"
-    release.write_text(release.read_text().replace('test "$GITHUB_SHA" = "$release_commit"', "true"))
+    release.write_text(release.read_text().replace('test "$GITHUB_SHA" = "$RELEASE_SHA"', "true"))
     monkeypatch.setattr(check_repository, "ROOT", tmp_path)
 
     with pytest.raises(check_repository.PolicyError, match="attested workflow commit"):
+        check_repository.check_release_workflow_binding()
+
+
+def test_release_workflow_cannot_publish_from_a_tag_push(tmp_path, monkeypatch):
+    workflows = configure_release_workflows(tmp_path)
+    release = workflows / "release.yml"
+    release.write_text(
+        release.read_text().replace(
+            "on:\n  workflow_dispatch:",
+            'on:\n  push:\n    tags: ["v*"]\n  workflow_dispatch:',
+        )
+    )
+    monkeypatch.setattr(check_repository, "ROOT", tmp_path)
+
+    with pytest.raises(check_repository.PolicyError, match="manual-only"):
         check_repository.check_release_workflow_binding()
 
 
@@ -185,14 +201,15 @@ def test_dependabot_routine_update_policy_fails_closed(tmp_path, monkeypatch, co
 @pytest.mark.parametrize(
     ("required", "description"),
     [
-        ('"v[0-9]+.[0-9]+.[0-9]+"', "final PEP 440 tag trigger"),
-        ('"v[0-9]+.[0-9]+.[0-9]+rc[0-9]+"', "release-candidate tag trigger"),
-        ("RELEASE_TAG: ${{ github.ref_name }}", "event tag binding"),
+        ("release_pr:", "merged release PR input"),
+        ("python scripts/release_version.py resolve", "release PR resolution"),
+        ("environment: release-tag", "protected tag environment"),
+        ('--field ref="refs/tags/$RELEASE_TAG"', "protected tag creation"),
         ('cache: ""', "disabled setup-node package cache"),
         ("cd dist && sha256sum -- * > SHA256SUMS", "download-friendly checksum paths"),
     ],
 )
-def test_release_workflow_requires_tag_event_binding(tmp_path, monkeypatch, required, description):
+def test_release_workflow_requires_reviewed_dispatch_binding(tmp_path, monkeypatch, required, description):
     workflows = configure_release_workflows(tmp_path)
     release = workflows / "release.yml"
     release.write_text(release.read_text().replace(required, "removed"))
@@ -230,6 +247,23 @@ def test_release_workflows_exclude_long_lived_app_credentials():
     assert "actions/create-github-app-token@" not in workflow_text
     assert "private-key:" not in workflow_text
     assert LEGACY_APP_CREDENTIAL not in workflow_text
+
+
+def test_release_workflows_prepare_a_pr_and_publish_only_its_exact_merge():
+    workflows = Path(__file__).resolve().parents[1] / ".github/workflows"
+    prepare = (workflows / "release-prepare.yml").read_text()
+    publish = (workflows / "release.yml").read_text()
+
+    assert "workflow_dispatch:" in prepare
+    assert "bump:" in prepare
+    assert "stage:" in prepare
+    assert "python scripts/release_version.py prepare" in prepare
+    assert "gh pr create" in prepare
+    assert "workflow_dispatch:" in publish
+    assert "release_pr:" in publish
+    assert "python scripts/release_version.py resolve" in publish
+    assert "environment: release-tag" in publish
+    assert "push:\n    tags:" not in publish
 
 
 def test_regression_proof_requires_an_actual_test_failure():
@@ -394,6 +428,66 @@ def test_release_candidate_tags_follow_pep440_ordering():
     assert release_version.select_release_tag("0.3.0rc2", ["v0.3.0rc1"], changelog) == "v0.3.0rc2"
     with pytest.raises(release_version.ReleaseError, match="older than existing release"):
         release_version.select_release_tag("0.3.0rc1", ["v0.3.0rc2"], changelog)
+
+
+def test_detect_release_tag_rejects_a_later_non_version_commit(tmp_path):
+    release_version = load_script("release_version")
+    configure_release_tree(tmp_path)
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Release Test"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "release@example.invalid"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-m", "base"], cwd=tmp_path, check=True, capture_output=True)
+    release_version.prepare_release(tmp_path, "patch", prerelease="rc")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-m", "release"], cwd=tmp_path, check=True, capture_output=True)
+
+    assert release_version.detect_release_tag(tmp_path) == "v0.2.3rc1"
+
+    (tmp_path / "README.md").write_text((tmp_path / "README.md").read_text() + "\nLater docs.\n")
+    subprocess.run(["git", "add", "README.md"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-m", "docs"], cwd=tmp_path, check=True, capture_output=True)
+
+    with pytest.raises(release_version.ReleaseError, match="must introduce a version newer"):
+        release_version.detect_release_tag(tmp_path)
+
+
+def test_resolve_release_pr_requires_the_exact_merged_main_commit(tmp_path):
+    release_version = load_script("release_version")
+    configure_release_tree(tmp_path)
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Release Test"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "release@example.invalid"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-m", "base"], cwd=tmp_path, check=True, capture_output=True)
+    release_version.prepare_release(tmp_path, "patch", prerelease="rc")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-m", "release"], cwd=tmp_path, check=True, capture_output=True)
+    revision = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=tmp_path, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    pull_request = {
+        "number": 29,
+        "state": "closed",
+        "merged_at": "2026-09-22T03:17:52Z",
+        "merge_commit_sha": revision,
+        "base": {"ref": "main"},
+    }
+
+    assert release_version.resolve_release_pr(pull_request, revision, tmp_path) == {
+        "pr": "29",
+        "revision": revision,
+        "tag": "v0.2.3rc1",
+        "version": "0.2.3rc1",
+    }
+
+    pull_request["merge_commit_sha"] = "0" * 40
+    with pytest.raises(release_version.ReleaseError, match="exact merged release PR commit"):
+        release_version.resolve_release_pr(pull_request, revision, tmp_path)
+
+    pull_request["merge_commit_sha"] = revision
+    subprocess.run(["git", "tag", "v0.2.3rc1", revision], cwd=tmp_path, check=True)
+    assert release_version.resolve_release_pr(pull_request, revision, tmp_path)["tag"] == ("v0.2.3rc1")
 
 
 def npm_lock(name="example", version="1.0.0"):
@@ -569,6 +663,24 @@ def test_malicious_workflow_trigger_is_rejected(tmp_path, monkeypatch):
     monkeypatch.setattr(check_repository, "ROOT", tmp_path)
 
     with pytest.raises(check_repository.PolicyError, match="pull_request_target"):
+        check_repository.check_workflows(datetime(2026, 9, 17, tzinfo=UTC), False)
+
+
+def test_release_prepare_write_checkout_is_manual_only(tmp_path, monkeypatch):
+    workflows = tmp_path / ".github/workflows"
+    workflows.mkdir(parents=True)
+    (tmp_path / ".github/action-pins.json").write_text("{}")
+    (workflows / "release-prepare.yml").write_text(
+        "name: unsafe release preparation\n"
+        "on:\n  pull_request:\n"
+        "permissions: {}\n"
+        "jobs:\n  prepare:\n    permissions:\n      contents: write\n      pull-requests: write\n"
+        "    steps:\n      - uses: ./synthetic-checkout\n        with:\n"
+        "          persist-credentials: false\n"
+    )
+    monkeypatch.setattr(check_repository, "ROOT", tmp_path)
+
+    with pytest.raises(check_repository.PolicyError, match="manual-only"):
         check_repository.check_workflows(datetime(2026, 9, 17, tzinfo=UTC), False)
 
 

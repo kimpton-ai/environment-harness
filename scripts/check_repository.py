@@ -322,13 +322,18 @@ def check_release_commit(release_tag: str) -> None:
 
 def check_release_workflow_binding() -> None:
     release = (ROOT / ".github/workflows/release.yml").read_text()
+    prepare = (ROOT / ".github/workflows/release-prepare.yml").read_text()
+    if re.search(r"(?m)^\s*push\s*:", release):
+        raise PolicyError("release.yml must remain a manual-only publisher")
     release_required = {
-        '"v[0-9]+.[0-9]+.[0-9]+"': "final PEP 440 tag trigger",
-        '"v[0-9]+.[0-9]+.[0-9]+rc[0-9]+"': "release-candidate tag trigger",
-        "RELEASE_TAG: ${{ github.ref_name }}": "event tag binding",
-        'test "$GITHUB_SHA" = "$release_commit"': "attested workflow commit",
-        'git merge-base --is-ancestor "$release_commit" origin/main': "main ancestry",
+        "workflow_dispatch:": "manual release dispatch",
+        "release_pr:": "merged release PR input",
+        "python scripts/release_version.py resolve": "release PR resolution",
+        'test "$GITHUB_SHA" = "$RELEASE_SHA"': "attested workflow commit",
+        'git merge-base --is-ancestor "$RELEASE_SHA" origin/main': "main ancestry",
         '--release-tag "$RELEASE_TAG"': "tag-to-package version binding",
+        "environment: release-tag": "protected tag environment",
+        '--field ref="refs/tags/$RELEASE_TAG"': "protected tag creation",
         "uv build --no-build-isolation": "frozen build environment",
         'gh attestation verify "$artifact"': "per-artifact provenance verification",
         'cmp "$artifact" "$released/$(basename "$artifact")"': "idempotent artifact comparison",
@@ -341,6 +346,17 @@ def check_release_workflow_binding() -> None:
     missing = [description for snippet, description in release_required.items() if snippet not in release]
     if missing:
         raise PolicyError("release workflow lacks " + ", ".join(missing))
+    prepare_required = {
+        "workflow_dispatch:": "manual preparation dispatch",
+        "bump:": "release bump input",
+        "stage:": "release stage input",
+        "python scripts/release_version.py prepare": "coordinated release preparation",
+        "python scripts/release_version.py validate": "prepared commit validation",
+        "gh pr create": "reviewed release pull request",
+    }
+    missing = [description for snippet, description in prepare_required.items() if snippet not in prepare]
+    if missing:
+        raise PolicyError("release preparation workflow lacks " + ", ".join(missing))
     release_artifact_downloads = release.count("artifact-ids: ${{ needs.build.outputs.artifact-id }}")
     python_artifact_downloads = release.count("artifact-ids: ${{ needs.build.outputs.python-artifact-id }}")
     artifact_downloads = release_artifact_downloads + python_artifact_downloads
@@ -602,6 +618,16 @@ def check_workflows(now: datetime, full: bool) -> None:
     used: set[str] = set()
     for path in sorted((ROOT / ".github/workflows").glob("*.y*ml")):
         text = path.read_text()
+        if path.name == "release-prepare.yml":
+            unsafe_trigger = re.search(r"(?m)^\s*(?:pull_request|push|schedule|workflow_run)\s*:", text)
+            required = (
+                "workflow_dispatch:",
+                "contents: write",
+                "pull-requests: write",
+                'test "$GITHUB_REF" = refs/heads/main',
+            )
+            if unsafe_trigger or any(item not in text for item in required):
+                raise PolicyError("release-prepare.yml must remain a main-bound, manual-only write workflow")
         if re.search(r"(?m)^\s*pull_request_target\s*:", text):
             raise PolicyError(f"pull_request_target is prohibited in {path.name}")
         if re.search(r"(?m)^\s*workflow_run\s*:", text):
@@ -613,7 +639,11 @@ def check_workflows(now: datetime, full: bool) -> None:
                 raise PolicyError(f"pull request workflow {path.name} may not access repository secrets")
         if not re.search(r"(?m)^permissions:\s*\{\}\s*$", text):
             raise PolicyError(f"{path.name} must default to permissions: {{}}")
-        if "actions/checkout" in text and "permissions:\n      contents: read" not in text:
+        if (
+            "actions/checkout" in text
+            and path.name != "release-prepare.yml"
+            and "permissions:\n      contents: read" not in text
+        ):
             raise PolicyError(f"checkout jobs in {path.name} must grant only contents: read")
         if "actions/checkout" in text and "persist-credentials: false" not in text:
             raise PolicyError(f"{path.name} checkout must disable persisted credentials")
