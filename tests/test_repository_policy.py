@@ -233,11 +233,10 @@ def test_release_workflows_exclude_long_lived_app_credentials():
 
 
 def test_regression_proof_requires_an_actual_test_failure():
-    for returncode in (1, 2):
-        check_regression_tests.require_regression_test_failure(returncode)
+    check_regression_tests.require_regression_test_failure(1)
     with pytest.raises(SystemExit, match="also pass"):
         check_regression_tests.require_regression_test_failure(0)
-    for returncode in (3, 4, 5):
+    for returncode in (2, 3, 4, 5):
         with pytest.raises(SystemExit, match=f"exit code {returncode}"):
             check_regression_tests.require_regression_test_failure(returncode)
 

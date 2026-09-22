@@ -33,7 +33,7 @@ def git(*arguments: str, text: bool = False):
 def require_regression_test_failure(returncode: int) -> None:
     if returncode == 0:
         raise SystemExit("changed regression tests also pass on the base revision")
-    if returncode not in {1, 2}:
+    if returncode != 1:
         raise SystemExit(f"regression proof runner failed with exit code {returncode}")
 
 
