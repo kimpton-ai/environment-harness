@@ -34,13 +34,6 @@ Install the latest stable release:
 python -m pip install "environment-harness[server]"
 ```
 
-To test a release candidate, request its exact version because ordinary `pip install` excludes
-prereleases:
-
-```sh
-python -m pip install "environment-harness[server]==X.Y.ZrcN"
-```
-
 Create synthetic environment sessions in a named store:
 
 ```sh
