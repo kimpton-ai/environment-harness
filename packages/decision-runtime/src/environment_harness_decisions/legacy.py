@@ -1,4 +1,4 @@
-"""Read-only readers for pre-decision-runtime Minecraft run journals.
+"""Read-only readers for pre-decision-runtime run journals.
 
 The reader never opens the application store through its normal constructor,
 because that constructor repairs restart state.  Migration code can therefore
@@ -6,17 +6,13 @@ inspect a saved run and copy its evidence without changing the source.
 """
 from __future__ import annotations
 
-import hashlib
 import json
-import shutil
 import sqlite3
-import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-
-LEGACY_READER_VERSION = "minecraft-legacy-reader@1"
+LEGACY_READER_VERSION = "legacy-run-reader@1"
 
 
 def _read_table(db: sqlite3.Connection, table: str) -> tuple[dict[str, Any], ...]:
@@ -66,34 +62,13 @@ def read_legacy_run(path: str | Path) -> LegacyRun:
     databases = _database_paths(root)
     goals = messages = events = attempts = leases = successors = ()
     for database in databases:
-        db = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
-        db.row_factory = sqlite3.Row
-        try:
+        from .migration import readonly_database
+        with readonly_database(database) as db:
             goals += _read_table(db, "goals")
             messages += _read_table(db, "messages")
             events += _read_table(db, "events")
             attempts += _read_table(db, "attempts")
             leases += _read_table(db, "operation_leases")
             successors += _read_table(db, "motor_successors")
-        finally:
-            db.close()
+    
     return LegacyRun(root, databases, goals, messages, events, attempts, leases, successors)
-
-
-def commit_segment(source: LegacyRun, destination: str | Path, *, source_identity: dict[str, Any] | None = None,
-                   destination_identity: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Create a linked SDK segment.  This only writes the destination."""
-    target = Path(destination).expanduser().resolve()
-    target.mkdir(parents=True, exist_ok=False)
-    copied = []
-    for database in source.databases:
-        output = target / database.name
-        shutil.copy2(database, output)
-        copied.append({"source": str(database), "destination": str(output),
-                       "sha256": hashlib.sha256(output.read_bytes()).hexdigest()})
-    manifest = {"schema": "decision-runtime-migration@1", "migration_id": uuid.uuid4().hex,
-                "reader": LEGACY_READER_VERSION, "source_identity": source_identity or source.identity(),
-                "destination_identity": destination_identity or {}, "databases": copied,
-                "budgets_retained": True, "evidence_retained": True, "phase": "committed"}
-    (target / "source-link.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
-    return manifest
