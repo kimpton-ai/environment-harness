@@ -239,6 +239,22 @@ def describe(event) -> str:
         return f"Score report revision {payload.get('revision')} recorded."
     if kind == "artifact":
         return f"Artifact {payload.get('id')} recorded."
+    if kind == "operation.intent":
+        request = payload.get("request") or {}
+        return (
+            f"{payload.get('participant')} prepared {request.get('operation')} "
+            f"as operation {payload.get('id')}."
+        )
+    if kind == "operation.dispatched":
+        return f"Operation {payload.get('id')} dispatched under lease epoch {payload.get('epoch')}."
+    if kind == "operation.receipt":
+        receipt = {
+            key.replace("_", " "): value
+            for key, value in (payload.get("receipt") or {}).items()
+            if key != "operation_id"
+        }
+        summary = scalars(receipt)
+        return f"Operation {payload.get('id')} completed{f': {summary}' if summary else ''}."
     if kind == "observation.delivered":
         return f"{participant_of(event)} observed {scalars(payload.get('payload'))}."
     if kind == "action.attempted":

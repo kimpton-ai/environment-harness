@@ -18,8 +18,9 @@ let activityCursor = 0;
 let activityTimer = 0;
 let activityFailures = 0;
 let homePage = 1;
+let focusedExperiment = null;
+let focusedScenario = null;
 const expandedExperiments = new Set();
-const expandedScenarios = new Set();
 let sessionTab = 'overview';
 let selectedTurnIndex = -1;
 let selectedParticipant = null;
@@ -297,6 +298,14 @@ function mapping(value) {
 const known = (id) => catalog.find(row => row.id === id);
 function reference(id) { const item = known(id); return item ? `${title(item)} ${shortId(id)}` : shortId(id); }
 const sessionPath = (id, tab) => `/session/${encodeURIComponent(id)}/${tab}`;
+function experimentPath(id, tab, scenario) {
+    const root = `/experiment/${encodeURIComponent(id)}`;
+    if (tab === 'overview')
+        return root;
+    if (tab === 'scenarios' && scenario)
+        return `${root}/scenarios/${encodeURIComponent(scenario)}`;
+    return `${root}/${tab}`;
+}
 function selectedEnvironments(parameters) {
     return [...new Set(parameters.getAll('environment').filter(Boolean))].slice(0, 100);
 }
@@ -332,6 +341,33 @@ function routeFromLocation() {
                 startTurn,
                 endTurn: endTurn !== undefined && (startTurn === undefined || endTurn >= startTurn) ? endTurn : undefined,
             } };
+    }
+    const experimentScenario = path.match(/^\/experiment\/([^/]+)\/scenarios\/([^/]+)$/);
+    if (experimentScenario) {
+        try {
+            return { kind: 'experiment', id: decodeURIComponent(experimentScenario[1]), tab: 'scenarios', scenario: decodeURIComponent(experimentScenario[2]) };
+        }
+        catch {
+            return null;
+        }
+    }
+    const experimentSection = path.match(/^\/experiment\/([^/]+)\/(scenarios|sessions)$/);
+    if (experimentSection) {
+        try {
+            return { kind: 'experiment', id: decodeURIComponent(experimentSection[1]), tab: experimentSection[2] };
+        }
+        catch {
+            return null;
+        }
+    }
+    const experiment = path.match(/^\/experiment\/([^/]+)$/);
+    if (experiment) {
+        try {
+            return { kind: 'experiment', id: decodeURIComponent(experiment[1]), tab: 'overview' };
+        }
+        catch {
+            return null;
+        }
     }
     const match = path.match(/^\/session\/([^/]+)(?:\/(overview|turns|progression|reports))?$/);
     if (!match)
@@ -596,7 +632,11 @@ function renderList() {
         holder.scrollLeft = tableScroll.left;
     });
     holder.replaceChildren();
-    const snapshot = activitySnapshot;
+    const snapshot = activitySnapshot && focusedExperiment ? {
+        ...activitySnapshot,
+        experiments: activitySnapshot.experiments.filter(item => item.id === focusedExperiment),
+        standalone: [],
+    } : activitySnapshot;
     const totalSessions = snapshot ? snapshot.standalone.length + snapshot.experiments.reduce((sum, item) => sum + item.sessions.length, 0) : catalog.length;
     el('experiment-count').textContent = String(snapshot?.experiments.length ?? 0);
     el('scenario-count').textContent = String(snapshot?.experiments.reduce((sum, item) => sum + item.scenarios.length, 0) ?? 0);
@@ -663,7 +703,7 @@ function renderList() {
         const session = text('span', '', 'home-session-cell');
         const button = text('button', sessionTitle(item), 'session-name');
         button.onclick = () => void attempt(() => attach(item.id));
-        session.append(button, text('small', `${item.parent ? 'Branch' : 'Original'} · ${shortId(item.id)}`));
+        session.append(button, text('small', `${item.parent ? 'Branch' : 'Original'} · ${participantSummary(item.participants)} · ${shortId(item.id)}`));
         row.append(check, session, text('span', 'Session', 'home-session-value'), text('span', sessionStatus(item.status), 'session-status'), text('span', '1', 'home-session-value'), text('span', formatCompactCount(item.revision), 'home-session-value'));
         holder.append(row);
     }
@@ -674,24 +714,48 @@ function renderList() {
     restoreTableScroll();
 }
 function activitySearch(session) {
-    return [session.scenario_id, session.id, session.status, session.participants.join(' '), session.latest_activity ?? '', session.failure ?? '', session.environment.implementation ?? ''].join(' ').toLowerCase();
+    return [session.scenario_id, session.id, session.status, session.participants.join(' '), session.latest_activity ?? '',
+        session.failure ?? '', session.environment.implementation ?? '', JSON.stringify(session.frozen.scenario_metadata ?? {})]
+        .join(' ').toLowerCase();
 }
 function activityMatches(session, query, status) {
     return (!query || activitySearch(session).includes(query)) && (!status || statusFilter(session.status) === status);
 }
-const scenarioKey = (experiment, scenario) => `${experiment}:${scenario}`;
-const totalRecordedTurns = (sessions) => sessions.reduce((total, session) => total + session.current_turn, 0);
-function scenarioSearch(scenario) {
-    return [scenario.id, scenario.status, scenario.latest_activity ?? '', JSON.stringify(scenario.input), JSON.stringify(scenario.metadata)].join(' ').toLowerCase();
+function participantSummary(participants) {
+    return participants.length ? participants.map(participantName).join(', ') : 'Not recorded';
 }
-function childActivityRow(session, scenario) {
+function sessionProgress(session) {
+    return session.target_turns === null ? `${formatCompactCount(session.current_turn)} turns`
+        : `${formatCompactCount(session.current_turn)} of ${formatCompactCount(session.target_turns)} turns`;
+}
+const totalRecordedTurns = (sessions) => sessions.reduce((total, session) => total + session.current_turn, 0);
+function sessionActivity(session) {
+    return session.failure ? `Failed: ${session.failure}` : session.latest_activity ?? 'No activity recorded';
+}
+function scenarioFor(experiment, session) {
+    return experiment.scenarios.find(scenario => scenario.id === session.scenario_id);
+}
+function experimentSearch(experiment) {
+    return [experiment.name, experiment.status, experiment.latest_activity ?? '', Object.keys(experiment.score_summary).join(' ')]
+        .join(' ').toLowerCase();
+}
+function experimentDetail(experiment, matches = null) {
+    const score = Object.entries(experiment.score_summary).slice(0, 2)
+        .map(([name, value]) => `${name} ${formatCompactCount(value)}`).join(' · ');
+    const coverage = matches === null
+        ? `${experiment.progress.completed} of ${experiment.progress.total} sessions complete`
+        : `${matches} matching of ${experiment.sessions.length} sessions`;
+    return [coverage, `${experiment.running} running`, experiment.latest_activity, score].filter(Boolean).join(' · ');
+}
+function childActivityRow(session, experiment) {
     const row = text('div', '', 'home-session-row scenario-session');
     row.dataset.sessionId = session.id;
     row.dataset.turnCount = String(session.current_turn);
     const check = document.createElement('input');
     check.type = 'checkbox';
     check.checked = selected.has(session.id);
-    const name = `${scenarioTitle(scenario)} · Trial ${session.trial}`;
+    const scenario = scenarioFor(experiment, session);
+    const name = `${scenario ? scenarioTitle(scenario) : session.scenario_id} · Trial ${session.trial}`;
     check.setAttribute('aria-label', `Select ${name}`);
     check.onchange = () => {
         check.checked ? selected.add(session.id) : selected.delete(session.id);
@@ -701,7 +765,7 @@ function childActivityRow(session, scenario) {
     const identity = text('span', '', 'home-session-cell');
     const button = text('button', name, 'session-name');
     button.onclick = () => void attempt(() => attach(session.id));
-    identity.append(button, text('small', `Session · ${shortId(session.id)}`));
+    identity.append(button, text('small', `${session.scenario_id} · ${participantSummary(session.participants)} · ${sessionProgress(session)} · ${sessionActivity(session)} · Session ${shortId(session.id)}`));
     row.append(check, identity, text('span', 'Session', 'home-session-value'), text('span', sessionStatus(session.status), 'session-status'), text('span', '1', 'home-session-value'), text('span', formatCompactCount(session.current_turn), 'home-session-value'));
     return row;
 }
@@ -722,7 +786,7 @@ function standaloneActivityRow(session) {
     const identity = text('span', '', 'home-session-cell');
     const button = text('button', item ? sessionTitle(item) : session.scenario_id, 'session-name');
     button.onclick = () => void attempt(() => attach(session.id));
-    identity.append(button, text('small', `Standalone · ${shortId(session.id)}`));
+    identity.append(button, text('small', `Standalone · ${participantSummary(session.participants)} · ${sessionProgress(session)} · ${sessionActivity(session)} · ${shortId(session.id)}`));
     row.append(check, identity, text('span', 'Session', 'home-session-value'), text('span', sessionStatus(session.status), 'session-status'), text('span', '1', 'home-session-value'), text('span', formatCompactCount(session.current_turn), 'home-session-value'));
     return row;
 }
@@ -733,30 +797,25 @@ function renderActivityRows(holder, snapshot, query, status, sort) {
     holder.append(header);
     const hasFilter = Boolean(query || status);
     const experiments = snapshot.experiments.map(item => {
-        const parent = (!query || [item.name, item.status, item.latest_activity ?? ''].join(' ').toLowerCase().includes(query)) && (!status || statusFilter(item.status) === status);
-        const scenarios = item.scenarios.map(scenario => ({
-            item: scenario,
-            matches: scenario.sessions.filter(session => activityMatches(session, query, status)),
-            parent: (!query || scenarioSearch(scenario).includes(query)) && (!status || statusFilter(scenario.status) === status),
-        })).filter(group => !hasFilter || group.parent || group.matches.length);
-        return { item, parent, scenarios };
-    }).filter(group => group.parent || group.scenarios.length);
+        const parent = (!query || experimentSearch(item).includes(query))
+            && (!status || statusFilter(item.status) === status);
+        const matches = item.sessions.filter(session => activityMatches(session, query, status));
+        return { item, parent, matches };
+    }).filter(group => group.parent || group.matches.length);
     experiments.sort((a, b) => sort === 'oldest' ? a.item.updated - b.item.updated : b.item.updated - a.item.updated);
     const standalone = snapshot.standalone.filter(session => activityMatches(session, query, status));
     standalone.sort((a, b) => sort === 'oldest' ? a.updated - b.updated : b.updated - a.updated);
     const visible = experiments.reduce((count, group) => count + (hasFilter && !group.parent
-        ? group.scenarios.flatMap(scenario => scenario.matches).length
-        : group.scenarios.reduce((sum, scenario) => sum + scenario.item.sessions.length, 0)), 0) + standalone.length;
+        ? group.matches.length : group.item.sessions.length), 0) + standalone.length;
     const page = homePageSlice([
         ...experiments.map(group => ({ kind: 'experiment', id: group.item.id })),
         ...standalone.map(session => ({ kind: 'session', id: session.id })),
     ]);
     const visibleExperiments = new Set(page.filter(entry => entry.kind === 'experiment').map(entry => entry.id));
     const visibleStandalone = new Set(page.filter(entry => entry.kind === 'session').map(entry => entry.id));
-    for (const { item, scenarios } of experiments) {
+    for (const { item, parent, matches } of experiments) {
         if (!visibleExperiments.has(item.id))
             continue;
-        const matchingSessions = scenarios.flatMap(group => group.matches);
         const row = text('div', '', 'home-session-row experiment-parent');
         row.dataset.experimentId = item.id;
         const experimentCheck = document.createElement('input');
@@ -772,18 +831,18 @@ function renderActivityRows(holder, snapshot, query, status, sort) {
                 experimentCheck.checked ? selected.add(session.id) : selected.delete(session.id);
             if (experimentCheck.checked) {
                 expandedExperiments.add(item.id);
-                for (const scenario of item.scenarios)
-                    expandedScenarios.add(scenarioKey(item.id, scenario.id));
             }
             persistSelection();
             renderList();
         };
         const identity = text('span', '', 'home-session-cell experiment-identity');
-        const name = text('strong', item.name, 'experiment-name');
-        const forcedOpen = Boolean(hasFilter && scenarios.length);
+        const name = text('a', item.name, 'experiment-name');
+        name.href = `/experiment/${encodeURIComponent(item.id)}`;
+        name.onclick = event => { event.preventDefault(); event.stopPropagation(); showExperiment(item.id); };
+        const forcedOpen = Boolean(hasFilter && matches.length);
         const open = expandedExperiments.has(item.id) || forcedOpen;
-        const disclosure = text('button', open ? 'Hide scenarios' : `View ${item.scenarios.length} scenarios`, 'experiment-disclosure');
-        const childId = `experiment-${item.id}-scenarios`;
+        const disclosure = text('button', open ? 'Hide sessions' : `View ${item.sessions.length} sessions`, 'experiment-disclosure');
+        const childId = `experiment-${item.id}-sessions`;
         disclosure.setAttribute('aria-expanded', String(open));
         disclosure.setAttribute('aria-controls', childId);
         const toggleExperiment = () => { expandedExperiments.has(item.id) ? expandedExperiments.delete(item.id) : expandedExperiments.add(item.id); renderList(); };
@@ -801,8 +860,8 @@ function renderActivityRows(holder, snapshot, query, status, sort) {
             }
         };
         const identityCopy = text('span', '', 'experiment-identity-copy');
-        identityCopy.append(name, text('small', hasFilter && matchingSessions.length ? `${matchingSessions.length} matching of ${item.sessions.length} sessions` : `${item.scenarios.length} scenarios · ${item.sessions.length} environment sessions`));
-        identity.append(disclosure, identityCopy);
+        identityCopy.append(name, text('small', experimentDetail(item, hasFilter && !parent ? matches.length : null)), disclosure);
+        identity.append(identityCopy);
         row.onclick = event => {
             if (event.target.closest('input, button, a'))
                 return;
@@ -813,64 +872,9 @@ function renderActivityRows(holder, snapshot, query, status, sort) {
         if (open) {
             const group = text('div', '', 'experiment-children');
             group.id = childId;
-            for (const scenarioGroup of scenarios) {
-                const scenario = scenarioGroup.item;
-                const key = scenarioKey(item.id, scenario.id);
-                const scenarioRow = text('div', '', 'home-session-row scenario-row');
-                scenarioRow.dataset.scenarioId = scenario.id;
-                const scenarioCheck = document.createElement('input');
-                scenarioCheck.type = 'checkbox';
-                const selectedSessions = scenario.sessions.filter(session => selected.has(session.id)).length;
-                scenarioCheck.checked = Boolean(scenario.sessions.length) && selectedSessions === scenario.sessions.length;
-                scenarioCheck.indeterminate = selectedSessions > 0 && selectedSessions < scenario.sessions.length;
-                scenarioCheck.setAttribute('aria-label', `Select all sessions in ${scenarioTitle(scenario)}`);
-                scenarioCheck.onclick = event => event.stopPropagation();
-                scenarioCheck.onchange = () => {
-                    for (const session of scenario.sessions)
-                        scenarioCheck.checked ? selected.add(session.id) : selected.delete(session.id);
-                    if (scenarioCheck.checked)
-                        expandedScenarios.add(key);
-                    persistSelection();
-                    renderList();
-                };
-                const scenarioIdentity = text('span', '', 'home-session-cell scenario-identity');
-                const scenarioName = text('strong', scenarioTitle(scenario), 'scenario-name');
-                const scenarioForcedOpen = Boolean(hasFilter && scenarioGroup.matches.length);
-                const scenarioOpen = expandedScenarios.has(key) || scenarioForcedOpen;
-                const scenarioDisclosure = text('button', scenarioOpen ? 'Hide sessions' : `View ${scenario.sessions.length} sessions`, 'scenario-disclosure');
-                const sessionsId = `scenario-${item.id}-${scenario.id}-sessions`;
-                scenarioDisclosure.setAttribute('aria-expanded', String(scenarioOpen));
-                scenarioDisclosure.setAttribute('aria-controls', sessionsId);
-                const toggleScenario = () => { expandedScenarios.has(key) ? expandedScenarios.delete(key) : expandedScenarios.add(key); renderList(); };
-                scenarioDisclosure.onclick = event => { event.stopPropagation(); toggleScenario(); };
-                scenarioDisclosure.onkeydown = event => {
-                    if (event.key === 'ArrowRight' && !expandedScenarios.has(key)) {
-                        event.preventDefault();
-                        expandedScenarios.add(key);
-                        renderList();
-                    }
-                    if (event.key === 'ArrowLeft' && expandedScenarios.has(key)) {
-                        event.preventDefault();
-                        expandedScenarios.delete(key);
-                        renderList();
-                    }
-                };
-                const scenarioCopy = text('span', '', 'scenario-identity-copy');
-                scenarioCopy.append(scenarioName, text('small', scenarioForcedOpen ? `${scenarioGroup.matches.length} matching of ${scenario.sessions.length} sessions` : 'Frozen configuration'));
-                scenarioIdentity.append(scenarioDisclosure, scenarioCopy);
-                scenarioRow.onclick = event => { if (!event.target.closest('input, button, a'))
-                    toggleScenario(); };
-                scenarioRow.append(scenarioCheck, scenarioIdentity, text('span', 'Scenario', 'home-session-value'), text('span', sessionStatus(scenario.status), 'session-status'), text('span', String(scenario.sessions.length), 'home-session-value'), text('span', formatCompactCount(totalRecordedTurns(scenario.sessions)), 'home-session-value'));
-                group.append(scenarioRow);
-                if (scenarioOpen) {
-                    const sessions = text('div', '', 'scenario-sessions');
-                    sessions.id = sessionsId;
-                    const children = hasFilter && !scenarioGroup.parent ? scenarioGroup.matches : scenario.sessions;
-                    for (const session of children)
-                        sessions.append(childActivityRow(session, scenario));
-                    group.append(sessions);
-                }
-            }
+            const children = hasFilter && !parent ? matches : item.sessions;
+            for (const session of children)
+                group.append(childActivityRow(session, item));
             holder.append(group);
         }
     }
@@ -899,27 +903,283 @@ function renderBreadcrumbs(items = []) {
     const trail = el('breadcrumb-trail');
     trail.replaceChildren();
     trail.hidden = items.length === 0;
-    items.forEach(item => {
+    items.forEach((item, index) => {
         trail.append(text('span', '/', 'breadcrumb-separator'));
-        const current = text('span', item.label, 'breadcrumb-current');
-        current.setAttribute('aria-current', 'page');
-        trail.append(current);
+        const final = index === items.length - 1;
+        if (!final && item.href) {
+            const link = text('a', item.label, 'breadcrumb-link');
+            link.href = item.href;
+            link.onclick = event => { event.preventDefault(); item.activate?.(); };
+            trail.append(link);
+        }
+        else {
+            const current = text('span', item.label, 'breadcrumb-current');
+            current.setAttribute('aria-current', 'page');
+            trail.append(current);
+        }
     });
 }
 function renderSessionBreadcrumbs(item) {
-    renderBreadcrumbs([{ label: sessionTitle(item) }]);
+    const parent = activitySnapshot?.experiments.find(experiment => experiment.sessions.some(session => session.id === item.id));
+    renderBreadcrumbs(parent ? [
+        { label: parent.name, href: experimentPath(parent.id, 'overview'), activate: () => showExperiment(parent.id) },
+        { label: sessionTitle(item) },
+    ] : [{ label: sessionTitle(item) }]);
 }
-function showHome(updateLocation = true) {
+function meaningfulScenarios(experiment) {
+    return experiment.scenarios.filter(scenario => {
+        const input = mapping(scenario.input);
+        const reference = mapping(scenario.reference);
+        return experiment.scenarios.length > 1 || !['default', 'synthetic'].includes(scenario.id)
+            || Object.keys(input).length > 0 || Object.keys(reference).length > 0
+            || Object.keys(scenario.metadata).length > 0;
+    });
+}
+function displayValue(value) {
+    if (value === null || value === undefined || value === '')
+        return 'Not provided';
+    if (Array.isArray(value))
+        return value.length ? value.map(displayValue).join(', ') : 'None';
+    if (typeof value === 'object') {
+        const entries = Object.entries(value);
+        return entries.length ? entries.map(([key, item]) => `${participantName(key)}: ${displayValue(item)}`).join(' · ') : 'None';
+    }
+    if (typeof value === 'boolean')
+        return value ? 'Yes' : 'No';
+    return String(value);
+}
+function definitionGroup(heading, value) {
+    const section = text('section', '', 'scenario-config-group');
+    section.append(text('h3', heading));
+    const entries = value !== null && typeof value === 'object' && !Array.isArray(value)
+        ? Object.entries(value) : [];
+    if (!entries.length) {
+        section.append(text('p', `No ${heading.toLowerCase()} configured.`, 'muted'));
+        return section;
+    }
+    const list = document.createElement('dl');
+    for (const [key, item] of entries) {
+        const row = text('div', '');
+        row.append(text('dt', participantName(key)), text('dd', displayValue(item)));
+        list.append(row);
+    }
+    section.append(list);
+    return section;
+}
+function renderExperimentOverview(item) {
+    const holder = el('experiment-overview');
+    holder.replaceChildren();
+    const frozen = item.frozen ?? {};
+    const environmentSpec = mapping(frozen.environment);
+    const execution = mapping(frozen.execution);
+    const policy = mapping(frozen.policy);
+    const operations = Array.isArray(frozen.operations)
+        ? frozen.operations.map(value => String(mapping(value).name ?? '')).filter(Boolean).join(', ') : '';
+    const scoring = Array.isArray(frozen.scoring_versions)
+        ? frozen.scoring_versions.map(String).join(', ') : '';
+    const participants = Array.isArray(frozen.participants)
+        ? frozen.participants.map(value => mapping(value)) : [];
+    const scenarios = meaningfulScenarios(item);
+    const frozenSection = text('div', '', 'overview-section');
+    const heading = text('div', '', 'overview-heading');
+    const headingCopy = text('div', '');
+    headingCopy.append(text('h2', 'Frozen Experiment'), text('p', 'The shared configuration recorded before its environment sessions started.'));
+    heading.append(headingCopy);
+    frozenSection.append(heading);
+    const summary = text('div', '', 'frozen-summary');
+    summary.id = 'experiment-frozen-summary';
+    const groups = [
+        ['Execution', [
+                ['Scenarios', String(item.scenarios.length)],
+                ['Trials per Scenario', displayValue(execution.trials)],
+                ['Turns per Session', displayValue(execution.turns)],
+                ['Base Seed', displayValue(execution.seed)],
+                ['Max Concurrency', displayValue(execution.max_concurrency)],
+            ]],
+        ['Environment', [
+                ['Implementation', displayValue(environmentSpec.implementation)],
+                ['Version', displayValue(environmentSpec.version)],
+                ['Scheduling', displayValue(environmentSpec.scheduling)],
+                ['Operations', operations || 'None'],
+                ['External Writes', policy.external_writes === true ? 'Allowed' : 'Not Allowed'],
+            ]],
+        ['Evaluation', [
+                ['Participants', String(participants.length)],
+                ['Scoring', scoring || 'None'],
+                ['Purposes', displayValue(environmentSpec.purposes)],
+                ['Max Cost', displayValue(policy.max_cost_micros)],
+                ['Max Turns', displayValue(policy.max_turns)],
+            ]],
+    ];
+    for (const [title, fields] of groups) {
+        const group = text('section', '', 'frozen-group');
+        group.append(text('h3', title));
+        const list = document.createElement('dl');
+        for (const [label, value] of fields) {
+            const row = text('div', '');
+            row.append(text('dt', label), text('dd', value));
+            list.append(row);
+        }
+        group.append(list);
+        summary.append(group);
+    }
+    frozenSection.append(summary);
+    holder.append(frozenSection);
+    const participantSection = text('div', '', 'overview-section');
+    const participantHeading = text('div', '', 'overview-heading');
+    participantHeading.append(text('div', ''));
+    participantHeading.firstElementChild?.append(text('h2', 'Participants'), text('p', 'The participant implementations frozen for every session.'));
+    participantSection.append(participantHeading);
+    const participantList = text('div', '', 'experiment-participant-list');
+    for (const participant of participants) {
+        const row = text('div', '', 'experiment-participant-row');
+        row.append(text('strong', participantName(String(participant.id ?? 'Participant'))), text('span', displayValue(participant.implementation)), text('span', `Policy ${displayValue(participant.policy_version)}`), text('span', participant.checkpoint === true ? 'Checkpoint supported' : 'No checkpoint'));
+        participantList.append(row);
+    }
+    if (!participants.length)
+        participantList.append(text('p', 'No participants were recorded.', 'muted'));
+    participantSection.append(participantList);
+    holder.append(participantSection);
+    const scenarioSection = text('div', '', 'overview-section');
+    const scenarioHeading = text('div', '', 'overview-heading');
+    const scenarioCopy = text('div', '');
+    scenarioCopy.append(text('h2', 'Scenarios'), text('p', scenarios.length
+        ? `${scenarios.length} configured ${scenarios.length === 1 ? 'scenario' : 'scenarios'} produced ${item.sessions.length} environment sessions.`
+        : 'No scenario variation was configured for this experiment.'));
+    scenarioHeading.append(scenarioCopy);
+    if (scenarios.length) {
+        const action = text('button', 'View Scenarios', 'text-button');
+        action.type = 'button';
+        action.onclick = () => showExperiment(item.id, 'scenarios');
+        scenarioHeading.append(action);
+    }
+    scenarioSection.append(scenarioHeading);
+    if (scenarios.length) {
+        const list = text('div', '', 'experiment-scenario-summary');
+        for (const scenario of scenarios) {
+            const button = text('button', '', 'experiment-scenario-summary-row');
+            button.type = 'button';
+            button.append(text('strong', scenarioTitle(scenario)), text('span', `${scenario.completed} of ${scenario.total} sessions complete`));
+            button.onclick = () => showExperiment(item.id, 'scenarios', scenario.id);
+            list.append(button);
+        }
+        scenarioSection.append(list);
+    }
+    holder.append(scenarioSection);
+}
+function renderExperimentScenarios(item, requested) {
+    const scenarios = meaningfulScenarios(item);
+    const selectedScenario = scenarios.find(scenario => scenario.id === requested) ?? scenarios[0];
+    focusedScenario = selectedScenario?.id ?? null;
+    el('experiment-scenario-count').textContent = String(scenarios.length);
+    const list = el('experiment-scenario-list');
+    list.replaceChildren();
+    for (const scenario of scenarios) {
+        const button = text('button', '', 'experiment-scenario-row');
+        button.type = 'button';
+        button.dataset.scenarioId = scenario.id;
+        button.setAttribute('aria-current', String(scenario.id === selectedScenario?.id));
+        button.append(text('strong', scenarioTitle(scenario)), text('span', `${scenario.completed} of ${scenario.total} sessions complete`));
+        button.onclick = () => showExperiment(item.id, 'scenarios', scenario.id);
+        list.append(button);
+    }
+    if (!selectedScenario) {
+        el('scenario-detail-title').textContent = 'No scenarios configured';
+        el('scenario-detail-body').replaceChildren(text('p', 'This experiment has no scenario variation.', 'muted'));
+        el('scenario-view-sessions').hidden = true;
+        return;
+    }
+    el('scenario-detail-title').textContent = scenarioTitle(selectedScenario);
+    const body = el('scenario-detail-body');
+    body.replaceChildren();
+    const progress = text('dl', '', 'scenario-progress');
+    for (const [label, value] of [
+        ['Status', sessionStatus(selectedScenario.status)],
+        ['Sessions', String(selectedScenario.total)],
+        ['Completed', String(selectedScenario.completed)],
+        ['Running', String(selectedScenario.running)],
+    ]) {
+        const row = text('div', '');
+        row.append(text('dt', label), text('dd', value));
+        progress.append(row);
+    }
+    body.append(progress, definitionGroup('Input', selectedScenario.input), definitionGroup('Reference', selectedScenario.reference), definitionGroup('Metadata', selectedScenario.metadata));
+    const viewSessions = el('scenario-view-sessions');
+    viewSessions.hidden = false;
+    viewSessions.onclick = () => {
+        el('session-search').value = selectedScenario.id;
+        el('session-status').value = '';
+        showExperiment(item.id, 'sessions');
+        resetHomePage();
+    };
+}
+function revealHome() {
     sessionSync += 1;
     el('home-view').hidden = false;
     el('session-shell').hidden = true;
     el('compare-sessions-view').hidden = true;
-    renderBreadcrumbs();
     document.body.classList.add('viewer-home');
     document.body.classList.remove('viewer-session', 'viewer-compare');
+}
+function showHome(updateLocation = true) {
+    focusedExperiment = null;
+    focusedScenario = null;
+    revealHome();
+    el('home-view').classList.remove('experiment-focused');
+    el('experiment-tabs').hidden = true;
+    el('experiment-overview').hidden = true;
+    el('experiment-scenarios').hidden = true;
+    el('home-list-content').hidden = false;
+    renderBreadcrumbs();
+    el('home-eyebrow').textContent = 'Home';
+    el('home-title').textContent = 'Environment Sessions';
+    el('home-description').textContent = 'Find a run, investigate what changed, or select sessions to compare.';
+    el('home-list-title').textContent = 'All Sessions';
     document.title = 'Environment Sessions · EnvironmentHarness';
     if (updateLocation)
         setLocation(selectionPath('/home', [...selected]));
+    renderList();
+}
+function showExperiment(id, tab = 'overview', scenario, updateLocation = true) {
+    const item = activitySnapshot?.experiments.find(experiment => experiment.id === id);
+    focusedExperiment = id;
+    focusedScenario = scenario ?? null;
+    expandedExperiments.add(id);
+    revealHome();
+    el('home-view').classList.add('experiment-focused');
+    const experimentBreadcrumb = {
+        label: item?.name ?? 'Experiment',
+        href: experimentPath(id, 'overview'),
+        activate: () => showExperiment(id),
+    };
+    const selectedScenario = item?.scenarios.find(candidate => candidate.id === scenario);
+    renderBreadcrumbs(selectedScenario
+        ? [experimentBreadcrumb, { label: scenarioTitle(selectedScenario) }]
+        : [{ label: experimentBreadcrumb.label }]);
+    el('home-eyebrow').textContent = 'Experiment';
+    el('home-title').textContent = item?.name ?? 'Experiment';
+    el('home-description').textContent = item ? experimentDetail(item) : 'Experiment activity is unavailable.';
+    el('home-list-title').textContent = 'Experiment Sessions';
+    const scenarios = item ? meaningfulScenarios(item) : [];
+    if (tab === 'scenarios' && !scenarios.length)
+        tab = 'overview';
+    const tabs = el('experiment-tabs');
+    tabs.hidden = false;
+    for (const button of tabs.querySelectorAll('[data-experiment-tab]')) {
+        const name = button.dataset.experimentTab;
+        button.hidden = name === 'scenarios' && scenarios.length === 0;
+        button.setAttribute('aria-selected', String(name === tab));
+    }
+    el('experiment-overview').hidden = tab !== 'overview';
+    el('experiment-scenarios').hidden = tab !== 'scenarios';
+    el('home-list-content').hidden = tab !== 'sessions';
+    if (item && tab === 'overview')
+        renderExperimentOverview(item);
+    if (item && tab === 'scenarios')
+        renderExperimentScenarios(item, scenario);
+    document.title = `${item?.name ?? 'Experiment'} · EnvironmentHarness`;
+    if (updateLocation)
+        setLocation(experimentPath(id, tab, scenario));
     renderList();
 }
 function showEmptyState() {
@@ -983,6 +1243,9 @@ function renderFrozenSummary(item) {
     const environmentSpec = mapping(experiment.environment);
     const scoring = Array.isArray(experiment.scoring_versions)
         ? experiment.scoring_versions.map(String).join(', ') : 'Not declared';
+    const operations = Array.isArray(experiment.operations)
+        ? experiment.operations.map(value => mapping(value).name).filter(Boolean).map(String).join(', ')
+        : '';
     const groups = [
         ['Experiment', [
                 ['Purpose', String(experiment.purpose ?? 'Unspecified')],
@@ -995,6 +1258,7 @@ function renderFrozenSummary(item) {
                 ['Scheduling', String(environmentSpec.scheduling ?? item.environment.scheduling ?? 'Unspecified')],
                 ['Time Boundary', String(experiment.time_boundary ?? 'Unspecified')],
                 ['Participants', `${item.participants.length} Participants`],
+                ['Operations', operations || 'None'],
             ]],
         ['Policy', [
                 ['Max Turns', String(policy.max_turns ?? 'Unspecified')],
@@ -2165,6 +2429,10 @@ async function restoreRoute() {
         else
             setLocation(selectionPath('/compare', [...selected], route.view), true);
     }
+    else if (route.kind === 'experiment') {
+        showExperiment(route.id, route.tab, route.scenario, false);
+        setLocation(experimentPath(route.id, route.tab, route.scenario), true);
+    }
     else {
         restoreSelected(route.environments);
         showHome(false);
@@ -2208,6 +2476,8 @@ el('home').onclick = event => {
     event.preventDefault();
     void attempt(async () => {
         selected.clear();
+        el('session-search').value = '';
+        el('session-status').value = '';
         showHome();
         await list();
     });
@@ -2239,6 +2509,14 @@ for (const tab of document.querySelectorAll('[data-session-tab]')) {
     tab.onclick = () => void attempt(() => setSessionTab(tab.dataset.sessionTab === 'turns' ? 'turns'
         : tab.dataset.sessionTab === 'progression' ? 'progression'
             : tab.dataset.sessionTab === 'reports' ? 'reports' : 'overview'));
+}
+for (const tab of document.querySelectorAll('[data-experiment-tab]')) {
+    tab.onclick = () => {
+        if (!focusedExperiment)
+            return;
+        const next = tab.dataset.experimentTab;
+        showExperiment(focusedExperiment, next);
+    };
 }
 el('reports-progression').onclick = () => void attempt(() => setSessionTab('progression'));
 el('reports-records').onclick = () => void attempt(() => setSessionTab('reports'));

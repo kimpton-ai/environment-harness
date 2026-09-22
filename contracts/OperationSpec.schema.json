@@ -1,0 +1,30 @@
+{
+  "$id": "urn:environment-harness:v1:OperationSpec",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Frozen identity and public configuration for environment-supplied work.",
+  "properties": {
+    "config": {
+      "additionalProperties": true,
+      "title": "Config",
+      "type": "object"
+    },
+    "name": {
+      "pattern": "^[a-zA-Z0-9_.-]{1,160}$",
+      "title": "Name",
+      "type": "string"
+    },
+    "version": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "version"
+  ],
+  "title": "OperationSpec",
+  "type": "object"
+}

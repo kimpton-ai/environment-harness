@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import json
 from threading import Event
-from typing import Any, Generic, Literal, Protocol, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, Literal, Mapping, Protocol, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-
-from .motor_contracts import MotorProfile
 
 Json = dict[str, Any]
 Mode = Literal["sequential", "simultaneous", "event"]
 InputT = TypeVar("InputT")
+
+if TYPE_CHECKING:
+    from .operations import EnvironmentOperation
 
 
 class Record(BaseModel):
@@ -50,6 +51,22 @@ class Capabilities(Record):
         return self
 
 
+class OperationSpec(Record):
+    """Frozen identity and public configuration for environment-supplied work."""
+
+    name: str = Field(pattern=r"^[a-zA-Z0-9_.-]{1,160}$")
+    version: str = Field(min_length=1, max_length=200)
+    config: Json = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def serializable(self):
+        try:
+            json.dumps(self.config, allow_nan=False)
+        except (TypeError, ValueError) as error:
+            raise ValueError("operation config must be JSON serializable") from error
+        return self
+
+
 class EnvironmentSpec(Record):
     protocol: Literal["environment-session.v1"] = "environment-session.v1"
     id: str = Field(min_length=1, max_length=200)
@@ -60,13 +77,20 @@ class EnvironmentSpec(Record):
     scenario_schema: Json = Field(default_factory=lambda: {"type": "object"})
     scheduling: Mode
     modalities: tuple[str, ...] = ("text", "json")
-    motor_skills: tuple[str, ...] = ()
+    operations: tuple[OperationSpec, ...] = ()
     capabilities: Capabilities = Field(default_factory=Capabilities)
     purposes: tuple[Literal["evaluation", "training"], ...] = ("evaluation",)
     stale_action: Literal["reject"] = "reject"
     missing_action: Literal["reject", "noop"] = "reject"
     phase_seconds: float = Field(default=60, gt=0, le=86400)
     phase_deadline: Literal["wall", "coordinator"] = "wall"
+
+    @model_validator(mode="after")
+    def unique_operations(self):
+        names = [operation.name for operation in self.operations]
+        if len(names) != len(set(names)):
+            raise ValueError("duplicate environment operation")
+        return self
 
 
 class AgentSpec(Record):
@@ -102,7 +126,7 @@ class ExperimentSpec(Record):
     interventions: Json = Field(default_factory=dict)
     scoring_versions: tuple[str, ...] = ()
     policy: RunPolicy = Field(default_factory=RunPolicy)
-    motor: MotorProfile | None = None
+    operations: tuple[OperationSpec, ...] = ()
 
     @model_validator(mode="after")
     def check(self):
@@ -115,9 +139,111 @@ class ExperimentSpec(Record):
             raise ValueError("heldout environments cannot be used for training")
         if self.policy.external_writes and not self.environment.capabilities.external_writes:
             raise ValueError("external writes unsupported")
-        if self.motor is not None and not self.environment.motor_skills:
-            raise ValueError("motor assistance requires declared environment skills")
+        available = {operation.name: operation for operation in self.environment.operations}
+        selected = [operation.name for operation in self.operations]
+        if len(selected) != len(set(selected)):
+            raise ValueError("duplicate operation")
+        if any(
+            operation.name not in available or available[operation.name].version != operation.version
+            for operation in self.operations
+        ):
+            raise ValueError("operation is not supplied by the environment")
         return self
+
+
+class ActivityEvent(Record):
+    """One durable item from the tenant activity outbox."""
+
+    id: int = Field(ge=1)
+    topic: str
+    experiment: str | None = None
+    environment: str | None = None
+    kind: str
+    payload: Json = Field(default_factory=dict)
+    created: float
+
+
+class ActivityPage(Record):
+    """A resumable JSON page from an activity feed."""
+
+    events: tuple[ActivityEvent, ...] = ()
+    cursor: int = Field(ge=0)
+
+
+class ActivitySession(Record):
+    """Current activity projection for one environment session."""
+
+    kind: Literal["session"] = "session"
+    id: str
+    scenario_id: str
+    trial: int = Field(ge=1)
+    status: str
+    current_turn: int = Field(ge=0)
+    target_turns: int | None = Field(default=None, ge=1)
+    participants: tuple[str, ...] = ()
+    latest_activity: str | None = None
+    failure: str | None = None
+    environment: Json = Field(default_factory=dict)
+    frozen: Json = Field(default_factory=dict)
+    updated: float
+
+
+class ActivityScenario(Record):
+    """Frozen scenario and aggregate state within an experiment."""
+
+    kind: Literal["scenario"] = "scenario"
+    id: str
+    input: Any
+    reference: Any | None = None
+    metadata: Json = Field(default_factory=dict)
+    status: str
+    completed: int = Field(ge=0)
+    total: int = Field(ge=0)
+    running: int = Field(ge=0)
+    queued: int = Field(ge=0)
+    failed: int = Field(ge=0)
+    latest_activity: str | None = None
+    sessions: tuple[ActivitySession, ...] = ()
+    updated: float
+
+
+class ActivityProgress(Record):
+    completed: int = Field(ge=0)
+    total: int = Field(ge=0)
+
+
+class ActivityExperiment(Record):
+    """Current aggregate and children for one experiment."""
+
+    kind: Literal["experiment"] = "experiment"
+    id: str
+    name: str
+    status: str
+    progress: ActivityProgress
+    running: int = Field(ge=0)
+    queued: int = Field(ge=0)
+    failed: int = Field(ge=0)
+    latest_activity: str | None = None
+    score_summary: dict[str, float] = Field(default_factory=dict)
+    frozen: Json = Field(default_factory=dict)
+    scenarios: tuple[ActivityScenario, ...] = ()
+    sessions: tuple[ActivitySession, ...] = ()
+    updated: float
+
+
+class ActivitySummary(Record):
+    running: int = Field(ge=0)
+    queued: int = Field(ge=0)
+    failed: int = Field(ge=0)
+
+
+class ActivitySnapshot(Record):
+    """Authoritative recovery snapshot for the live activity hierarchy."""
+
+    summary: ActivitySummary
+    experiments: tuple[ActivityExperiment, ...] = ()
+    standalone: tuple[ActivitySession, ...] = ()
+    cursor: int = Field(ge=0)
 
 
 class Principal(Record):
@@ -192,6 +318,7 @@ class ScoreReport(Record):
 
 class Environment(Protocol):
     spec: EnvironmentSpec
+    operations: Mapping[str, EnvironmentOperation]
 
     def initialize(self, experiment: ExperimentSpec) -> Json: ...
     def observe(self, state: Json, participant: str) -> Json: ...

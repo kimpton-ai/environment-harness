@@ -1,0 +1,62 @@
+{
+  "$id": "urn:environment-harness:v1:ActivityEvent",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One durable item from the tenant activity outbox.",
+  "properties": {
+    "created": {
+      "title": "Created",
+      "type": "number"
+    },
+    "environment": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Environment"
+    },
+    "experiment": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Experiment"
+    },
+    "id": {
+      "minimum": 1,
+      "title": "Id",
+      "type": "integer"
+    },
+    "kind": {
+      "title": "Kind",
+      "type": "string"
+    },
+    "payload": {
+      "additionalProperties": true,
+      "title": "Payload",
+      "type": "object"
+    },
+    "topic": {
+      "title": "Topic",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "topic",
+    "kind",
+    "created"
+  ],
+  "title": "ActivityEvent",
+  "type": "object"
+}

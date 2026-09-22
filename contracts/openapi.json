@@ -38,6 +38,467 @@
         "title": "Action",
         "type": "object"
       },
+      "ActivityEvent": {
+        "additionalProperties": false,
+        "description": "One durable item from the tenant activity outbox.",
+        "properties": {
+          "created": {
+            "title": "Created",
+            "type": "number"
+          },
+          "environment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Environment"
+          },
+          "experiment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experiment"
+          },
+          "id": {
+            "minimum": 1.0,
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "topic": {
+            "title": "Topic",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "topic",
+          "kind",
+          "created"
+        ],
+        "title": "ActivityEvent",
+        "type": "object"
+      },
+      "ActivityExperiment": {
+        "additionalProperties": false,
+        "description": "Current aggregate and children for one experiment.",
+        "properties": {
+          "failed": {
+            "minimum": 0.0,
+            "title": "Failed",
+            "type": "integer"
+          },
+          "frozen": {
+            "additionalProperties": true,
+            "title": "Frozen",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "experiment",
+            "default": "experiment",
+            "title": "Kind",
+            "type": "string"
+          },
+          "latest_activity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Activity"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/ActivityProgress"
+          },
+          "queued": {
+            "minimum": 0.0,
+            "title": "Queued",
+            "type": "integer"
+          },
+          "running": {
+            "minimum": 0.0,
+            "title": "Running",
+            "type": "integer"
+          },
+          "scenarios": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ActivityScenario"
+            },
+            "title": "Scenarios",
+            "type": "array"
+          },
+          "score_summary": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Score Summary",
+            "type": "object"
+          },
+          "sessions": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ActivitySession"
+            },
+            "title": "Sessions",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "updated": {
+            "title": "Updated",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "status",
+          "progress",
+          "running",
+          "queued",
+          "failed",
+          "updated"
+        ],
+        "title": "ActivityExperiment",
+        "type": "object"
+      },
+      "ActivityPage": {
+        "additionalProperties": false,
+        "description": "A resumable JSON page from an activity feed.",
+        "properties": {
+          "cursor": {
+            "minimum": 0.0,
+            "title": "Cursor",
+            "type": "integer"
+          },
+          "events": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ActivityEvent"
+            },
+            "title": "Events",
+            "type": "array"
+          }
+        },
+        "required": [
+          "cursor"
+        ],
+        "title": "ActivityPage",
+        "type": "object"
+      },
+      "ActivityProgress": {
+        "additionalProperties": false,
+        "properties": {
+          "completed": {
+            "minimum": 0.0,
+            "title": "Completed",
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "completed",
+          "total"
+        ],
+        "title": "ActivityProgress",
+        "type": "object"
+      },
+      "ActivityScenario": {
+        "additionalProperties": false,
+        "description": "Frozen scenario and aggregate state within an experiment.",
+        "properties": {
+          "completed": {
+            "minimum": 0.0,
+            "title": "Completed",
+            "type": "integer"
+          },
+          "failed": {
+            "minimum": 0.0,
+            "title": "Failed",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "kind": {
+            "const": "scenario",
+            "default": "scenario",
+            "title": "Kind",
+            "type": "string"
+          },
+          "latest_activity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Activity"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "queued": {
+            "minimum": 0.0,
+            "title": "Queued",
+            "type": "integer"
+          },
+          "reference": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference"
+          },
+          "running": {
+            "minimum": 0.0,
+            "title": "Running",
+            "type": "integer"
+          },
+          "sessions": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ActivitySession"
+            },
+            "title": "Sessions",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          },
+          "updated": {
+            "title": "Updated",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "input",
+          "status",
+          "completed",
+          "total",
+          "running",
+          "queued",
+          "failed",
+          "updated"
+        ],
+        "title": "ActivityScenario",
+        "type": "object"
+      },
+      "ActivitySession": {
+        "additionalProperties": false,
+        "description": "Current activity projection for one environment session.",
+        "properties": {
+          "current_turn": {
+            "minimum": 0.0,
+            "title": "Current Turn",
+            "type": "integer"
+          },
+          "environment": {
+            "additionalProperties": true,
+            "title": "Environment",
+            "type": "object"
+          },
+          "failure": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure"
+          },
+          "frozen": {
+            "additionalProperties": true,
+            "title": "Frozen",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "session",
+            "default": "session",
+            "title": "Kind",
+            "type": "string"
+          },
+          "latest_activity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Activity"
+          },
+          "participants": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Participants",
+            "type": "array"
+          },
+          "scenario_id": {
+            "title": "Scenario Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "target_turns": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Turns"
+          },
+          "trial": {
+            "minimum": 1.0,
+            "title": "Trial",
+            "type": "integer"
+          },
+          "updated": {
+            "title": "Updated",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "scenario_id",
+          "trial",
+          "status",
+          "current_turn",
+          "updated"
+        ],
+        "title": "ActivitySession",
+        "type": "object"
+      },
+      "ActivitySnapshot": {
+        "additionalProperties": false,
+        "description": "Authoritative recovery snapshot for the live activity hierarchy.",
+        "properties": {
+          "cursor": {
+            "minimum": 0.0,
+            "title": "Cursor",
+            "type": "integer"
+          },
+          "experiments": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ActivityExperiment"
+            },
+            "title": "Experiments",
+            "type": "array"
+          },
+          "standalone": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ActivitySession"
+            },
+            "title": "Standalone",
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/ActivitySummary"
+          }
+        },
+        "required": [
+          "summary",
+          "cursor"
+        ],
+        "title": "ActivitySnapshot",
+        "type": "object"
+      },
+      "ActivitySummary": {
+        "additionalProperties": false,
+        "properties": {
+          "failed": {
+            "minimum": 0.0,
+            "title": "Failed",
+            "type": "integer"
+          },
+          "queued": {
+            "minimum": 0.0,
+            "title": "Queued",
+            "type": "integer"
+          },
+          "running": {
+            "minimum": 0.0,
+            "title": "Running",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "running",
+          "queued",
+          "failed"
+        ],
+        "title": "ActivitySummary",
+        "type": "object"
+      },
       "AgentSpec": {
         "additionalProperties": false,
         "properties": {
@@ -307,18 +768,18 @@
             "title": "Modalities",
             "type": "array"
           },
-          "motor_skills": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Motor Skills",
-            "type": "array"
-          },
           "observation_schema": {
             "additionalProperties": true,
             "title": "Observation Schema",
             "type": "object"
+          },
+          "operations": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/OperationSpec"
+            },
+            "title": "Operations",
+            "type": "array"
           },
           "phase_deadline": {
             "default": "wall",
@@ -461,15 +922,13 @@
             "title": "Interventions",
             "type": "object"
           },
-          "motor": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/MotorProfile"
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "operations": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/OperationSpec"
+            },
+            "title": "Operations",
+            "type": "array"
           },
           "participants": {
             "items": {
@@ -684,47 +1143,6 @@
         "title": "MetricDefinition",
         "type": "object"
       },
-      "MotorProfile": {
-        "additionalProperties": false,
-        "properties": {
-          "adapter": {
-            "minLength": 1,
-            "title": "Adapter",
-            "type": "string"
-          },
-          "executor": {
-            "const": "motor.v1",
-            "default": "motor.v1",
-            "title": "Executor",
-            "type": "string"
-          },
-          "mode": {
-            "default": "deterministic",
-            "enum": [
-              "deterministic",
-              "jev"
-            ],
-            "title": "Mode",
-            "type": "string"
-          },
-          "selector_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Selector Model"
-          }
-        },
-        "required": [
-          "adapter"
-        ],
-        "title": "MotorProfile",
-        "type": "object"
-      },
       "OperationIntentRequest": {
         "additionalProperties": false,
         "properties": {
@@ -793,6 +1211,34 @@
           "status"
         ],
         "title": "OperationIntentResponse",
+        "type": "object"
+      },
+      "OperationSpec": {
+        "additionalProperties": false,
+        "description": "Frozen identity and public configuration for environment-supplied work.",
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "title": "Config",
+            "type": "object"
+          },
+          "name": {
+            "pattern": "^[a-zA-Z0-9_.-]{1,160}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "version"
+        ],
+        "title": "OperationSpec",
         "type": "object"
       },
       "RunPolicy": {
@@ -1136,7 +1582,14 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityPage"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
               }
             },
             "description": "Successful Response"
@@ -1274,7 +1727,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ActivitySnapshot"
+                }
               }
             },
             "description": "Successful Response"
@@ -2411,7 +2866,14 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityPage"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
               }
             },
             "description": "Successful Response"
@@ -4602,7 +5064,14 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityPage"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
               }
             },
             "description": "Successful Response"

@@ -241,6 +241,27 @@ def test_regression_proof_requires_an_actual_test_failure():
             check_regression_tests.require_regression_test_failure(returncode)
 
 
+def test_regression_proof_distinguishes_new_api_imports_from_broken_collection(tmp_path):
+    head = tmp_path / "head"
+    base = tmp_path / "base"
+    for root, body in ((head, "class Added: pass\n"), (base, "class Existing: pass\n")):
+        package = root / "src" / "environment_harness"
+        package.mkdir(parents=True)
+        (package / "contracts.py").write_text(body)
+    missing_api = """________________ ERROR collecting tests/test_feature.py ________________
+E   ImportError: cannot import name 'Added' from 'environment_harness.contracts'
+"""
+    unrelated_error = (
+        missing_api
+        + """________________ ERROR collecting tests/test_broken.py _________________
+SyntaxError: invalid syntax
+"""
+    )
+
+    assert check_regression_tests.is_new_api_collection_failure(missing_api, base, head)
+    assert not check_regression_tests.is_new_api_collection_failure(unrelated_error, base, head)
+
+
 def configure_release_tree(tmp_path):
     root = Path(__file__).resolve().parents[1]
     for name in (

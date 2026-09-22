@@ -7,15 +7,21 @@ from pydantic import BaseModel
 from environment_harness import (
     AgentSpec,
     EnvironmentHarness,
+    EnvironmentOperation,
     EnvironmentSession,
     ExperimentResult,
     ExperimentSpec,
+    OperationSpec,
     Principal,
     Scenario,
 )
 from environment_harness.contracts import Capabilities, EnvironmentSpec, Transition
 from environment_harness.errors import Conflict, Forbidden
+from environment_harness.operations import Operations
+from environment_harness.runner import run as run_session
 from environment_harness.server import create_app
+
+SESSION_COMPLETION_TIMEOUT = 10
 
 
 class ScenarioInput(BaseModel):
@@ -86,6 +92,133 @@ def test_harness_runs_a_standalone_environment_session(tmp_path):
     assert session.experiment_id is None
 
 
+def test_harness_rejects_a_session_runner_that_does_not_return_the_current_record(tmp_path):
+    def invalid_runner(session, environment, researcher, agents, *, turns):
+        return {"status": "completed"}
+
+    harness = EnvironmentHarness(
+        tmp_path,
+        environment_factory=ScenarioEnvironment,
+        agent_factories={"agent": ScenarioAgent},
+        session_runner=invalid_runner,
+    )
+
+    session = harness.run(Scenario(id="invalid-runner", input={"difficulty": 2}), turns=1)
+
+    assert session.status == "failed"
+    record = next(
+        item
+        for item in harness.store.activity_snapshot(harness.researcher)["standalone"]
+        if item["id"] == session.id
+    )
+    assert record["failure"] == "Conflict"
+
+
+def test_harness_freezes_environment_supplied_operation_specs(tmp_path):
+    class InspectOperation(EnvironmentOperation):
+        endpoint = "world"
+        spec = OperationSpec(name="world.inspect", version="unreal-1", config={"level": "Arena"})
+
+        def execute(self, operation_id, request, maximum_cost_micros, *, authority):
+            authority(request["payload"])
+            return {"operation_id": operation_id, "cost_micros": 0}
+
+    class OperableEnvironment(ScenarioEnvironment):
+        def __init__(self):
+            operation = InspectOperation()
+            self.operations = {operation.spec.name: operation}
+            self.spec = ScenarioEnvironment.spec.model_copy(
+                update={
+                    "operations": (OperationSpec(name=operation.spec.name, version=operation.spec.version),)
+                }
+            )
+
+    def run_with_inspection(session, environment, researcher, agents, *, turns):
+        run_session(session, environment, researcher, agents, turns=1)
+        agent = Principal(
+            tenant=researcher.tenant,
+            subject="agent",
+            role="agent",
+            environment=environment,
+            participant="agent",
+        )
+        operations = Operations(session.store)
+        operations.prepare(
+            environment,
+            agent,
+            "inspect",
+            endpoint="world",
+            operation="world.inspect",
+            payload={"location": "Arena"},
+        )
+        lease = session.lease(environment, researcher, "example-operation")
+        try:
+            operations.dispatch(session, environment, researcher, lease, "inspect")
+        finally:
+            session.release(environment, researcher, lease)
+        return run_session(session, environment, researcher, agents, turns=turns - 1)
+
+    harness = EnvironmentHarness(
+        tmp_path,
+        environment_factory=OperableEnvironment,
+        agent_factories={"agent": ScenarioAgent},
+        session_runner=run_with_inspection,
+    )
+
+    session = harness.run(Scenario(id="operable", input={"difficulty": 2}), turns=2)
+
+    manifest = session.get(session.id, harness.researcher)["experiment"]
+    assert manifest["operations"] == [InspectOperation.spec.model_dump(mode="json")]
+    assert manifest["policy"]["allowed_endpoints"] == ["world"]
+    assert manifest["policy"]["allowed_operations"] == ["world.inspect"]
+    evidence = list(harness.store.replay(session.id, harness.researcher))
+    assert (
+        next(event for event in evidence if event["kind"] == "operation.receipt")["payload"]["receipt"][
+            "operation_id"
+        ]
+        == f"{session.id}:inspect"
+    )
+
+
+def test_experiment_rejects_invalid_environment_operations_before_queueing(tmp_path):
+    class BrokenEnvironment(ScenarioEnvironment):
+        spec = ScenarioEnvironment.spec.model_copy(
+            update={"operations": (OperationSpec(name="world.inspect", version="1"),)}
+        )
+
+    harness = EnvironmentHarness(
+        tmp_path,
+        environment_factory=BrokenEnvironment,
+        agent_factories={"agent": ScenarioAgent},
+    )
+    experiment = harness.experiment(
+        "Broken operation",
+        (Scenario(id="broken", input={"difficulty": 2}),),
+        turns=1,
+    )
+
+    with pytest.raises(Conflict, match="world.inspect.*runtime implementation"):
+        experiment.start()
+    assert harness.store.activity_snapshot(harness.researcher)["experiments"] == []
+
+
+def test_standalone_rejects_invalid_environment_operations_before_queueing(tmp_path):
+    class BrokenEnvironment(ScenarioEnvironment):
+        spec = ScenarioEnvironment.spec.model_copy(
+            update={"operations": (OperationSpec(name="world.inspect", version="1"),)}
+        )
+
+    harness = EnvironmentHarness(
+        tmp_path,
+        environment_factory=BrokenEnvironment,
+        agent_factories={"agent": ScenarioAgent},
+    )
+
+    with pytest.raises(Conflict, match="world.inspect.*runtime implementation"):
+        harness.start(Scenario(id="broken", input={"difficulty": 2}), turns=1)
+    assert harness.store.activity_snapshot(harness.researcher)["standalone"] == []
+
+
 def test_experiment_expands_scenarios_and_trials_reproducibly(tmp_path):
     harness = EnvironmentHarness(
         tmp_path,
@@ -143,8 +276,8 @@ def test_experiments_share_a_fair_bounded_scheduler(tmp_path):
     second = harness.experiment("second", [Scenario(id="c", input={"difficulty": 3})], turns=1).start()
 
     release.set()
-    first.wait(2)
-    second.wait(2)
+    first.wait(SESSION_COMPLETION_TIMEOUT)
+    second.wait(SESSION_COMPLETION_TIMEOUT)
 
     assert order == [1, 3, 2]
 
@@ -178,7 +311,7 @@ def test_interrupted_experiment_requires_explicit_resume(tmp_path):
         "restart", [Scenario(id="recoverable", input={"difficulty": 2})], turns=1
     )
     reconnected.id = experiment.id
-    resumed = reconnected.resume().wait(2)
+    resumed = reconnected.resume().wait(SESSION_COMPLETION_TIMEOUT)
     assert resumed.status == "succeeded"
 
 
@@ -237,6 +370,25 @@ def test_activity_snapshot_groups_experiments_and_keeps_standalone_sessions_top_
     assert snapshot["experiments"][0]["id"] == grouped.id
     assert snapshot["experiments"][0]["kind"] == "experiment"
     assert snapshot["experiments"][0]["progress"] == {"completed": 2, "total": 2}
+    frozen = snapshot["experiments"][0]["frozen"]
+    assert frozen["environment"]["implementation"] == "scenario-environment@1"
+    assert frozen["participants"] == [
+        {
+            "id": "agent",
+            "implementation": "scenario-agent@1",
+            "policy_version": "1",
+            "config": {},
+            "checkpoint": False,
+        }
+    ]
+    assert frozen["execution"] == {
+        "seed": 0,
+        "trials": 2,
+        "turns": 1,
+        "max_concurrency": 4,
+    }
+    assert frozen["policy"]["max_turns"] == 1
+    assert frozen["scoring_versions"] == []
     assert len(snapshot["experiments"][0]["sessions"]) == 2
     scenario = snapshot["experiments"][0]["scenarios"][0]
     assert scenario == {
@@ -319,7 +471,7 @@ def test_concurrent_progress_counts_and_failure_isolation(tmp_path):
     progress = experiment.result()
     assert (progress.running, progress.queued) == (2, 1)
     release.set()
-    result = experiment.wait(2)
+    result = experiment.wait(SESSION_COMPLETION_TIMEOUT)
 
     assert result.failed == 1
     assert result.completed == 3
@@ -346,7 +498,7 @@ def test_stopping_a_running_environment_session_is_terminal(tmp_path):
 
     session.stop()
     release.set()
-    session.wait(2)
+    session.wait(SESSION_COMPLETION_TIMEOUT)
 
     assert session.status == "stopped"
 
@@ -408,7 +560,7 @@ def test_harness_lifecycle_guards_and_validation_edges(tmp_path):
     with pytest.raises(Conflict, match="unavailable"):
         pending.result()
     assert pending.start().start() is pending
-    result = pending.wait(2)
+    result = pending.wait(SESSION_COMPLETION_TIMEOUT)
     harness._futures.pop(result.sessions[0].id)
     assert result.sessions[0].wait().status == "succeeded"
     with pytest.raises(Conflict, match="only interrupted"):
@@ -455,14 +607,14 @@ def test_harness_stops_queued_work_and_enforces_active_limits(tmp_path):
     running = harness.start(Scenario(id="running", input={"difficulty": 1}), turns=1)
     assert started.wait(2)
     queued = harness.start(Scenario(id="queued", input={"difficulty": 2}), turns=1)
-    queued.stop().wait(2)
+    queued.stop().wait(SESSION_COMPLETION_TIMEOUT)
     assert queued.status == "stopped"
     experiment = harness.experiment(
         "queued experiment", [Scenario(id="experiment", input={"difficulty": 3})], turns=1
     ).start()
     assert experiment.stop().status == "stopped"
     release.set()
-    running.wait(2)
+    running.wait(SESSION_COMPLETION_TIMEOUT)
 
     limit_started = Event()
     limit_release = Event()
@@ -487,4 +639,4 @@ def test_harness_stops_queued_work_and_enforces_active_limits(tmp_path):
     with pytest.raises(Conflict, match="max_sessions limit"):
         limited.experiment("second", [Scenario(id="experiment", input={"difficulty": 3})], turns=1).start()
     limit_release.set()
-    active.wait(2)
+    active.wait(SESSION_COMPLETION_TIMEOUT)

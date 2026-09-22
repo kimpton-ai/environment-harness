@@ -1,0 +1,389 @@
+{
+  "$defs": {
+    "ActivityExperiment": {
+      "additionalProperties": false,
+      "description": "Current aggregate and children for one experiment.",
+      "properties": {
+        "failed": {
+          "minimum": 0,
+          "title": "Failed",
+          "type": "integer"
+        },
+        "frozen": {
+          "additionalProperties": true,
+          "title": "Frozen",
+          "type": "object"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "experiment",
+          "default": "experiment",
+          "title": "Kind",
+          "type": "string"
+        },
+        "latest_activity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Latest Activity"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "progress": {
+          "$ref": "#/$defs/ActivityProgress"
+        },
+        "queued": {
+          "minimum": 0,
+          "title": "Queued",
+          "type": "integer"
+        },
+        "running": {
+          "minimum": 0,
+          "title": "Running",
+          "type": "integer"
+        },
+        "scenarios": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ActivityScenario"
+          },
+          "title": "Scenarios",
+          "type": "array"
+        },
+        "score_summary": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Score Summary",
+          "type": "object"
+        },
+        "sessions": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ActivitySession"
+          },
+          "title": "Sessions",
+          "type": "array"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "updated": {
+          "title": "Updated",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "status",
+        "progress",
+        "running",
+        "queued",
+        "failed",
+        "updated"
+      ],
+      "title": "ActivityExperiment",
+      "type": "object"
+    },
+    "ActivityProgress": {
+      "additionalProperties": false,
+      "properties": {
+        "completed": {
+          "minimum": 0,
+          "title": "Completed",
+          "type": "integer"
+        },
+        "total": {
+          "minimum": 0,
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "completed",
+        "total"
+      ],
+      "title": "ActivityProgress",
+      "type": "object"
+    },
+    "ActivityScenario": {
+      "additionalProperties": false,
+      "description": "Frozen scenario and aggregate state within an experiment.",
+      "properties": {
+        "completed": {
+          "minimum": 0,
+          "title": "Completed",
+          "type": "integer"
+        },
+        "failed": {
+          "minimum": 0,
+          "title": "Failed",
+          "type": "integer"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "input": {
+          "title": "Input"
+        },
+        "kind": {
+          "const": "scenario",
+          "default": "scenario",
+          "title": "Kind",
+          "type": "string"
+        },
+        "latest_activity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Latest Activity"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "queued": {
+          "minimum": 0,
+          "title": "Queued",
+          "type": "integer"
+        },
+        "reference": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reference"
+        },
+        "running": {
+          "minimum": 0,
+          "title": "Running",
+          "type": "integer"
+        },
+        "sessions": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ActivitySession"
+          },
+          "title": "Sessions",
+          "type": "array"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "total": {
+          "minimum": 0,
+          "title": "Total",
+          "type": "integer"
+        },
+        "updated": {
+          "title": "Updated",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "input",
+        "status",
+        "completed",
+        "total",
+        "running",
+        "queued",
+        "failed",
+        "updated"
+      ],
+      "title": "ActivityScenario",
+      "type": "object"
+    },
+    "ActivitySession": {
+      "additionalProperties": false,
+      "description": "Current activity projection for one environment session.",
+      "properties": {
+        "current_turn": {
+          "minimum": 0,
+          "title": "Current Turn",
+          "type": "integer"
+        },
+        "environment": {
+          "additionalProperties": true,
+          "title": "Environment",
+          "type": "object"
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Failure"
+        },
+        "frozen": {
+          "additionalProperties": true,
+          "title": "Frozen",
+          "type": "object"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "session",
+          "default": "session",
+          "title": "Kind",
+          "type": "string"
+        },
+        "latest_activity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Latest Activity"
+        },
+        "participants": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Participants",
+          "type": "array"
+        },
+        "scenario_id": {
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "target_turns": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Turns"
+        },
+        "trial": {
+          "minimum": 1,
+          "title": "Trial",
+          "type": "integer"
+        },
+        "updated": {
+          "title": "Updated",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "scenario_id",
+        "trial",
+        "status",
+        "current_turn",
+        "updated"
+      ],
+      "title": "ActivitySession",
+      "type": "object"
+    },
+    "ActivitySummary": {
+      "additionalProperties": false,
+      "properties": {
+        "failed": {
+          "minimum": 0,
+          "title": "Failed",
+          "type": "integer"
+        },
+        "queued": {
+          "minimum": 0,
+          "title": "Queued",
+          "type": "integer"
+        },
+        "running": {
+          "minimum": 0,
+          "title": "Running",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "running",
+        "queued",
+        "failed"
+      ],
+      "title": "ActivitySummary",
+      "type": "object"
+    }
+  },
+  "$id": "urn:environment-harness:v1:ActivitySnapshot",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Authoritative recovery snapshot for the live activity hierarchy.",
+  "properties": {
+    "cursor": {
+      "minimum": 0,
+      "title": "Cursor",
+      "type": "integer"
+    },
+    "experiments": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ActivityExperiment"
+      },
+      "title": "Experiments",
+      "type": "array"
+    },
+    "standalone": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ActivitySession"
+      },
+      "title": "Standalone",
+      "type": "array"
+    },
+    "summary": {
+      "$ref": "#/$defs/ActivitySummary"
+    }
+  },
+  "required": [
+    "summary",
+    "cursor"
+  ],
+  "title": "ActivitySnapshot",
+  "type": "object"
+}

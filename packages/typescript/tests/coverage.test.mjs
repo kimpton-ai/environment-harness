@@ -214,6 +214,18 @@ test('timeline groups transitions, shared data, duplicates and unknown participa
   assert.equal(describe(event(1, 0, 'session.created')), 'Session created.');
   assert.match(describe(event(1, 0, 'session.branched', {parent: 'p', checkpoint: 'c'})), /checkpoint c\.$/);
   assert.match(describe(event(1, 0, 'observation.delivered', {participant: 'a'})), /observed/);
+  assert.equal(
+    describe(event(1, 1, 'operation.intent', {
+      id: 'inspect', participant: 'alice', request: {operation: 'synthetic.inspect-total'},
+    })),
+    'alice prepared synthetic.inspect-total as operation inspect.',
+  );
+  assert.equal(
+    describe(event(2, 1, 'operation.receipt', {
+      id: 'inspect', receipt: {operation_id: 'session:inspect', cost_micros: 0, meets_threshold: true},
+    })),
+    'Operation inspect completed: cost micros 0, meets threshold true.',
+  );
 });
 
 test('turn series preserve rewards, public signals and sparse score revisions', () => {

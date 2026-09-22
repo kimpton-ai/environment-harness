@@ -54,9 +54,9 @@
       <section id="home-view" class="home-view" hidden>
         <header class="home-heading">
           <div>
-            <p class="eyebrow">Home</p>
-            <h1>Environment Sessions</h1>
-            <p>Find a run, investigate what changed, or select sessions to compare.</p>
+            <p id="home-eyebrow" class="eyebrow">Home</p>
+            <h1 id="home-title">Environment Sessions</h1>
+            <p id="home-description">Find a run, investigate what changed, or select sessions to compare.</p>
           </div>
           <div class="home-count" aria-label="Inventory summary">
             <div><span>Experiments</span><strong id="experiment-count">0</strong></div>
@@ -66,8 +66,33 @@
             <time id="list-synced"></time>
           </div>
         </header>
+        <nav id="experiment-tabs" class="session-tabs experiment-tabs" role="tablist" aria-label="Selected Experiment Navigation" hidden>
+          <button type="button" role="tab" data-experiment-tab="overview" aria-selected="true">Overview</button>
+          <button type="button" role="tab" data-experiment-tab="scenarios" aria-selected="false">Scenarios</button>
+          <button type="button" role="tab" data-experiment-tab="sessions" aria-selected="false">Sessions</button>
+        </nav>
+        <section id="experiment-overview" class="experiment-page" hidden></section>
+        <section id="experiment-scenarios" class="experiment-page" hidden>
+          <div class="overview-heading">
+            <div><h2>Scenarios</h2><p>Immutable inputs and references applied within this experiment.</p></div>
+          </div>
+          <div class="scenario-browser">
+            <nav class="scenario-list" aria-label="Experiment Scenarios">
+              <div class="section-heading"><span>Scenarios</span><span id="experiment-scenario-count">0</span></div>
+              <div id="experiment-scenario-list"></div>
+            </nav>
+            <article id="scenario-detail" class="scenario-detail" aria-live="polite">
+              <header class="scenario-detail-heading">
+                <div><p class="eyebrow">Scenario</p><h2 id="scenario-detail-title">Select a scenario</h2></div>
+                <button id="scenario-view-sessions" type="button" class="text-button">View Sessions</button>
+              </header>
+              <div id="scenario-detail-body"></div>
+            </article>
+          </div>
+        </section>
+        <div id="home-list-content" class="home-list-content">
         <div class="home-list-heading">
-          <h2>All Sessions</h2>
+          <h2 id="home-list-title">All Sessions</h2>
           <span id="visible-session-count" hidden>0 visible</span>
         </div>
         <div class="home-toolbar">
@@ -120,6 +145,7 @@
             </div>
           </div>
         </nav>
+        </div>
       </section>
 
       <div id="session-shell" hidden>

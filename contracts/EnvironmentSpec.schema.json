@@ -56,6 +56,34 @@
       },
       "title": "Capabilities",
       "type": "object"
+    },
+    "OperationSpec": {
+      "additionalProperties": false,
+      "description": "Frozen identity and public configuration for environment-supplied work.",
+      "properties": {
+        "config": {
+          "additionalProperties": true,
+          "title": "Config",
+          "type": "object"
+        },
+        "name": {
+          "pattern": "^[a-zA-Z0-9_.-]{1,160}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "title": "OperationSpec",
+      "type": "object"
     }
   },
   "$id": "urn:environment-harness:v1:EnvironmentSpec",
@@ -101,18 +129,18 @@
       "title": "Modalities",
       "type": "array"
     },
-    "motor_skills": {
-      "default": [],
-      "items": {
-        "type": "string"
-      },
-      "title": "Motor Skills",
-      "type": "array"
-    },
     "observation_schema": {
       "additionalProperties": true,
       "title": "Observation Schema",
       "type": "object"
+    },
+    "operations": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/OperationSpec"
+      },
+      "title": "Operations",
+      "type": "array"
     },
     "phase_deadline": {
       "default": "wall",

@@ -9,14 +9,37 @@ history. The HTTP service now checks in generated OpenAPI, validates command and
 operation request shapes, and returns one traceable error envelope across routes and
 both SDK clients.
 
+The viewer now expands experiment rows directly into environment sessions instead of adding a
+label-only scenario layer. Session rows show scenario and trial identity, status, turn progress,
+participants and latest activity; experiment names open stable detail routes. Activity pages and
+snapshots now have checked-in JSON Schemas and concrete OpenAPI response models.
+Experiment detail routes now separate shared frozen configuration, clickable scenario snapshots,
+and environment sessions. Empty/default scenarios do not add navigation; meaningful scenarios
+show structured input, reference, metadata, progress, and a filtered path to their sessions.
+
+Environment packages can now expose typed `EnvironmentOperation` classes for
+engine-specific or imperative capabilities. Environment and experiment manifests
+freeze portable `OperationSpec` identities and JSON configuration, while runtime
+clients, credentials and process-local handles remain on the environment instance.
+Specialized motor APIs have been removed from the prerelease SDK; integrations use
+the environment-owned operation seam without adding domain-specific types to core.
+
+`EnvironmentHarness` now accepts an optional Python `session_runner`, allowing grouped experiments
+to interleave ordinary turns with environment operations without replacing scheduling or durable
+status. A runnable custom-environment experiment records operation receipts, comparable scores and
+evidence-linked findings, and the CLI/browser timelines describe operation activity directly.
+The public `SessionRunner` protocol documents this extension boundary. Experiment startup now
+validates environment operations before queueing work, runner results must identify the current
+environment-session record, and conformance reports how many operation classes it checked.
+An external-simulator example keeps the domain client and operation outside core while exercising
+a real subprocess connection, explicit external-write policy, idempotent receipts, scoring,
+findings and the same multi-session viewer workflow.
+
 Native implementations can run behind authenticated HTTP workers while a trusted
 supervisor retains the evidence store. External participants can advance ready
 phases through the fenced coordinator. A versioned legacy adapter preserves old
 records, and an ORS HTTP/SSE client retains original task receipts without implicit
 write retries. See [remote workers](docs/REMOTE-WORKERS.md).
-
-Optional motor control adds bounded native, browser and desktop skills with durable
-receipts and an optional Jev selector. Direct execution remains the default.
 
 Hosted PostgreSQL/S3 storage adds aggregate environment payload admission and
 explicit tenant erasure with confirmed object deletion. Erasure includes experiment,

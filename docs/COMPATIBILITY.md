@@ -26,7 +26,7 @@ Before invoking a dispatch set, the runner verifies each program's `implementati
 
 A mismatched historical registration remains readable, but executing a new call requires a matching implementation. Historical manifests are never silently relabeled. Implementation strings remain declarations by trusted embedding code; they are not executable attestations.
 
-The conformance helper closes coordinator phases and tests checkpoints only when advertised. It always releases its lease. Event-driven environments with wall deadlines require explicit input events:
+The conformance helper first verifies that every advertised environment operation has one matching `EnvironmentOperation` runtime class with the same name and version and a non-empty endpoint. It closes coordinator phases and tests checkpoints only when advertised. It always releases its lease. Event-driven environments with wall deadlines require explicit input events:
 
 ```python
 check(store, environment, experiment, action_factory, events=[{

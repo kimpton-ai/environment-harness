@@ -75,6 +75,77 @@ def test_typed_experiment_example_creates_reviewable_grouped_sessions(tmp_path):
     assert summary["review"]["path"] == f"/experiment/{summary['experiment']}"
 
 
+def test_custom_environment_experiment_records_operations_scores_and_findings(tmp_path):
+    store_path = tmp_path / "custom-environment"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "examples/custom_environment_experiment.py"),
+            "--store",
+            str(store_path),
+            "--turns",
+            "2",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    summary = json.loads(result.stdout)
+    assert summary["status"] == "succeeded"
+    assert summary["completed"] == summary["total"] == 4
+    assert summary["review"]["path"] == f"/experiment/{summary['experiment']}"
+    assert {session["inspection"]["meets_threshold"] for session in summary["sessions"]} == {
+        False,
+        True,
+    }
+    assert {session["findings"] for session in summary["sessions"]} == {1}
+
+    store = EvidenceStore(store_path)
+    researcher = Principal(tenant="local", subject="example", role="researcher")
+    for session in summary["sessions"]:
+        record = store.reports(session["id"], researcher)
+        assert record[-1]["report"]["metrics"]["operation_receipts"] == 1
+        evidence = list(store.replay(session["id"], researcher))
+        assert any(event["kind"] == "operation.receipt" for event in evidence)
+
+
+def test_external_environment_experiment_connects_to_a_separate_simulator(tmp_path):
+    store_path = tmp_path / "external-environment"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "examples/external_environment_experiment.py"),
+            "--store",
+            str(store_path),
+            "--turns",
+            "2",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    summary = json.loads(result.stdout)
+    assert summary["status"] == "succeeded"
+    assert summary["completed"] == summary["total"] == 4
+    assert summary["connection"]["transport"] == "json-lines-subprocess"
+    assert summary["connection"]["worker_pid"] != summary["driver_pid"]
+    assert summary["review"]["path"] == f"/experiment/{summary['experiment']}"
+    assert {session["receipt"]["status"] for session in summary["sessions"]} == {"moved"}
+
+    store = EvidenceStore(store_path)
+    researcher = Principal(tenant="local", subject="example", role="researcher")
+    for session in summary["sessions"]:
+        reports = store.reports(session["id"], researcher)
+        assert reports[-1]["report"]["metrics"]["external_operations"] == 1
+        evidence = list(store.replay(session["id"], researcher))
+        receipt = next(event for event in evidence if event["kind"] == "operation.receipt")
+        assert receipt["payload"]["receipt"]["worker_pid"] == summary["connection"]["worker_pid"]
+
+
 def test_optional_pettingzoo_example_matches_its_frozen_agent_implementation(tmp_path):
     if importlib.util.find_spec("pettingzoo") is None:
         pytest.skip("PettingZoo extra is not installed")
