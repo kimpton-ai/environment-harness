@@ -6,16 +6,18 @@ import hashlib
 import json
 import threading
 import time
+from collections.abc import Callable, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Protocol
 
 from jsonschema import Draft202012Validator
 from pydantic import TypeAdapter
 
 from .contracts import AgentSpec, ExperimentSpec, Principal, RunPolicy, Scenario
 from .errors import Conflict
+from .operations import environment_operations
 from .runner import run as run_session
 from .runtime import EnvironmentSession as RuntimeEnvironmentSession
 from .store import EvidenceStore, encode, uid
@@ -24,6 +26,20 @@ from .store import EvidenceStore, encode, uid
 def _session_seed(seed: int, scenario_id: str, trial: int) -> int:
     material = f"{seed}\0{scenario_id}\0{trial}".encode()
     return int.from_bytes(hashlib.sha256(material).digest()[:8], "big") & ((1 << 63) - 1)
+
+
+class SessionRunner(Protocol):
+    """Callable that advances one durable environment session."""
+
+    def __call__(
+        self,
+        session: RuntimeEnvironmentSession,
+        environment: str,
+        researcher: Principal,
+        agents: Mapping[str, Any],
+        *,
+        turns: int,
+    ) -> Mapping[str, Any]: ...
 
 
 class EnvironmentSession(RuntimeEnvironmentSession):
@@ -210,6 +226,8 @@ class EnvironmentHarness:
         environment_factory: Callable[[], Any],
         agent_factories: Mapping[str, Callable[[], Any]],
         scoring_versions: tuple[str, ...] = (),
+        policy: RunPolicy | None = None,
+        session_runner: SessionRunner = run_session,
         max_sessions: int = 1000,
         max_concurrency: int = 4,
         tenant: str = "local",
@@ -221,7 +239,11 @@ class EnvironmentHarness:
         self.agent_factories = dict(agent_factories)
         if not self.agent_factories:
             raise ValueError("at least one agent factory is required")
+        if not callable(session_runner):
+            raise TypeError("session_runner must be callable")
         self.scoring_versions = tuple(scoring_versions)
+        self.policy = policy or RunPolicy()
+        self.session_runner = session_runner
         self.max_sessions = max_sessions
         self.max_concurrency = max_concurrency
         self.tenant = tenant
@@ -259,6 +281,7 @@ class EnvironmentHarness:
     ) -> EnvironmentSession:
         if turns < 1:
             raise ValueError("turns must be positive")
+        environment_operations(self.environment_factory())
         scenario = self._validate_scenario(scenario)
         environment_id = uid()
         now = time.time()
@@ -344,6 +367,7 @@ class EnvironmentHarness:
 
     def _start_experiment(self, experiment: Experiment) -> None:
         environment = self.environment_factory()
+        runtime_operations = environment_operations(environment)
         preview_agents = {participant: factory() for participant, factory in self.agent_factories.items()}
         config = {
             "environment": environment.spec.model_dump(mode="json"),
@@ -352,6 +376,10 @@ class EnvironmentHarness:
                 for name, agent in preview_agents.items()
             ],
             "scoring_versions": list(self.scoring_versions),
+            "operations": [
+                runtime_operations[declaration.name].spec.model_dump(mode="json")
+                for declaration in environment.spec.operations
+            ],
             "turns": experiment.turns,
         }
         now = time.time()
@@ -500,6 +528,28 @@ class EnvironmentHarness:
             environment = self.environment_factory()
             agents = {participant: factory() for participant, factory in self.agent_factories.items()}
             scenario: Scenario[Any] = job["scenario"]
+            runtime_operations = environment_operations(environment)
+            operations = tuple(
+                runtime_operations[declared.name].spec for declared in environment.spec.operations
+            )
+            operation_endpoints = tuple(
+                dict.fromkeys(
+                    (
+                        *self.policy.allowed_endpoints,
+                        *(runtime_operations[item.name].endpoint for item in operations),
+                    )
+                )
+            )
+            operation_names = tuple(
+                dict.fromkeys((*self.policy.allowed_operations, *(item.name for item in operations)))
+            )
+            policy = self.policy.model_copy(
+                update={
+                    "max_turns": job["turns"],
+                    "allowed_endpoints": operation_endpoints,
+                    "allowed_operations": operation_names,
+                }
+            )
             spec = ExperimentSpec(
                 environment=environment.spec,
                 participants=tuple(self._agent_spec(name, agent) for name, agent in agents.items()),
@@ -509,19 +559,25 @@ class EnvironmentHarness:
                 scenario_reference=scenario.reference,
                 scenario_metadata=scenario.metadata,
                 scoring_versions=self.scoring_versions,
-                policy=RunPolicy(max_turns=job["turns"]),
+                policy=policy,
+                operations=operations,
             )
             self._set_status(environment_id, "running", "Started")
             runtime = RuntimeEnvironmentSession(self.store, environment)
             runtime.create(spec, self.researcher, environment_id=environment_id)
-            result = run_session(
+            result = self.session_runner(
                 runtime,
                 environment_id,
                 self.researcher,
                 agents,
                 turns=job["turns"],
             )
-            final = "succeeded" if result["status"] in ("running", "completed") else "stopped"
+            current = runtime.get(environment_id, self.researcher)
+            if not isinstance(result, Mapping) or any(
+                result.get(field) != current[field] for field in ("id", "revision", "status")
+            ):
+                raise Conflict("session_runner must return the current environment-session record")
+            final = "succeeded" if current["status"] in ("running", "completed") else "stopped"
             self._set_status(environment_id, final, "Completed")
         except BaseException as error:
             with self.store.transaction() as db:

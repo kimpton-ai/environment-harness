@@ -12,7 +12,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 import environment_harness.runner as runner_module
-from environment_harness import AgentSpec, EnvironmentSession, EvidenceStore, ExperimentSpec, Principal
+from environment_harness import (
+    AgentSpec,
+    EnvironmentSession,
+    EvidenceStore,
+    ExperimentSpec,
+    OperationSpec,
+    Principal,
+)
 from environment_harness.conformance import check
 from environment_harness.contracts import Capabilities, RunPolicy
 from environment_harness.errors import Conflict, Forbidden, Unsupported
@@ -138,6 +145,7 @@ def test_conformance_modes_and_lease_cleanup(tmp_path, mode, deadline, checkpoin
     events = [{"source": "synthetic", "cursor": 1, "event_time": 0, "payload": {}}] if mode == "event" else []
     result = check(store, env, spec, lambda _: {"value": 1}, events=events)
     assert bool(result["checkpoint"]) == checkpoint
+    assert result["operations"] == 0
     with store.transaction() as db:
         row = db.execute("SELECT * FROM environments WHERE id=?", (result["environment"],)).fetchone()
     assert row["revision"] == 1 and row["lease_until"] == 0
@@ -152,6 +160,20 @@ def test_conformance_failure_releases_lease_and_event_requires_input(tmp_path):
     event_env = SyntheticEnvironment("event")
     with pytest.raises(Unsupported, match="explicit input"):
         check(session.store, event_env, spec.model_copy(update={"environment": event_env.spec}), lambda _: {})
+
+
+def test_conformance_rejects_advertised_operation_without_runtime_class(tmp_path):
+    environment = SyntheticEnvironment()
+    environment.spec = environment.spec.model_copy(
+        update={"operations": (OperationSpec(name="world.inspect", version="1"),)}
+    )
+    spec = ExperimentSpec(
+        environment=environment.spec,
+        participants=(AgentSpec(id="a", implementation="test", policy_version="1"),),
+    )
+
+    with pytest.raises(Conflict, match="world.inspect.*runtime implementation"):
+        check(EvidenceStore(tmp_path), environment, spec, lambda _: {"value": 1})
 
 
 def test_cancel_is_atomic_idempotent_and_preserves_unknown_reservations(tmp_path):

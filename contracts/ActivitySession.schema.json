@@ -1,0 +1,105 @@
+{
+  "$id": "urn:environment-harness:v1:ActivitySession",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Current activity projection for one environment session.",
+  "properties": {
+    "current_turn": {
+      "minimum": 0,
+      "title": "Current Turn",
+      "type": "integer"
+    },
+    "environment": {
+      "additionalProperties": true,
+      "title": "Environment",
+      "type": "object"
+    },
+    "failure": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Failure"
+    },
+    "frozen": {
+      "additionalProperties": true,
+      "title": "Frozen",
+      "type": "object"
+    },
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "kind": {
+      "const": "session",
+      "default": "session",
+      "title": "Kind",
+      "type": "string"
+    },
+    "latest_activity": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Latest Activity"
+    },
+    "participants": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Participants",
+      "type": "array"
+    },
+    "scenario_id": {
+      "title": "Scenario Id",
+      "type": "string"
+    },
+    "status": {
+      "title": "Status",
+      "type": "string"
+    },
+    "target_turns": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Target Turns"
+    },
+    "trial": {
+      "minimum": 1,
+      "title": "Trial",
+      "type": "integer"
+    },
+    "updated": {
+      "title": "Updated",
+      "type": "number"
+    }
+  },
+  "required": [
+    "id",
+    "scenario_id",
+    "trial",
+    "status",
+    "current_turn",
+    "updated"
+  ],
+  "title": "ActivitySession",
+  "type": "object"
+}

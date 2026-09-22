@@ -155,15 +155,37 @@ The example prints the experiment ID, every environment-session ID, scenario/tri
 
 Use `experiment.start()`, `wait()`, `stop()`, and explicit `resume()` for lifecycle control. Standalone environment sessions use `harness.start(...)` or `harness.run(...)`. The low-level coordinator, explicit `ExperimentSpec`, and branching workflow remain available from `environment_harness.advanced`.
 
+## Extend an environment and review the results
+
+The complete [custom environment experiment](examples/custom_environment_experiment.py) shows the
+extension path in one runnable file. It adds an `EnvironmentOperation`, interleaves that operation
+with normal turns through the typed Python `SessionRunner` seam, runs two scenarios across two trials,
+and records comparable metrics plus evidence-linked findings for every environment session.
+
+```sh
+python examples/custom_environment_experiment.py \
+  --store .local/custom-environment-experiment \
+  --turns 3
+environment-harness \
+  --store .local/custom-environment-experiment \
+  serve --open
+```
+
+Open the experiment path printed by the example. Home groups all four environment sessions under
+one experiment. A session's Overview shows the frozen operation configuration, Turns describes
+the operation receipt alongside agent and environment evidence, Progression plots the recorded
+metrics, and Reports summarizes the deterministic score and linked finding. The same operation
+class also works with the low-level single-session API; experiment grouping is an orchestration
+choice, not a different environment type.
+
 ## Documentation
 
 | Goal | Guide |
 | --- | --- |
 | Connect a Python agent, model integration, or JSON program | [Agent integration](https://github.com/kimpton-ai/environment-harness/blob/main/docs/AGENT-INTEGRATION.md) |
-| Implement and package environment rules | [Environment authoring](https://github.com/kimpton-ai/environment-harness/blob/main/docs/AUTHORING.md) |
+| Implement environment rules and custom operation classes | [Environment authoring](https://github.com/kimpton-ai/environment-harness/blob/main/docs/AUTHORING.md) · [Complete experiment](https://github.com/kimpton-ai/environment-harness/blob/main/examples/custom_environment_experiment.py) |
 | Understand checkpoints, branches, and coordinated sessions | [Coordinated sessions](https://github.com/kimpton-ai/environment-harness/blob/main/docs/coordinated-sessions.md) |
 | Run environments behind a trusted supervisor | [Remote workers and external agents](https://github.com/kimpton-ai/environment-harness/blob/main/docs/REMOTE-WORKERS.md) |
-| Add bounded native, browser, or desktop actions | [Motor control](https://github.com/kimpton-ai/environment-harness/blob/main/docs/motor-control.md) |
 | Use the authenticated HTTP API | [API reference](https://github.com/kimpton-ai/environment-harness/blob/main/docs/API-REFERENCE.md) · [Protocol semantics](https://github.com/kimpton-ai/environment-harness/blob/main/docs/PROTOCOL.md) |
 | Use the TypeScript client | [TypeScript package](https://github.com/kimpton-ai/environment-harness/blob/main/packages/typescript/README.md) |
 | Check adapter and isolation boundaries | [Adapters](https://github.com/kimpton-ai/environment-harness/blob/main/docs/ADAPTERS.md) |
@@ -175,7 +197,5 @@ Use `experiment.start()`, `wait()`, `stop()`, and explicit `resume()` for lifecy
 ## Project
 
 [Contributing](https://github.com/kimpton-ai/environment-harness/blob/main/CONTRIBUTING.md) · [Support](https://github.com/kimpton-ai/environment-harness/blob/main/SUPPORT.md) · [Security](https://github.com/kimpton-ai/environment-harness/blob/main/SECURITY.md) · [Changelog](https://github.com/kimpton-ai/environment-harness/blob/main/CHANGELOG.md) · [MIT license](https://github.com/kimpton-ai/environment-harness/blob/main/LICENSE)
-
-Optional [motor control](docs/motor-control.md) adds bounded native, browser and desktop skills with durable receipts and an optional Jev selector. Direct execution remains the default.
 
 Report vulnerabilities privately through [SECURITY.md](https://github.com/kimpton-ai/environment-harness/blob/main/SECURITY.md). Do not put credentials or private environment sessions in a public issue.

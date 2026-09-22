@@ -15,7 +15,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from .contracts import Action, ExperimentSpec, ScoreReport
+from .contracts import Action, ActivityPage, ActivitySnapshot, ExperimentSpec, ScoreReport
 from .coordinator import advance
 from .errors import BudgetExceeded, Conflict, Forbidden, HarnessError, Unsupported
 from .evaluation import compare, rollouts, turn_series
@@ -472,6 +472,8 @@ def create_app(session, *, local_access=None):
         "/v1/activity/events",
         tags=["Activity"],
         summary="Read tenant activity",
+        response_model=ActivityPage,
+        responses={200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}}},
         openapi_extra={"x-roles": ["researcher", "worker"]},
     )
     def global_activity(
@@ -488,6 +490,7 @@ def create_app(session, *, local_access=None):
         "/v1/activity/snapshot",
         tags=["Activity"],
         summary="Get the current activity hierarchy",
+        response_model=ActivitySnapshot,
         openapi_extra={"x-roles": ["researcher", "worker"]},
     )
     def activity_snapshot(who=Depends(actor)):
@@ -497,6 +500,8 @@ def create_app(session, *, local_access=None):
         "/v1/experiments/{experiment}/events",
         tags=["Activity"],
         summary="Read activity for an experiment",
+        response_model=ActivityPage,
+        responses={200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}}},
         openapi_extra={"x-roles": ["researcher", "worker"]},
     )
     def experiment_activity(
@@ -514,6 +519,8 @@ def create_app(session, *, local_access=None):
         "/v1/environments/{environment}/activity",
         tags=["Activity"],
         summary="Read activity for an environment session",
+        response_model=ActivityPage,
+        responses={200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}}},
         openapi_extra={"x-roles": ["researcher", "worker"]},
     )
     def environment_activity(

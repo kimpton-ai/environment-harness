@@ -136,18 +136,18 @@
           "title": "Modalities",
           "type": "array"
         },
-        "motor_skills": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "title": "Motor Skills",
-          "type": "array"
-        },
         "observation_schema": {
           "additionalProperties": true,
           "title": "Observation Schema",
           "type": "object"
+        },
+        "operations": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/OperationSpec"
+          },
+          "title": "Operations",
+          "type": "array"
         },
         "phase_deadline": {
           "default": "wall",
@@ -220,46 +220,32 @@
       "title": "EnvironmentSpec",
       "type": "object"
     },
-    "MotorProfile": {
+    "OperationSpec": {
       "additionalProperties": false,
+      "description": "Frozen identity and public configuration for environment-supplied work.",
       "properties": {
-        "adapter": {
+        "config": {
+          "additionalProperties": true,
+          "title": "Config",
+          "type": "object"
+        },
+        "name": {
+          "pattern": "^[a-zA-Z0-9_.-]{1,160}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 200,
           "minLength": 1,
-          "title": "Adapter",
+          "title": "Version",
           "type": "string"
-        },
-        "executor": {
-          "const": "motor.v1",
-          "default": "motor.v1",
-          "title": "Executor",
-          "type": "string"
-        },
-        "mode": {
-          "default": "deterministic",
-          "enum": [
-            "deterministic",
-            "jev"
-          ],
-          "title": "Mode",
-          "type": "string"
-        },
-        "selector_model": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Selector Model"
         }
       },
       "required": [
-        "adapter"
+        "name",
+        "version"
       ],
-      "title": "MotorProfile",
+      "title": "OperationSpec",
       "type": "object"
     },
     "RunPolicy": {
@@ -334,16 +320,13 @@
       "title": "Interventions",
       "type": "object"
     },
-    "motor": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/MotorProfile"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null
+    "operations": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/OperationSpec"
+      },
+      "title": "Operations",
+      "type": "array"
     },
     "participants": {
       "items": {

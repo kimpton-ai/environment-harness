@@ -188,6 +188,9 @@ Run the packaged EnvironmentHarness server. It serves the viewer shell for `/hom
 `/experiment/{id}`, and supported `/session/{id}/{section}` deep links. A generic static-file server
 does not know those routes.
 
+`/experiment/{id}` restores the experiment-scoped environment-session list. Each child session
+links to its `/session/{id}/{section}` inspection route.
+
 ### The local viewer shows “Local viewer unavailable”
 
 Confirm that the URL uses the exact origin printed by `serve`, including port and `127.0.0.1`.

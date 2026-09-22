@@ -9,14 +9,31 @@ history. The HTTP service now checks in generated OpenAPI, validates command and
 operation request shapes, and returns one traceable error envelope across routes and
 both SDK clients.
 
+The viewer now expands experiment rows directly into environment sessions instead of adding a
+label-only scenario layer. Session rows show scenario and trial identity, status, turn progress,
+participants and latest activity; experiment names open stable detail routes. Activity pages and
+snapshots now have checked-in JSON Schemas and concrete OpenAPI response models.
+
+Environment packages can now expose typed `EnvironmentOperation` classes for
+engine-specific or imperative capabilities. Environment and experiment manifests
+freeze portable `OperationSpec` identities and JSON configuration, while runtime
+clients, credentials and process-local handles remain on the environment instance.
+Specialized motor APIs have been removed from the prerelease SDK; integrations use
+the environment-owned operation seam without adding domain-specific types to core.
+
+`EnvironmentHarness` now accepts an optional Python `session_runner`, allowing grouped experiments
+to interleave ordinary turns with environment operations without replacing scheduling or durable
+status. A runnable custom-environment experiment records operation receipts, comparable scores and
+evidence-linked findings, and the CLI/browser timelines describe operation activity directly.
+The public `SessionRunner` protocol documents this extension boundary. Experiment startup now
+validates environment operations before queueing work, runner results must identify the current
+environment-session record, and conformance reports how many operation classes it checked.
+
 Native implementations can run behind authenticated HTTP workers while a trusted
 supervisor retains the evidence store. External participants can advance ready
 phases through the fenced coordinator. A versioned legacy adapter preserves old
 records, and an ORS HTTP/SSE client retains original task receipts without implicit
 write retries. See [remote workers](docs/REMOTE-WORKERS.md).
-
-Optional motor control adds bounded native, browser and desktop skills with durable
-receipts and an optional Jev selector. Direct execution remains the default.
 
 Hosted PostgreSQL/S3 storage adds aggregate environment payload admission and
 explicit tenant erasure with confirmed object deletion. Erasure includes experiment,
@@ -25,10 +42,6 @@ scenario, environment-session and activity metadata introduced by this release.
 Production PyPI publishing now uses short-lived Trusted Publishing credentials and publishes only the reviewed Python wheel and source distribution. Releases support PEP 440 alpha, beta, and release-candidate versions while mapping those versions to npm-compatible SemVer prereleases. Package metadata now includes the rendered README, classifiers, project links, and the `py.typed` marker.
 
 Deployment, release, and viewer-maintenance guides now define the supported local topology, hosted-service qualification boundary, prerelease workflow, generated browser assets, required checks, and documentation triggers for future contributors.
-
-The motor SDK adds generic coordinated goal contracts with immutable goal and milestone context, channel claims, resource ownership, bounded group deadlines, stop-epoch fencing, and durable per-tick receipts. Group dispatch requires an adapter capability and matching environment-issued permissions, and rechecks the contract at the effect boundary. These contracts record coordination and authority; domain controllers, graders, native drivers, and task-success guarantees remain supplier responsibilities.
-
-Prepared successors now use a versioned, one-slot intent contract. Preparation requires a live owner, goal, observation, epoch, selected candidate, and environment-issued controls. Native admission checks freshness, predecessor identity, frame, camera, UI, and tick fences. Unknown preparation or admission is quarantined for ledger reconciliation and is never replayed. Existing sequential adapters explicitly reject successor preparation.
 
 ## 0.2.2 - 2026-09-18
 

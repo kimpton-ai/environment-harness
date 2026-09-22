@@ -18,6 +18,7 @@ class SyntheticEnvironment:
     scenario_type = SyntheticScenarioInput
 
     def __init__(self, mode: Mode = "simultaneous"):
+        self.operations = {}
         self.spec = EnvironmentSpec(
             id="synthetic-protocol",
             version="1",

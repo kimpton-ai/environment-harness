@@ -341,6 +341,8 @@ def test_presentation_optional_details_are_independent():
         ("action.attempted", "attempted"),
         ("action.executed", "executed"),
         ("transition.committed", "State revision 1 committed."),
+        ("operation.intent", "alice prepared synthetic.inspect-total as operation inspect."),
+        ("operation.receipt", "Operation inspect completed: meets threshold True."),
     ):
         event = {
             "kind": kind,
@@ -352,6 +354,17 @@ def test_presentation_optional_details_are_independent():
                 "outcome": "complete",
             },
         }
+        if kind == "operation.intent":
+            event["payload"] = {
+                "id": "inspect",
+                "participant": "alice",
+                "request": {"operation": "synthetic.inspect-total"},
+            }
+        if kind == "operation.receipt":
+            event["payload"] = {
+                "id": "inspect",
+                "receipt": {"operation_id": "session:inspect", "meets_threshold": True},
+            }
         assert expected in presentation.describe(event)
     assert presentation.cell_text({"payload": {"outcome": "complete"}}, "executed") == ("executed complete")
     assert presentation.participant_line("alice", presentation._empty_slots()) == (

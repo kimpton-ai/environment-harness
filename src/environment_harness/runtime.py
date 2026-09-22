@@ -11,6 +11,7 @@ from jsonschema import Draft202012Validator
 from .contracts import Action, ExperimentSpec, Principal, Transition
 from .errors import Conflict, Forbidden, Unsupported
 from .history import inherit
+from .operations import environment_operations
 from .store import EvidenceStore, digest, encode, uid
 
 
@@ -36,6 +37,13 @@ class EnvironmentSession:
             raise Forbidden("unscoped researcher authority required")
         if experiment.environment != self.environment.spec:
             raise Conflict("environment contract mismatch")
+        runtime_operations = environment_operations(self.environment)
+        for selected in experiment.operations:
+            operation = runtime_operations.get(selected.name)
+            if operation is None or operation.spec != selected:
+                raise Conflict(
+                    f"environment operation {selected.name!r} has no matching runtime implementation"
+                )
         environment = environment_id or uid()
         if len(environment) != 32 or any(c not in "0123456789abcdef" for c in environment):
             raise ValueError("environment ID must be 32 lowercase hex characters")

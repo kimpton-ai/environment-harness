@@ -63,6 +63,10 @@ Events support JSON pages and finite server-sent-event pages. Reconnect with `La
 
 Activity feeds use a transactional outbox and global cursor. They cover experiment status and environment-session evidence without exposing the scheduler queue as an authority. SSE pages include a reconnect delay and heartbeat; clients tolerate duplicate IDs and recover from the activity snapshot after reconnecting. Global, experiment and environment-session scopes all require an authenticated tenant principal.
 
+The checked-in `ActivityPage` and `ActivitySnapshot` JSON Schemas are the durable JSON response
+contracts for those feeds. The generated OpenAPI document references the same response models and
+records `text/event-stream` as the alternate representation for event pages.
+
 ## Scheduling
 
 Sequential environments select one actor. Simultaneous environments keep the committed state and observation revision fixed until all required decisions arrive, or until the declared deadline/missing-action rule resolves the phase. Decisions are passed to the environment in participant order, never arrival order. Event environments resolve only when an external event or deadline is present. Stale actions are explicitly rejected.
@@ -75,7 +79,7 @@ The supplied runner drives sequential and simultaneous phases. Event-driven supp
 
 Checkpoints include the environment, RNG, participants and agent checkpoint data, scheduler, feed cursors, budget state and pending journals. They commit atomically in the evidence database. Arbitrary external handles are not presumed durable. Exact-agent checkpoint requests fail if a participant lacks a hook. External opaque agent state has to be supplied by the agent integration.
 
-The latest committed environment state is the recovery authority. Resume does not roll the outside environment back to an old checkpoint. Pending ambiguous external dispatches must be reconciled before resume or checkpoint. The operations journal persists intent and reservation before dispatch. Providers receive a stable environment/operation key and a maximum cost. Receipt settlement is idempotent; unknown outcomes stay blocked if lookup cannot prove what happened.
+The latest committed environment state is the recovery authority. Resume does not roll the outside environment back to an old checkpoint. Pending ambiguous external dispatches must be reconciled before resume or checkpoint. The operations journal persists intent and reservation before dispatch. An environment advertises operation names and versions, supplies their runtime classes, and freezes each selected class's JSON configuration in `ExperimentSpec.operations`. Session creation requires the selected specification to match the runtime class. Runtime classes receive a stable environment/operation key, a maximum cost and a live fenced-authority callback. Receipt settlement is idempotent; unknown outcomes stay blocked if lookup cannot prove what happened.
 
 Budget limits cover operations routed through the journal. A backend must enforce the maximum passed to it. Arbitrary externally managed programs cannot acquire spending authority through this SDK. Reservations for known-unsent operations can be released on cancellation; ambiguous dispatches retain their reservation until settlement.
 

@@ -393,6 +393,25 @@ def test_interactive_api_reference_has_route_scoped_asset_policy(tmp_path):
     assert client.get("/experiment/example").status_code == 200
 
 
+def test_activity_openapi_records_json_response_contracts(tmp_path):
+    client, store, session, researcher, spec, environment, headers, agent_headers = service(tmp_path)
+
+    document = client.get("/openapi.json").json()
+
+    assert document["paths"]["/v1/activity/events"]["get"]["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ] == {"$ref": "#/components/schemas/ActivityPage"}
+    assert document["paths"]["/v1/experiments/{experiment}/events"]["get"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/ActivityPage"}
+    assert document["paths"]["/v1/environments/{environment}/activity"]["get"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/ActivityPage"}
+    assert document["paths"]["/v1/activity/snapshot"]["get"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/ActivitySnapshot"}
+
+
 def test_http_boundaries_reject_oversize_invalid_and_unavailable_requests(tmp_path, monkeypatch):
     client, store, session, researcher, spec, environment, headers, agent_headers = service(tmp_path)
 

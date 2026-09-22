@@ -2,7 +2,7 @@
 
 The EnvironmentHarness HTTP API exposes environment sessions, evidence, activity, artifacts, and evaluation results. API version 1 uses the `/v1` path prefix and the `environment-session.v1` protocol.
 
-The canonical machine-readable contract is [`contracts/openapi.json`](../contracts/openapi.json). A running service exposes the same document at `/openapi.json` and interactive Swagger UI at `/docs`. [`PROTOCOL.md`](PROTOCOL.md) defines authority, lifecycle, recovery, and evidence guarantees that cannot be expressed completely in OpenAPI.
+The canonical machine-readable contract is [`contracts/openapi.json`](../contracts/openapi.json). A running service exposes the same document at `/openapi.json` and interactive Swagger UI at `/docs`. Standalone JSON Schemas under `contracts/`, including `ActivityPage.schema.json` and `ActivitySnapshot.schema.json`, record the corresponding durable response shapes. [`PROTOCOL.md`](PROTOCOL.md) defines authority, lifecycle, recovery, and evidence guarantees that cannot be expressed completely in OpenAPI.
 
 ## Base URL and authentication
 
@@ -98,7 +98,7 @@ curl --fail-with-body -H "Authorization: Bearer $EH_TOKEN" \
   "$EH_URL/v1/environment"
 ```
 
-The response is an `EnvironmentSpec`. It declares the environment implementation, observation and action JSON Schemas, scheduling mode, modalities, capabilities, purposes, and phase behavior. The versioned schema is [`EnvironmentSpec.schema.json`](../contracts/EnvironmentSpec.schema.json).
+The response is an `EnvironmentSpec`. It declares the environment implementation, observation and action JSON Schemas, scheduling mode, modalities, capabilities, purposes, environment-supplied operation identities, and phase behavior. The versioned schema is [`EnvironmentSpec.schema.json`](../contracts/EnvironmentSpec.schema.json); reusable operation identity and JSON configuration use [`OperationSpec.schema.json`](../contracts/OperationSpec.schema.json).
 
 ## Environment sessions
 
@@ -347,6 +347,10 @@ curl --fail-with-body -H "Authorization: Bearer $EH_TOKEN" \
 
 Activity SSE pages include `retry: 2000` and a heartbeat. Consumers must tolerate duplicate IDs and recover from a snapshot after reconnecting.
 
+The JSON responses for all three activity feeds conform to
+[`ActivityPage.schema.json`](../contracts/ActivityPage.schema.json). OpenAPI records both the typed
+JSON response and the alternate `text/event-stream` representation.
+
 ### Read the activity snapshot
 
 ```sh
@@ -355,6 +359,8 @@ curl --fail-with-body -H "Authorization: Bearer $EH_TOKEN" \
 ```
 
 The response contains current experiment, scenario, and environment-session records plus the current global activity cursor. It is the recovery source for clients that miss activity events.
+Its machine-readable response contract is
+[`ActivitySnapshot.schema.json`](../contracts/ActivitySnapshot.schema.json).
 
 ### Store and download an artifact
 

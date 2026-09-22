@@ -195,6 +195,19 @@ export function describe(event) {
         return `Score report revision ${compact(payload.revision)} recorded.`;
     if (kind === 'artifact')
         return `Artifact ${compact(payload.id)} recorded.`;
+    if (kind === 'operation.intent') {
+        const request = record(payload.request);
+        return `${compact(payload.participant)} prepared ${compact(request?.operation)} as operation ${compact(payload.id)}.`;
+    }
+    if (kind === 'operation.dispatched')
+        return `Operation ${compact(payload.id)} dispatched under lease epoch ${compact(payload.epoch)}.`;
+    if (kind === 'operation.receipt') {
+        const receipt = record(payload.receipt) ?? {};
+        const summary = scalars(Object.fromEntries(Object.entries(receipt)
+            .filter(([key]) => key !== 'operation_id')
+            .map(([key, value]) => [key.replaceAll('_', ' '), value])));
+        return `Operation ${compact(payload.id)} completed${summary ? `: ${summary}` : ''}.`;
+    }
     if (kind === 'observation.delivered')
         return `${participantOf(event)} ${cellText(event, 'observation')}.`;
     if (kind === 'action.attempted')

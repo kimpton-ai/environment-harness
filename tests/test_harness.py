@@ -7,14 +7,18 @@ from pydantic import BaseModel
 from environment_harness import (
     AgentSpec,
     EnvironmentHarness,
+    EnvironmentOperation,
     EnvironmentSession,
     ExperimentResult,
     ExperimentSpec,
+    OperationSpec,
     Principal,
     Scenario,
 )
 from environment_harness.contracts import Capabilities, EnvironmentSpec, Transition
 from environment_harness.errors import Conflict, Forbidden
+from environment_harness.operations import Operations
+from environment_harness.runner import run as run_session
 from environment_harness.server import create_app
 
 
@@ -84,6 +88,133 @@ def test_harness_runs_a_standalone_environment_session(tmp_path):
     assert session.status == "succeeded"
     assert session.scenario_id == "standalone"
     assert session.experiment_id is None
+
+
+def test_harness_rejects_a_session_runner_that_does_not_return_the_current_record(tmp_path):
+    def invalid_runner(session, environment, researcher, agents, *, turns):
+        return {"status": "completed"}
+
+    harness = EnvironmentHarness(
+        tmp_path,
+        environment_factory=ScenarioEnvironment,
+        agent_factories={"agent": ScenarioAgent},
+        session_runner=invalid_runner,
+    )
+
+    session = harness.run(Scenario(id="invalid-runner", input={"difficulty": 2}), turns=1)
+
+    assert session.status == "failed"
+    record = next(
+        item
+        for item in harness.store.activity_snapshot(harness.researcher)["standalone"]
+        if item["id"] == session.id
+    )
+    assert record["failure"] == "Conflict"
+
+
+def test_harness_freezes_environment_supplied_operation_specs(tmp_path):
+    class InspectOperation(EnvironmentOperation):
+        endpoint = "world"
+        spec = OperationSpec(name="world.inspect", version="unreal-1", config={"level": "Arena"})
+
+        def execute(self, operation_id, request, maximum_cost_micros, *, authority):
+            authority(request["payload"])
+            return {"operation_id": operation_id, "cost_micros": 0}
+
+    class OperableEnvironment(ScenarioEnvironment):
+        def __init__(self):
+            operation = InspectOperation()
+            self.operations = {operation.spec.name: operation}
+            self.spec = ScenarioEnvironment.spec.model_copy(
+                update={
+                    "operations": (OperationSpec(name=operation.spec.name, version=operation.spec.version),)
+                }
+            )
+
+    def run_with_inspection(session, environment, researcher, agents, *, turns):
+        run_session(session, environment, researcher, agents, turns=1)
+        agent = Principal(
+            tenant=researcher.tenant,
+            subject="agent",
+            role="agent",
+            environment=environment,
+            participant="agent",
+        )
+        operations = Operations(session.store)
+        operations.prepare(
+            environment,
+            agent,
+            "inspect",
+            endpoint="world",
+            operation="world.inspect",
+            payload={"location": "Arena"},
+        )
+        lease = session.lease(environment, researcher, "example-operation")
+        try:
+            operations.dispatch(session, environment, researcher, lease, "inspect")
+        finally:
+            session.release(environment, researcher, lease)
+        return run_session(session, environment, researcher, agents, turns=turns - 1)
+
+    harness = EnvironmentHarness(
+        tmp_path,
+        environment_factory=OperableEnvironment,
+        agent_factories={"agent": ScenarioAgent},
+        session_runner=run_with_inspection,
+    )
+
+    session = harness.run(Scenario(id="operable", input={"difficulty": 2}), turns=2)
+
+    manifest = session.get(session.id, harness.researcher)["experiment"]
+    assert manifest["operations"] == [InspectOperation.spec.model_dump(mode="json")]
+    assert manifest["policy"]["allowed_endpoints"] == ["world"]
+    assert manifest["policy"]["allowed_operations"] == ["world.inspect"]
+    evidence = list(harness.store.replay(session.id, harness.researcher))
+    assert (
+        next(event for event in evidence if event["kind"] == "operation.receipt")["payload"]["receipt"][
+            "operation_id"
+        ]
+        == f"{session.id}:inspect"
+    )
+
+
+def test_experiment_rejects_invalid_environment_operations_before_queueing(tmp_path):
+    class BrokenEnvironment(ScenarioEnvironment):
+        spec = ScenarioEnvironment.spec.model_copy(
+            update={"operations": (OperationSpec(name="world.inspect", version="1"),)}
+        )
+
+    harness = EnvironmentHarness(
+        tmp_path,
+        environment_factory=BrokenEnvironment,
+        agent_factories={"agent": ScenarioAgent},
+    )
+    experiment = harness.experiment(
+        "Broken operation",
+        (Scenario(id="broken", input={"difficulty": 2}),),
+        turns=1,
+    )
+
+    with pytest.raises(Conflict, match="world.inspect.*runtime implementation"):
+        experiment.start()
+    assert harness.store.activity_snapshot(harness.researcher)["experiments"] == []
+
+
+def test_standalone_rejects_invalid_environment_operations_before_queueing(tmp_path):
+    class BrokenEnvironment(ScenarioEnvironment):
+        spec = ScenarioEnvironment.spec.model_copy(
+            update={"operations": (OperationSpec(name="world.inspect", version="1"),)}
+        )
+
+    harness = EnvironmentHarness(
+        tmp_path,
+        environment_factory=BrokenEnvironment,
+        agent_factories={"agent": ScenarioAgent},
+    )
+
+    with pytest.raises(Conflict, match="world.inspect.*runtime implementation"):
+        harness.start(Scenario(id="broken", input={"difficulty": 2}), turns=1)
+    assert harness.store.activity_snapshot(harness.researcher)["standalone"] == []
 
 
 def test_experiment_expands_scenarios_and_trials_reproducibly(tmp_path):

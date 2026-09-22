@@ -374,35 +374,32 @@ try {
     'Refresh remains visibly active before returning to idle with the latest complete sync time',
   );
   assert.deepEqual(
-    await evaluate(`(() => {const button=document.querySelector('.experiment-disclosure'); return [button.textContent, button.getAttribute('aria-expanded'), Boolean(button.getAttribute('aria-controls'))];})()`),
-    ['View 2 scenarios', 'false', true],
-    'experiment disclosure announces its count and accessible state',
+    await evaluate(`(() => {const button=document.querySelector('.experiment-disclosure'); const box=button.getBoundingClientRect(); return [button.textContent, button.getAttribute('aria-expanded'), Boolean(button.getAttribute('aria-controls')), box.width > 1, box.height > 1];})()`),
+    ['View 4 sessions', 'false', true, true, true],
+    'experiment disclosure visibly announces its environment-session count and accessible state',
   );
-  await evaluate(`document.querySelector('.experiment-parent').click()`);
-  await waitFor('document.querySelectorAll(".scenario-row[data-scenario-id]").length === 2');
-  assert.equal(
-    await evaluate(`document.querySelector('.scenario-name')?.textContent`),
-    'Routine request',
-    'scenario rows use their frozen human-readable names',
-  );
+  await evaluate(`document.querySelector('.experiment-disclosure').click()`);
+  await waitFor('document.querySelectorAll(".scenario-session[data-session-id]").length === 4');
   assert.deepEqual(
     await evaluate(`[
       location.pathname,
       document.querySelector('.experiment-name')?.tagName,
+      document.querySelector('.experiment-name')?.getAttribute('href')?.startsWith('/experiment/'),
+      document.querySelectorAll('.scenario-row[data-scenario-id]').length,
       document.querySelectorAll('.standalone-session[data-session-id]').length,
     ]`),
-    ['/home', 'STRONG', 3],
-    'expanding an experiment keeps the index URL and uses a non-navigating label',
+    ['/home', 'A', true, 0, 3],
+    'expanding an experiment keeps the index URL while its name links to dedicated details',
   );
   assert.equal(
     await evaluate('document.querySelector(".experiment-disclosure").textContent'),
-    'Hide scenarios',
-    'clicking an experiment row expands its scenarios inline',
+    'Hide sessions',
+    'the disclosure expands environment sessions directly below the experiment',
   );
   assert.deepEqual(
     await evaluate(`Array.from(document.querySelector('.home-session-columns')?.children ?? []).map(node => node.textContent)`),
     ['', 'Name', 'Type', 'Status', 'Sessions', 'Turns'],
-    'Home identifies hierarchy counts and recorded turns as separate columns',
+    'Home preserves the established row distinctions and aggregate count columns',
   );
   assert.equal(
     await evaluate(`getComputedStyle(document.querySelector('.home-session-columns > :last-child')).textAlign`),
@@ -425,63 +422,50 @@ try {
   assert.deepEqual(
     await evaluate(`[
       document.querySelector('.experiment-parent')?.children[2]?.textContent,
-      document.querySelector('.scenario-row')?.children[2]?.textContent,
+      document.querySelector('.scenario-session')?.children[2]?.textContent,
       document.querySelector('.standalone-session')?.children[2]?.textContent,
+      document.querySelector('.experiment-parent')?.children[3]?.textContent,
+      document.querySelector('.scenario-session')?.children[3]?.textContent,
+      document.querySelector('.standalone-session')?.children[3]?.textContent,
       document.querySelector('.experiment-parent')?.children[4]?.textContent,
-      document.querySelector('.scenario-row')?.children[4]?.textContent,
-      document.querySelector('.standalone-session')?.children[4]?.textContent,
+      document.querySelector('.scenario-session')?.children[4]?.textContent,
+      document.querySelector('[data-turn-count="24"]')?.children[4]?.textContent,
       document.querySelector('.experiment-parent')?.children[5]?.textContent,
-      document.querySelector('.scenario-row')?.children[5]?.textContent,
-      document.querySelector('[data-turn-count="24"]')?.children[5]?.textContent,
+      document.querySelector('.scenario-session')?.children[5]?.textContent,
+      document.querySelector('.scenario-session .home-session-cell small')?.textContent.includes('Agent'),
+      document.querySelector('.scenario-session .home-session-cell small')?.textContent.includes('2 of 2 turns'),
+      document.querySelector('.scenario-session .home-session-cell small')?.textContent.includes('Completed'),
     ]`),
-    ['Experiment', 'Scenario', 'Session', '4', '2', '1', '8', '4', '24'],
-    'grouped rows sum recorded turns across their environment sessions',
+    ['Experiment', 'Session', 'Session', 'Completed', 'Completed', 'Completed', '4', '1', '1', '8', '2', true, true, true],
+    'the table keeps its established columns while session identity includes participants, target turns, and activity',
   );
-  assert.deepEqual(
-    await evaluate(`(() => {const button=document.querySelector('.scenario-disclosure'); return [button.textContent, button.getAttribute('aria-expanded'), Boolean(button.getAttribute('aria-controls'))];})()`),
-    ['View 2 sessions', 'false', true],
-    'scenario disclosure announces its environment-session count and accessible state',
-  );
-  await evaluate(`document.querySelector('.scenario-row').click()`);
-  await waitFor('document.querySelectorAll(".scenario-session[data-session-id]").length === 2');
   assert.equal(
-    await evaluate(`document.querySelector('.scenario-sessions .session-name')?.textContent`),
+    await evaluate(`document.querySelector('.experiment-children .session-name')?.textContent`),
     'Routine request · Trial 1',
     'environment-session rows combine the scenario name with their trial',
-  );
-  assert.equal(
-    await evaluate(`document.querySelector('.scenario-session')?.children[2]?.textContent`),
-    'Session',
-    'environment sessions appear beneath their scenario',
-  );
-  assert.equal(
-    await evaluate(`document.querySelector('.scenario-session')?.children[4]?.textContent`),
-    '1',
-    'each environment-session row contributes one session',
-  );
-  assert.equal(
-    await evaluate(`document.querySelector('.scenario-session')?.children[5]?.textContent`),
-    '2',
-    'grouped environment sessions report their recorded turn count',
   );
   if (process.env.BROWSER_UI_SCREENSHOT_DIR) {
     const screenshot = await command('Page.captureScreenshot', {format: 'png', captureBeyondViewport: false});
     writeFileSync(`${process.env.BROWSER_UI_SCREENSHOT_DIR}/home-hierarchy.png`, screenshot.data, 'base64');
   }
-  await evaluate(`document.querySelector('.scenario-row').click()`);
-  await waitFor('document.querySelectorAll(".scenario-session[data-session-id]").length === 0');
-  await evaluate(`document.querySelector('.scenario-name').click()`);
-  await waitFor('document.querySelectorAll(".scenario-session[data-session-id]").length === 2');
+  await evaluate(`document.querySelector('.experiment-name').click()`);
+  await waitFor(`location.pathname.startsWith('/experiment/')`);
   assert.deepEqual(
     await evaluate(`[
-      location.pathname,
-      document.querySelector('.scenario-name')?.tagName,
-      document.querySelectorAll('.scenario-row[data-scenario-id]').length,
-      document.querySelectorAll('.scenario-session[data-session-id]').length,
+      location.pathname.startsWith('/experiment/'),
+      document.querySelector('.home-heading h1')?.textContent,
+      document.querySelector('.home-list-heading h2')?.textContent,
+      document.querySelectorAll('.experiment-parent').length,
     ]`),
-    ['/home', 'STRONG', 2, 2],
-    'expanding a scenario keeps the index URL and uses a non-navigating label',
+    [true, 'Support response evaluation', 'Experiment Sessions', 1],
+    'the experiment name opens a dedicated detail route for that experiment',
   );
+  if (process.env.BROWSER_UI_SCREENSHOT_DIR) {
+    const screenshot = await command('Page.captureScreenshot', {format: 'png', captureBeyondViewport: false});
+    writeFileSync(`${process.env.BROWSER_UI_SCREENSHOT_DIR}/experiment.png`, screenshot.data, 'base64');
+  }
+  await evaluate(`document.querySelector('#home').click()`);
+  await waitFor(`location.pathname === '/home'`);
   await evaluate(`document.querySelector('.experiment-parent > input[type=checkbox]').click()`);
   await waitFor('document.querySelector("#compare")?.textContent === "Compare 4 Sessions"');
   assert.equal(
@@ -507,7 +491,7 @@ try {
   await evaluate(`document.querySelector('.experiment-parent > input[type=checkbox]').click()`);
   await waitFor('document.querySelector("#home-selection")?.hidden === true');
   await evaluate(`document.querySelector('.experiment-disclosure').dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowLeft', bubbles:true}))`);
-  await waitFor('document.querySelectorAll(".scenario-row[data-scenario-id]").length === 0');
+  await waitFor('document.querySelectorAll(".scenario-session[data-session-id]").length === 0');
   await evaluate(`document.querySelector('.experiment-parent > input[type=checkbox]').click()`);
   await waitFor('document.querySelectorAll(".scenario-session[data-session-id]").length === 4');
   assert.equal(
@@ -519,7 +503,7 @@ try {
   await evaluate(`document.querySelector('.experiment-parent > input[type=checkbox]').click()`);
   await waitFor('document.querySelector("#home-selection")?.hidden === true');
   await evaluate(`document.querySelector('.experiment-parent').click()`);
-  await waitFor('document.querySelectorAll(".scenario-row[data-scenario-id]").length === 0');
+  await waitFor('document.querySelectorAll(".scenario-session[data-session-id]").length === 0');
   assert.equal(
     await evaluate('document.querySelector(".session-drawer") === null'),
     true,

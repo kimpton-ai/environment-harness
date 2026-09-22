@@ -4,12 +4,14 @@ from contextlib import suppress
 
 from .contracts import Action, Principal
 from .errors import Conflict, Unsupported
+from .operations import environment_operations
 from .runtime import EnvironmentSession
 from .store import uid
 
 
 def check(store, environment, experiment, action_factory, *, events=()):
     events = tuple(events)
+    operations = environment_operations(environment)
     if environment.spec.scheduling == "event" and environment.spec.phase_deadline == "wall" and not events:
         raise Unsupported("event conformance requires explicit input events")
     who = Principal(tenant=uid(), subject="conformance", role="researcher")
@@ -56,6 +58,7 @@ def check(store, environment, experiment, action_factory, *, events=()):
         return {
             "environment": environment_id,
             "actions": len(receipts),
+            "operations": len(operations),
             "evidence": evidence,
             "checkpoint": checkpoint,
             "scope": "one supplied contract transition; not a live or stress qualification",

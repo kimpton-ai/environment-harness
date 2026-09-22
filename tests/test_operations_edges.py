@@ -3,10 +3,10 @@ import json
 import pytest
 
 from environment_harness import AgentSpec, EnvironmentSession, EvidenceStore, ExperimentSpec, Principal
-from environment_harness.contracts import RunPolicy
+from environment_harness.contracts import OperationSpec, RunPolicy
 from environment_harness.errors import BudgetExceeded, Conflict, Forbidden, Unsupported
 from environment_harness.fixtures import SyntheticEnvironment
-from environment_harness.operations import Operations
+from environment_harness.operations import EnvironmentOperation, Operations
 
 
 def setup(tmp_path):
@@ -117,6 +117,81 @@ def test_dispatch_and_settle_fail_closed_then_become_idempotent(tmp_path):
     assert operations.settle(environment, researcher, "operation", receipt) == receipt
     with pytest.raises(Conflict, match="conflicting receipts"):
         operations.settle(environment, researcher, "operation", receipt | {"result": "changed"})
+
+
+def test_environment_package_supplies_custom_operation_without_core_registration(tmp_path):
+    class WorldOperation(EnvironmentOperation):
+        endpoint = "world"
+        spec = OperationSpec(name="world.teleport", version="unreal-1", config={"map": "Arena"})
+
+        def validate(self, request, manifest):
+            assert manifest["operations"] == [self.spec.model_dump(mode="json")]
+            return request["payload"]
+
+        def execute(self, operation_id, request, maximum, *, authority):
+            authority(request["payload"])
+            return {"operation_id": operation_id, "cost_micros": 0, "location": request["payload"]}
+
+    operation = WorldOperation()
+    environment_impl = SyntheticEnvironment()
+    environment_impl.spec = environment_impl.spec.model_copy(update={"operations": (operation.spec,)})
+    environment_impl.operations = {operation.spec.name: operation}
+    store = EvidenceStore(tmp_path)
+    session = EnvironmentSession(store, environment_impl)
+    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    spec = ExperimentSpec(
+        environment=environment_impl.spec,
+        participants=(AgentSpec(id="a", implementation="synthetic", policy_version="1"),),
+        operations=(operation.spec,),
+        policy=RunPolicy(allowed_endpoints=("world",), allowed_operations=("world.teleport",)),
+    )
+    environment = session.create(spec, researcher)["id"]
+    agent = Principal(tenant="tenant", subject="a", role="agent", environment=environment, participant="a")
+    operations = Operations(store)
+    operations.prepare(
+        environment,
+        agent,
+        "teleport",
+        endpoint="world",
+        operation="world.teleport",
+        payload={"x": 4, "y": 2},
+    )
+    lease = session.lease(environment, researcher, "worker")
+
+    frozen = operation.spec
+    operation.spec = operation.spec.model_copy(update={"config": {"map": "Other"}})
+    with pytest.raises(Forbidden, match="frozen experiment"):
+        operations.dispatch(session, environment, researcher, lease, "teleport")
+    operation.spec = frozen
+    receipt = operations.dispatch(session, environment, researcher, lease, "teleport")
+
+    assert receipt["location"] == {"x": 4, "y": 2}
+
+
+def test_experiment_rejects_operations_the_environment_does_not_supply():
+    environment = SyntheticEnvironment().spec
+    with pytest.raises(ValueError, match="operation is not supplied by the environment"):
+        ExperimentSpec(
+            environment=environment,
+            participants=(AgentSpec(id="a", implementation="synthetic", policy_version="1"),),
+            operations=(OperationSpec(name="world.teleport", version="1"),),
+        )
+
+
+def test_session_rejects_missing_runtime_operation(tmp_path):
+    environment_impl = SyntheticEnvironment()
+    advertised = OperationSpec(name="world.teleport", version="unreal-1")
+    environment_impl.spec = environment_impl.spec.model_copy(update={"operations": (advertised,)})
+    spec = ExperimentSpec(
+        environment=environment_impl.spec,
+        participants=(AgentSpec(id="a", implementation="synthetic", policy_version="1"),),
+        operations=(advertised,),
+    )
+
+    with pytest.raises(Conflict, match="runtime implementation"):
+        EnvironmentSession(EvidenceStore(tmp_path), environment_impl).create(
+            spec, Principal(tenant="tenant", subject="researcher", role="researcher")
+        )
 
 
 def test_budget_overrun_reconciliation_and_prepared_cancellation(tmp_path):

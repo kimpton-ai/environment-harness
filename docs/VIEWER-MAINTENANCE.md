@@ -62,7 +62,10 @@ screenshots. All `/v1` routes remain authenticated in both modes.
 
 ### Live updates
 
-Home loads the environment-session list and activity snapshot together. It then reads finite
+Home loads the environment-session list and activity snapshot together. Experiment disclosures
+expand directly into their environment sessions; the experiment name separately opens the stable
+`/experiment/{experiment}` detail route. Child rows expose scenario and trial identity, status,
+turn progress, participants and latest activity without a label-only intermediate row. It then reads finite
 server-sent-event activity pages. After three activity-stream failures it falls back to the JSON
 activity endpoint with backoff. Changes refresh the list and any selected environment session.
 
@@ -74,7 +77,9 @@ session when changing this behavior; a viewer disconnect must never block eviden
 
 `packages/typescript/src/timeline.ts` mirrors `src/environment_harness/presentation.py`. Keep their
 turn grouping, participant attribution, inherited-record reconstruction, missing-state language,
-and field names aligned. The browser is a projection of recorded evidence, not a second authority.
+operation intent/receipt descriptions, and field names aligned. The browser is a projection of
+recorded evidence, not a second authority. User-facing receipt summaries replace identifier
+underscores with spaces while preserving the recorded receipt unchanged.
 
 The Progression page derives time series from executed rewards, public numeric signals, and score
 reports. Missing score revisions remain gaps rather than invented values. Comparison only pools
@@ -169,8 +174,11 @@ source distribution, and TypeScript artifact contain the intended files.
 ## Review checklist
 
 - The empty state tells the user how to create or attach an environment session.
-- Home separates experiments from standalone environment sessions and scales through scrolling and
-  pagination.
+- Home separates experiments from standalone environment sessions, expands experiments directly
+  into useful child rows, and scales through scrolling and pagination.
+- Experiment names and disclosure controls remain separate: the name opens details while the
+  disclosure uses visible `View N sessions` / `Hide sessions` text with `aria-expanded` and
+  `aria-controls`.
 - Session tabs remain subordinate to the selected environment session.
 - Turns preserve the relationship between starting state, participant evidence, and environment
   resolution.
