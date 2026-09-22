@@ -109,3 +109,10 @@ def test_legacy_facade_retains_unknown_native_effect_without_resubmitting(tmp_pa
             10, authority=lambda binding: None,
         )
     assert len(adapter.submissions) == 1
+
+
+def test_legacy_stop_advances_legacy_epoch(tmp_path):
+    operation, _ = make_operation(tmp_path)
+    assert operation.stop_epoch == 0
+    operation.stop()
+    assert operation.stop_epoch == 1

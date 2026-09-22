@@ -328,8 +328,12 @@ class LegacyMotorOperation(EnvironmentOperation, LegacySuccessorLedger):
         return {"status": receipt["status"], "steps": list(receipt.get("steps", ())) } if receipt else None
 
     def stop(self):
-        for control in self._legacy_controls.values():
-            control.stop()
+        # Preserve the legacy epoch fence and propagate cancellation into each
+        # shared decision ledger. Both paths are durable; native stop is
+        # idempotent for the adapters this facade supports.
+        LegacySuccessorLedger.stop(self)
+        for decision in self._decision_ops.values():
+            decision.stop()
 
 
 MotorExecutor = LegacyMotorOperation
