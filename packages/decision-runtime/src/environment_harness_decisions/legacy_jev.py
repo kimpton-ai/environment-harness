@@ -9,6 +9,7 @@ import threading
 import time
 from math import ceil
 from typing import Any, Callable
+from urllib.parse import urlsplit
 
 from .contracts import Answer, ChoiceOption, DecisionQuestion, DecisionSet, Observation
 from .jev import DEFAULT_ENDPOINT
@@ -37,7 +38,10 @@ class JevSelector:
                  token_bound_multiplier: int = DEFAULT_TOKEN_BOUND_MULTIPLIER,
                  verified_token_bound: Callable[[bytes], int] | None = None,
                  verified_token_bound_source: str | None = None):
-        if not model or not endpoint.startswith("https://"):
+        parsed_endpoint = urlsplit(endpoint)
+        if (not model or parsed_endpoint.scheme != "https" or not parsed_endpoint.netloc
+                or parsed_endpoint.username is not None or parsed_endpoint.password is not None
+                or parsed_endpoint.query or parsed_endpoint.fragment):
             raise ValueError("model is required and endpoint must use HTTPS")
         if (verified_token_bound is None) != (verified_token_bound_source is None):
             raise ValueError("verified token bound and source must be supplied together")
@@ -48,7 +52,7 @@ class JevSelector:
         self.max_input_bytes = max_input_bytes
         self.price_micros_per_million = price_micros_per_million
         self.token_bound_multiplier = token_bound_multiplier
-        self._transport = transport
+        self._transport = transport or self._default_transport
         self.verified_token_bound = verified_token_bound
         self.verified_token_bound_source = verified_token_bound_source
         self.last_model_input: dict[str, Any] | None = None
@@ -74,6 +78,11 @@ class JevSelector:
                                    price_micros_per_million=self.price_micros_per_million,
                                    token_bound=self.verified_token_bound,
                                    token_bound_source=self.verified_token_bound_source)
+
+    @staticmethod
+    def _default_transport(endpoint, headers, body, timeout):
+        from .jev import JevDecisionSelector
+        return JevDecisionSelector._httpx_transport(endpoint, headers, body, timeout)
 
     @staticmethod
     def _candidate_values(candidates):

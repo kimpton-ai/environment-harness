@@ -53,3 +53,19 @@ def test_provider_parse_failure_preserves_known_evidence():
         selector.select({}, candidates(), maximum_cost_micros=10, cancel=threading.Event(), deadline=time.monotonic() + 2)
     assert getattr(caught.value, "model_input", None)
     assert getattr(caught.value, "raw_response", None) == bad
+
+
+@pytest.mark.parametrize("endpoint", [
+    "https://user:secret@api.typesafe.ai/v1/systemone",
+    "https://api.typesafe.ai/v1/systemone?key=secret",
+    "https://api.typesafe.ai/v1/systemone#fragment",
+])
+def test_endpoint_cannot_embed_credentials_or_unfrozen_components(endpoint):
+    with pytest.raises(ValueError):
+        JevSelector(api_key="test", endpoint=endpoint)
+
+
+def test_default_transport_property_is_callable():
+    selector = JevSelector(api_key="test", verified_token_bound=lambda body: 100,
+                           verified_token_bound_source="fixture")
+    assert callable(selector.transport)

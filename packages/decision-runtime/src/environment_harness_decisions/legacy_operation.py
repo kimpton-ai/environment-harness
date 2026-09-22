@@ -35,6 +35,7 @@ from .contracts import (
     NativeReceipt,
     Objective,
     Observation,
+    OutcomeUncertain as _OutcomeUncertain,
     Selection,
     Verification,
 )
@@ -46,7 +47,7 @@ from .legacy_contracts import (
     MotorRequest,
     MotorSelection,
 )
-from .legacy_successors import LegacySuccessorLedger, _matches, _validate_candidate
+from .legacy_successors import LegacySuccessorLedger, MotorOutcomeUnknown, _matches, _validate_candidate
 from .runtime import DecisionOperation
 
 
@@ -67,10 +68,13 @@ class _LegacySelector:
         state = projection(self.request, observation.model_input)
         if not isinstance(state, dict):
             raise Forbidden("selection_observation must return an object")
-        return state
+        # Preserve the historical selector envelope.  Legacy selectors receive
+        # the projected view beneath ``observation`` so private world state
+        # never enters their input.
+        return {"observation": state}
 
     def model_input(self, observation, decisions):
-        return {"observation": self._state(observation), "questions": decisions.model_dump(mode="json")}
+        return {**self._state(observation), "questions": decisions.model_dump(mode="json")}
 
     def maximum_charge_micros(self, objective, observation, decisions):
         if self.old is None:
@@ -196,7 +200,7 @@ class _LegacyControl:
         if not callable(revalidate):
             return Admission(execution_id=execution_id, binding=binding, accepted=False, reason="revalidation_required")
         checked = revalidate(self.request, fresh, candidate, 0)
-        if not checked or checked[0] != candidate:
+        if not checked or not any(item == candidate for item in checked):
             return Admission(execution_id=execution_id, binding=binding, accepted=False, reason="plan_changed")
         invalid = _validate_candidate(self.request, candidate, fresh)
         if invalid:
@@ -354,8 +358,9 @@ class LegacyMotorOperation(EnvironmentOperation, LegacySuccessorLedger):
 
     def _project(self, operation_id, request, receipt, started):
         status = receipt["status"]
-        old_status = "completed" if status == "completed" else "cancelled" if status == "cancelled" else "blocked"
-        outcome = "completed" if status == "completed" else "cancelled" if status == "cancelled" else "rejected"
+        stale = status == "cancelled" and receipt.get("reason") in {"stale observation revision", "cancelled by stop epoch"}
+        old_status = "completed" if status == "completed" else "blocked" if stale else "cancelled" if status == "cancelled" else "blocked"
+        outcome = "completed" if status == "completed" else "rejected" if stale else "cancelled" if status == "cancelled" else "rejected"
         selection = self._legacy_selections.get(operation_id)
         control = self._legacy_controls.get(operation_id)
         steps = []
@@ -418,3 +423,7 @@ class LegacyMotorOperation(EnvironmentOperation, LegacySuccessorLedger):
 
 
 MotorExecutor = LegacyMotorOperation
+
+# Historical callers used this name for unresolved native outcomes.
+MotorOutcomeUnknown = _OutcomeUncertain
+OutcomeUncertain = MotorOutcomeUnknown
