@@ -14,7 +14,7 @@ import os
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping, Protocol
+from typing import Any, Mapping, Protocol
 
 from .contracts import ProviderFailure as _SharedProviderFailure
 
@@ -285,6 +285,87 @@ class JevDecisionSelector:
                 abstention=ABSTENTION_CANCELLED, versions=result.versions
             )
         return result
+
+    def request_encoded(
+        self,
+        body: bytes,
+        *,
+        maximum_charge_micros: int,
+        cancel: threading.Event,
+        deadline: float,
+    ) -> tuple[dict[str, Any], int, dict[str, str | None]]:
+        """Send an already-authorized request and validate its provider envelope.
+
+        Environment adapters sometimes have a richer, game-specific question
+        schema than the shared contracts.  They still use this method for the
+        provider boundary, so authorization, bounds, transport, and envelope
+        handling remain in one place.  The adapter owns interpretation of the
+        validated answer fields.
+        """
+        try:
+            request = json.loads(body)
+        except Exception as exc:
+            raise JevResponseError("Jev request was not valid JSON") from exc
+        if not isinstance(request, dict) or request.get("model") != self.model:
+            raise JevResponseError("Jev request omitted the pinned model", model_input=request if isinstance(request, dict) else {})
+        if len(body) > self.max_input_bytes:
+            raise JevBudgetError("Jev input exceeds max_input_bytes", model_input=request)
+        if isinstance(maximum_charge_micros, bool) or maximum_charge_micros < 0:
+            raise ValueError("maximum_charge_micros must be nonnegative")
+        if cancel.is_set() or time.monotonic() >= deadline:
+            raise JevError(ABSTENTION_CANCELLED)
+        if self.token_bound is None:
+            raise JevBudgetError("Jev requires a verified token bound", model_input=request)
+        bound = self.token_bound(body)
+        if isinstance(bound, bool) or not isinstance(bound, int) or bound < 0:
+            raise ValueError("token_bound must return a nonnegative integer")
+        reserved = math.ceil(bound * self.price_micros_per_million / 1_000_000)
+        if reserved > maximum_charge_micros:
+            raise JevBudgetError("Jev verified charge bound exceeds operation budget", model_input=request,
+                                 cost_micros=reserved)
+        try:
+            raw = self.transport(
+                self.endpoint,
+                {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+                body,
+                max(0.001, deadline - time.monotonic()),
+            )
+        except _SharedProviderFailure as exc:
+            exc.model_input = request
+            exc.provider_response = None
+            exc.raw_response = {}
+            exc.cost_micros = None
+            raise
+        except Exception as exc:
+            error = JevProviderFailure("Jev request outcome is unknown", submitted=True, uncharged=False)
+            error.model_input = request
+            error.provider_response = None
+            error.raw_response = {}
+            error.cost_micros = None
+            raise error from exc
+        try:
+            response = json.loads(raw) if isinstance(raw, (bytes, bytearray, str)) else dict(raw)
+        except Exception as exc:
+            raise JevResponseError("Jev response was not valid JSON", provider_response=raw,
+                                   model_input=request) from exc
+        if not isinstance(response, dict) or response.get("model") != self.model:
+            raise JevResponseError("Jev response omitted or changed the pinned model",
+                                   provider_response=response, model_input=request)
+        usage = response.get("usage")
+        if not isinstance(usage, dict) or not all(
+            isinstance(usage.get(key), int) and not isinstance(usage.get(key), bool) and usage[key] >= 0
+            for key in ("input_tokens", "output_tokens")
+        ):
+            raise JevResponseError("Jev response omitted valid usage", provider_response=response, model_input=request)
+        if usage["input_tokens"] > bound:
+            cost = math.ceil(usage["input_tokens"] * self.price_micros_per_million / 1_000_000)
+            raise JevBudgetError("Jev usage exceeded the verified token bound", provider_response=response,
+                                 model_input=request, cost_micros=cost)
+        cost = math.ceil(usage["input_tokens"] * self.price_micros_per_million / 1_000_000)
+        if cost > reserved or cost > maximum_charge_micros:
+            raise JevBudgetError("Jev usage exceeded the verified charge bound", provider_response=response,
+                                 model_input=request, cost_micros=cost)
+        return response, cost, self.evidence.as_dict()
 
     def _parse(self, response: Any, request: dict[str, Any], decisions: Any) -> Any:
         if not isinstance(response, dict) or response.get("model") != self.model:
