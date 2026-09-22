@@ -19,7 +19,10 @@ def _decisions():
                 options=(ChoiceOption(id="left", label="left"), ChoiceOption(id="right", label="right")),
             ),
             DecisionQuestion(id="safe", kind="noul", prompt="Is this safe?"),
-            DecisionQuestion(id="throttle", kind="score", prompt="Throttle", minimum=0, maximum=4),
+            DecisionQuestion(
+                id="throttle", kind="score", prompt="Throttle", minimum=0, maximum=4,
+                options=tuple(ChoiceOption(id=str(i), label=label) for i, label in enumerate(("none", "low", "medium", "high", "max"))),
+            ),
         ),
     )
 
@@ -115,3 +118,30 @@ def test_cancel_before_transport_does_not_call_provider():
     )
     assert result.abstention == "cancelled"
     assert calls == []
+
+
+def test_parse_failure_retains_request_response_and_charge_evidence():
+    response = _response()
+    response["answers"]["direction"]["choice"] = "not-authorized"
+    selector = JevDecisionSelector(
+        api_key="x", transport=lambda *_: response, token_bound=lambda body: 100, token_bound_source="fixture"
+    )
+    with pytest.raises(JevResponseError) as caught:
+        selector.select(
+            "s", None, Observation(revision="obs-1", model_input={"private": "state"}), _decisions(),
+            cancel=threading.Event(), deadline=time.monotonic() + 2,
+        )
+    error = caught.value
+    assert error.raw_response == response
+    assert error.model_input["state"] == {"private": "state"}
+    assert error.cost_micros == 1
+
+
+def test_fractional_score_requires_explicit_discrete_levels():
+    decisions = DecisionSet(
+        id="d", observation_revision="obs-1",
+        questions=(DecisionQuestion(id="score", kind="score", prompt="rate", minimum=0.5, maximum=1.5),),
+    )
+    selector = JevDecisionSelector(api_key="x", transport=lambda *_: _response())
+    with pytest.raises(ValueError, match="fractional bounds"):
+        selector.model_input(Observation(revision="obs-1", model_input={}), decisions)
