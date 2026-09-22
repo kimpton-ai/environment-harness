@@ -20,4 +20,4 @@ __all__ = [
     "SessionRunner",
     "EvidenceStore",
 ]
-__version__ = "0.2.4rc1"
+__version__ = "0.2.4rc2"

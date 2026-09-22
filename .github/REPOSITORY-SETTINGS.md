@@ -5,14 +5,23 @@ GitHub settings are part of the security boundary and cannot be enforced by file
 - a `main` ruleset requiring the `Python`, `Cross-platform`, `TypeScript`, `Security`, and `Distribution` checks, each bound to the GitHub Actions integration as its expected source;
 - at least one independent approval, required CODEOWNERS approval, dismissal of stale approvals, and approval of the complete commit range;
 - blocked direct pushes, force pushes, branch deletion, and ordinary administrator/team bypasses;
-- a `v*` tag ruleset allowing creation only by release maintainers, while blocking update/deletion and automation bypass;
+- a `v*` tag ruleset allowing creation only by the repository's GitHub Actions integration after
+  the protected workflow gate, while blocking update, deletion, and every other bypass path;
+- a protected `release-tag` environment requiring approval by a security/release maintainer other
+  than the release PR author or workflow initiator, with administrator bypass disabled;
 - protected `github-release` environment approval by a security/release maintainer other than the release PR author, with administrator bypass disabled;
 - a protected `pypi` environment with the same independent-review requirement and administrator bypass disabled;
 - GitHub Actions restricted to GitHub-owned actions and the explicitly approved third-party actions already used by the workflows, with full commit-SHA pinning required;
 - Dependabot alerts and security updates, immutable GitHub Releases, and GitHub Private Vulnerability Reporting; and
-- review of the complete release commit range before a maintainer creates a tag.
+- permission for the CODEOWNER-protected `release-prepare.yml` workflow to create branches and pull
+  requests with `GITHUB_TOKEN`; it must never approve or merge its own pull request; and
+- review of the complete release commit range before the protected publisher creates a tag.
 
-Do not install a release GitHub App or store a long-lived release credential in Actions. Release preparation and protected tag creation are deliberate maintainer operations. Dependabot may open security-update pull requests, but dependency updates are never auto-merged. Review branch rules and the Actions allowlist after ownership or workflow changes, and record exceptions in a tracked security issue.
+Do not install a release GitHub App or store a long-lived release credential in Actions. Release
+preparation and protected tag creation use the short-lived workflow `GITHUB_TOKEN`, with write
+permissions isolated to their dedicated jobs. Dependabot may open security-update pull requests,
+but dependency updates are never auto-merged. Review branch rules and the Actions allowlist after
+ownership or workflow changes, and record exceptions in a tracked security issue.
 
 Treat CI path classification only as a runner-cost optimization. Required checks must continue to report on every pull request, and incomplete GitHub file metadata must run additional checks rather than skip them. The security team owns `.github/workflows/ci.yml`; maintain the required CODEOWNER and last-push approval rules so proposed workflow code cannot approve itself.
 
@@ -20,10 +29,32 @@ Release immutability applies when a release is published after the repository se
 
 Before the first publication, create a pending Trusted Publisher on production PyPI for project `environment-harness`. Create it within the Kimpton PyPI organization when that organization is ready. Use GitHub owner `kimpton-ai`, repository `environment-harness`, workflow filename `release.yml`, and environment name `pypi`. The pending publisher creates the project on its first successful publication, so do not create an API token or add a PyPI password to GitHub.
 
-After adding notes under `Unreleased`, start a release candidate with `python scripts/release_version.py prepare --bump patch --prerelease rc` (or `minor`/`major`). This creates a PEP 440 Python version such as `0.2.3rc1` and the corresponding npm SemVer version `0.2.3-rc.1`. The helper synchronizes every Python, TypeScript, lockfile, and README version. Validate the proposed tag with `python scripts/release_version.py validate --release-tag vX.Y.Zrc1`, run the release checks, and open a normal reviewed PR. After an RC is published and more changes have accumulated under `Unreleased`, prepare the next one with `python scripts/release_version.py prepare --prerelease rc`. Alpha and beta stages are also available through `--prerelease alpha` and `--prerelease beta`; stages may advance but never move backwards.
+After adding notes under `Unreleased`, run **Prepare release pull request** on `main`. Choose a
+`patch`, `minor`, or `major` bump and the `rc` stage for the first candidate. The workflow creates a
+PEP 440 Python version such as `0.2.3rc1`, the corresponding npm SemVer version `0.2.3-rc.1`, a
+`release/v0.2.3rc1` branch, and a normal reviewed pull request. For another candidate, choose bump
+`none` and stage `rc`. Alpha and beta stages are also available; stages may advance but never move
+backwards. The underlying `release_version.py prepare` commands remain available for local
+validation and recovery.
 
-When the release candidate is approved, run `python scripts/release_version.py prepare --final`. The finalization PR removes the prerelease suffix and moves the accumulated `Unreleased` notes under the final `X.Y.Z` changelog heading. A direct stable release remains available with `python scripts/release_version.py prepare --bump patch` when staging is unnecessary.
+When the release candidate is approved, run **Prepare release pull request** with bump `none` and
+stage `final`. The finalization PR removes the prerelease suffix and moves accumulated `Unreleased`
+notes under the final `X.Y.Z` changelog heading. A direct stable release remains available by
+choosing a semantic bump and stage `stable` when staging is unnecessary.
 
-After each release PR merges, copy its merge commit SHA from GitHub; do not substitute the newest `main` commit if later changes have landed. Fetch `main` and tags, detach at the recorded merge commit, and run `python scripts/release_version.py detect`. A release maintainer then creates the reported protected tag at that recorded commit with `git tag <reported-tag> <release-merge-sha>` and pushes only that tag ref. The tag dispatches the attested publisher, which waits for independent `github-release` approval before creating the GitHub release and then for `pypi` approval before publishing the wheel and source distribution. PyPI release candidates are real immutable releases, but ordinary `pip install environment-harness` excludes them; testers should request the exact RC or use `--pre`.
+Merge the release PR only after every intended code and documentation change. Then run **Attested
+GitHub release** on `main` and enter the merged release PR number. The workflow requires that PR's
+merge commit to be the exact current `main` commit, derives the version and tag without operator
+input, builds and attests the artifacts, and pauses for independent `release-tag` approval before
+creating the tag. It then waits for `github-release` approval and `pypi` approval. PyPI release
+candidates are real immutable releases, but ordinary `pip install environment-harness` excludes
+them; testers should request the exact RC or use `--pre`.
 
-The publisher requires the tag target, checked-out `HEAD`, and GitHub workflow `GITHUB_SHA` to be the same commit on `main`; its package metadata must equal the tag, and its first parent must carry an older package version. This prevents a later `main` commit from being substituted for the reviewed release merge. Provenance therefore identifies the commit that supplied the released files, and GitHub release reruns only succeed when every artifact is byte-for-byte identical. PyPI never permits replacing a published version, so a failed or incorrect RC must be followed by a newer RC. Keep both environment approvals independent of the release PR author and automation initiator.
+The publisher requires the resolved PR merge commit, checked-out `HEAD`, and workflow `GITHUB_SHA`
+to be the same current commit on `main`; its package metadata determines the tag, and its first
+parent must carry an older package version. This prevents a later `main` commit from being
+substituted for the reviewed release merge. Provenance therefore identifies the commit that
+supplied the released files, and reruns accept an existing tag only when it still targets that exact
+commit. PyPI never permits replacing a published version, so a failed or incorrect candidate must
+be followed by a newer candidate. Keep all three environment approvals independent of the release
+PR author and automation initiator.
