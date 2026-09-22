@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tarfile
 import tempfile
 from pathlib import Path
 
@@ -14,6 +15,11 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     core = next((ROOT / "dist").glob("environment_harness-*.whl"))
     companion = next((ROOT / "dist/decisions").glob("environment_harness_decisions-*.whl"))
+    with tarfile.open(next((ROOT / "dist").glob("environment_harness-*.tar.gz"))) as archive:
+        assert not any(
+            "environment_harness_decisions" in name or "packages/decision-runtime" in name
+            for name in archive.getnames()
+        )
     env = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}
     with tempfile.TemporaryDirectory(prefix="decision-distribution-") as directory:
         root = Path(directory)

@@ -15,6 +15,7 @@ import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol
+from urllib.parse import urlsplit
 
 from .contracts import ProviderFailure as _SharedProviderFailure
 
@@ -100,6 +101,7 @@ class ProviderEvidence:
     question_adapter_version: str = QUESTION_ADAPTER_VERSION
     policy_version: str = POLICY_VERSION
     token_bound_source: str | None = None
+    price_micros_per_million: int = DEFAULT_PRICE_MICROS_PER_MILLION
 
     def as_dict(self) -> dict[str, str | None]:
         values: dict[str, str | None] = {
@@ -109,6 +111,7 @@ class ProviderEvidence:
             "question_adapter_version": self.question_adapter_version,
             "policy_version": self.policy_version,
             "token_bound_source": self.token_bound_source,
+            "price_micros_per_million": str(self.price_micros_per_million),
         }
         return {key: value for key, value in values.items() if value is not None}
 
@@ -148,8 +151,16 @@ class JevDecisionSelector:
     ) -> None:
         if not model:
             raise ValueError("model is required")
-        if not endpoint.startswith("https://"):
-            raise ValueError("endpoint must use HTTPS")
+        parsed_endpoint = urlsplit(endpoint)
+        if (
+            parsed_endpoint.scheme != "https"
+            or not parsed_endpoint.netloc
+            or parsed_endpoint.username is not None
+            or parsed_endpoint.password is not None
+            or parsed_endpoint.query
+            or parsed_endpoint.fragment
+        ):
+            raise ValueError("endpoint must be HTTPS without credentials, query, or fragment")
         if max_input_bytes < 1024:
             raise ValueError("max_input_bytes must be at least 1024")
         if price_micros_per_million < 0:
@@ -164,7 +175,12 @@ class JevDecisionSelector:
         self.max_input_bytes = max_input_bytes
         self.price_micros_per_million = price_micros_per_million
         self.token_bound = token_bound
-        self.evidence = ProviderEvidence(endpoint, model, token_bound_source=token_bound_source)
+        self.evidence = ProviderEvidence(
+            endpoint,
+            model,
+            token_bound_source=token_bound_source,
+            price_micros_per_million=price_micros_per_million,
+        )
         self.transport = transport or self._httpx_transport
 
     def _question_payload(self, question: Any) -> dict[str, Any]:
@@ -357,7 +373,7 @@ class JevDecisionSelector:
             raise JevBudgetError(
                 "Jev verified charge bound exceeds operation budget",
                 model_input=request,
-                cost_micros=reserved,
+                cost_micros=0,
             )
         try:
             raw = self.transport(

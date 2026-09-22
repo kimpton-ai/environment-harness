@@ -358,7 +358,11 @@ class LegacyMotorOperation(EnvironmentOperation, LegacySuccessorLedger):
         return OperationSpec(
             name="motor.execute",
             version="decision-operation.v1",
-            config={"profile": self.profile.model_dump(mode="json"), "adapter": self.adapter.implementation},
+            config={
+                "profile": self.profile.model_dump(mode="json"),
+                "adapter": self.adapter.implementation,
+                "decision_policy": self.decision_policy.model_dump(mode="json"),
+            },
         )
 
     @property
@@ -381,7 +385,7 @@ class LegacyMotorOperation(EnvironmentOperation, LegacySuccessorLedger):
             raise Forbidden("motor profile differs from frozen manifest")
         return payload
 
-    def _invocation(self, request: MotorRequest, operation_id: str, existing=None):
+    def _invocation(self, request: MotorRequest, operation_id: str, existing=None, maximum_cost_micros=0):
         directive = request.goal_context.revision if request.goal_context else request.goal_revision
         objective = Objective(
             id=request.skill,
@@ -391,7 +395,7 @@ class LegacyMotorOperation(EnvironmentOperation, LegacySuccessorLedger):
             limits=InvocationLimits(
                 max_steps=request.max_steps,
                 timeout_ms=request.timeout_ms,
-                max_cost_micros=2**63 - 1,
+                max_cost_micros=maximum_cost_micros,
                 max_corrections=request.max_recovery_attempts,
             ),
         )
@@ -437,7 +441,9 @@ class LegacyMotorOperation(EnvironmentOperation, LegacySuccessorLedger):
             db.close()
             objective, control, invocation = self._invocation(payload, operation_id, invocation)
         else:
-            objective, control, invocation = self._invocation(payload, operation_id)
+            objective, control, invocation = self._invocation(
+                payload, operation_id, maximum_cost_micros=maximum_cost_micros
+            )
             db.execute(
                 "INSERT INTO legacy_operations VALUES (?,?,?,?)",
                 (operation_id, request_identity, maximum_cost_micros, invocation.model_dump_json()),
