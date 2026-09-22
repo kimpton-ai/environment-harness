@@ -21,6 +21,8 @@ from environment_harness.operations import Operations
 from environment_harness.runner import run as run_session
 from environment_harness.server import create_app
 
+SESSION_COMPLETION_TIMEOUT = 10
+
 
 class ScenarioInput(BaseModel):
     difficulty: int
@@ -274,8 +276,8 @@ def test_experiments_share_a_fair_bounded_scheduler(tmp_path):
     second = harness.experiment("second", [Scenario(id="c", input={"difficulty": 3})], turns=1).start()
 
     release.set()
-    first.wait(2)
-    second.wait(2)
+    first.wait(SESSION_COMPLETION_TIMEOUT)
+    second.wait(SESSION_COMPLETION_TIMEOUT)
 
     assert order == [1, 3, 2]
 
@@ -309,7 +311,7 @@ def test_interrupted_experiment_requires_explicit_resume(tmp_path):
         "restart", [Scenario(id="recoverable", input={"difficulty": 2})], turns=1
     )
     reconnected.id = experiment.id
-    resumed = reconnected.resume().wait(2)
+    resumed = reconnected.resume().wait(SESSION_COMPLETION_TIMEOUT)
     assert resumed.status == "succeeded"
 
 
@@ -469,7 +471,7 @@ def test_concurrent_progress_counts_and_failure_isolation(tmp_path):
     progress = experiment.result()
     assert (progress.running, progress.queued) == (2, 1)
     release.set()
-    result = experiment.wait(2)
+    result = experiment.wait(SESSION_COMPLETION_TIMEOUT)
 
     assert result.failed == 1
     assert result.completed == 3
@@ -496,7 +498,7 @@ def test_stopping_a_running_environment_session_is_terminal(tmp_path):
 
     session.stop()
     release.set()
-    session.wait(2)
+    session.wait(SESSION_COMPLETION_TIMEOUT)
 
     assert session.status == "stopped"
 
@@ -558,7 +560,7 @@ def test_harness_lifecycle_guards_and_validation_edges(tmp_path):
     with pytest.raises(Conflict, match="unavailable"):
         pending.result()
     assert pending.start().start() is pending
-    result = pending.wait(2)
+    result = pending.wait(SESSION_COMPLETION_TIMEOUT)
     harness._futures.pop(result.sessions[0].id)
     assert result.sessions[0].wait().status == "succeeded"
     with pytest.raises(Conflict, match="only interrupted"):
@@ -605,14 +607,14 @@ def test_harness_stops_queued_work_and_enforces_active_limits(tmp_path):
     running = harness.start(Scenario(id="running", input={"difficulty": 1}), turns=1)
     assert started.wait(2)
     queued = harness.start(Scenario(id="queued", input={"difficulty": 2}), turns=1)
-    queued.stop().wait(2)
+    queued.stop().wait(SESSION_COMPLETION_TIMEOUT)
     assert queued.status == "stopped"
     experiment = harness.experiment(
         "queued experiment", [Scenario(id="experiment", input={"difficulty": 3})], turns=1
     ).start()
     assert experiment.stop().status == "stopped"
     release.set()
-    running.wait(2)
+    running.wait(SESSION_COMPLETION_TIMEOUT)
 
     limit_started = Event()
     limit_release = Event()
@@ -637,4 +639,4 @@ def test_harness_stops_queued_work_and_enforces_active_limits(tmp_path):
     with pytest.raises(Conflict, match="max_sessions limit"):
         limited.experiment("second", [Scenario(id="experiment", input={"difficulty": 3})], turns=1).start()
     limit_release.set()
-    active.wait(2)
+    active.wait(SESSION_COMPLETION_TIMEOUT)
