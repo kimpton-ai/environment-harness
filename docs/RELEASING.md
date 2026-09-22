@@ -214,6 +214,7 @@ needed.
 Every release pull request must check whether it needs updates to:
 
 - `README.md` for installation or first-use behavior;
+- `docs/assets/` when the README's viewer screenshots no longer match the packaged UI;
 - [Deployment](DEPLOYMENT.md) for server, authentication, storage, or support boundaries;
 - [Viewer maintenance](VIEWER-MAINTENANCE.md) for the browser build or test contract;
 - [Protocol](PROTOCOL.md), generated [API reference](API-REFERENCE.md), and `contracts/` for API changes;

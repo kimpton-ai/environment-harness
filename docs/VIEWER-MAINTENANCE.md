@@ -164,6 +164,24 @@ BROWSER_UI_SCREENSHOT_DIR=.local/viewer-screenshots \
 The screenshot directory is local and must not contain private environment sessions or be
 committed as release evidence.
 
+The four screenshots rendered in `README.md` are public documentation assets under `docs/assets/`,
+not browser-test output. Refresh them when the visible hierarchy, experiment configuration, or
+report layout changes:
+
+- create Home and experiment data with `quickstart --turns 3` and
+  `examples/custom_environment_experiment.py` in one temporary store, then use a separate
+  `quickstart --turns 8` store for the Progression image;
+- run the packaged server against each store and capture a 1440 by 900 viewport;
+- capture Home with one experiment expanded, the custom experiment Overview, a session's
+  Progression tab with a real multi-point series, and one child session's Reports tab;
+- use only the repository's synthetic records and verify that the browser console is clean; and
+- keep the stable filenames `environment-harness-home.png`, `environment-harness-experiment.png`,
+  `environment-harness-progression.png`, and `environment-harness-reports.png` so the PyPI-rendered
+  README does not drift.
+
+Review these images as documentation, not as pass/fail test evidence. Interactive behavior remains
+covered by the browser checks above.
+
 ### 5. Run the complete checks
 
 ```sh
