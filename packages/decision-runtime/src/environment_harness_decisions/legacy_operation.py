@@ -211,11 +211,23 @@ class _LegacyControl:
         for index, step in enumerate(candidate.steps):
             if cancel.is_set() or time.monotonic() >= deadline:
                 return NativeReceipt(execution_id=execution_id, outcome="cancelled", reason="deadline")
-            if "before_dispatch" not in inspect.signature(self.adapter.execute).parameters:
-                raise Forbidden("legacy adapter.execute must accept before_dispatch")
-            result = self.adapter.execute(step, operation_id=execution_id,
-                                          before_dispatch=before_dispatch,
-                                          cancel=cancel, deadline=deadline)
+            admitted = False
+            def dispatch_authority(*args, **kwargs):
+                nonlocal admitted
+                before_dispatch()
+                admitted = True
+            previous_authority = getattr(self.adapter, "dispatch_authority", None)
+            self.adapter.dispatch_authority = dispatch_authority
+            try:
+                parameters = inspect.signature(self.adapter.execute).parameters
+                arguments = {"operation_id": execution_id, "cancel": cancel, "deadline": deadline}
+                if "before_dispatch" in parameters:
+                    arguments["before_dispatch"] = dispatch_authority
+                result = self.adapter.execute(step, **arguments)
+            finally:
+                self.adapter.dispatch_authority = previous_authority
+            if not admitted:
+                raise Forbidden("legacy adapter did not invoke dispatch_authority at its native boundary")
             if not isinstance(result, dict) or result.get("status") not in {"completed", "blocked", "cancelled"}:
                 return NativeReceipt(execution_id=execution_id, outcome="unknown", reason="invalid_native_receipt")
             receipts.append(result)

@@ -82,6 +82,15 @@ def test_legacy_facade_executes_one_native_step_and_projects_receipt(tmp_path):
     assert operation.lookup("motor:1") == receipt
 
 
+def test_legacy_facade_supports_sequential_invocations(tmp_path):
+    operation, adapter = make_operation(tmp_path)
+    first = operation.execute("motor:1", {"endpoint": "motor", "operation": "motor.execute", "payload": request(), "write": True}, 10, authority=lambda _: None)
+    second_request = request().model_copy(update={"observation_revision": "1", "expected": {"revision": "2"}})
+    second = operation.execute("motor:2", {"endpoint": "motor", "operation": "motor.execute", "payload": second_request, "write": True}, 10, authority=lambda _: None)
+    assert first["status"] == second["status"] == "completed"
+    assert len(adapter.submissions) == 2
+
+
 def test_legacy_facade_requires_immediate_native_hook(tmp_path):
     adapter = Adapter()
     def execute_without_hook(step, *, operation_id, cancel, deadline):
