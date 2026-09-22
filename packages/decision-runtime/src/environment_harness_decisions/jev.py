@@ -248,10 +248,21 @@ class JevDecisionSelector:
                 body,
                 max(0.001, deadline - time.monotonic()),
             )
-        except _SharedProviderFailure:
+        except _SharedProviderFailure as exc:
+            # Preserve the exact authorized request even when no response was
+            # received.  The runtime can journal it without credentials.
+            exc.model_input = request
+            exc.provider_response = None
+            exc.raw_response = {}
+            exc.cost_micros = None
             raise
         except Exception as exc:
-            raise JevProviderFailure("Jev request outcome is unknown", submitted=True, uncharged=False) from exc
+            error = JevProviderFailure("Jev request outcome is unknown", submitted=True, uncharged=False)
+            error.model_input = request
+            error.provider_response = None
+            error.raw_response = {}
+            error.cost_micros = None
+            raise error from exc
         try:
             response = json.loads(raw) if isinstance(raw, (bytes, bytearray, str)) else dict(raw)
         except Exception as exc:
