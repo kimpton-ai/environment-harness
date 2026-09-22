@@ -1,4 +1,3 @@
-
 import pytest
 
 from environment_harness_decisions.legacy_contracts import (
@@ -31,9 +30,13 @@ class Adapter:
     def plan(self, request, observation):
         if self.advance_on_plan:
             self.revision += 1
-        return (MotorCandidate(id="step", description="advance", steps=(
-            MotorStep(operation="move", target=request.target, arguments=request.arguments),
-        )),)
+        return (
+            MotorCandidate(
+                id="step",
+                description="advance",
+                steps=(MotorStep(operation="move", target=request.target, arguments=request.arguments),),
+            ),
+        )
 
     def selection_observation(self, request, observation):
         return {"revision": observation["revision"]}
@@ -59,8 +62,12 @@ class Adapter:
 
 def request():
     return MotorRequest(
-        skill="move", target={"x": 1}, expected={"revision": "1"}, observation_revision="0",
-        goal_revision="session-7", goal_context=GoalContext(goal_id="g", revision="directive-3", milestone_id="m"),
+        skill="move",
+        target={"x": 1},
+        expected={"revision": "1"},
+        observation_revision="0",
+        goal_revision="session-7",
+        goal_context=GoalContext(goal_id="g", revision="directive-3", milestone_id="m"),
     )
 
 
@@ -74,8 +81,10 @@ def make_operation(tmp_path, adapter=None):
 def test_legacy_facade_executes_one_native_step_and_projects_receipt(tmp_path):
     operation, adapter = make_operation(tmp_path)
     receipt = operation.execute(
-        "motor:1", {"endpoint": "motor", "operation": "motor.execute", "payload": request(), "write": True},
-        10, authority=lambda binding: None,
+        "motor:1",
+        {"endpoint": "motor", "operation": "motor.execute", "payload": request(), "write": True},
+        10,
+        authority=lambda binding: None,
     )
     assert receipt["status"] == "completed"
     assert receipt["request"]["goal_revision"] == "session-7"
@@ -89,9 +98,19 @@ def test_legacy_facade_executes_one_native_step_and_projects_receipt(tmp_path):
 
 def test_legacy_facade_supports_sequential_invocations(tmp_path):
     operation, adapter = make_operation(tmp_path)
-    first = operation.execute("motor:1", {"endpoint": "motor", "operation": "motor.execute", "payload": request(), "write": True}, 10, authority=lambda _: None)
+    first = operation.execute(
+        "motor:1",
+        {"endpoint": "motor", "operation": "motor.execute", "payload": request(), "write": True},
+        10,
+        authority=lambda _: None,
+    )
     second_request = request().model_copy(update={"observation_revision": "1", "expected": {"revision": "2"}})
-    second = operation.execute("motor:2", {"endpoint": "motor", "operation": "motor.execute", "payload": second_request, "write": True}, 10, authority=lambda _: None)
+    second = operation.execute(
+        "motor:2",
+        {"endpoint": "motor", "operation": "motor.execute", "payload": second_request, "write": True},
+        10,
+        authority=lambda _: None,
+    )
     assert first["status"] == second["status"] == "completed"
     assert len(adapter.submissions) == 2
 
@@ -100,8 +119,10 @@ def test_stale_native_observation_projects_effect_free_reason(tmp_path):
     operation, adapter = make_operation(tmp_path)
     adapter.advance_on_plan = True
     receipt = operation.execute(
-        "motor:stale", {"endpoint": "motor", "operation": "motor.execute", "payload": request(), "write": True},
-        10, authority=lambda _: None,
+        "motor:stale",
+        {"endpoint": "motor", "operation": "motor.execute", "payload": request(), "write": True},
+        10,
+        authority=lambda _: None,
     )
     assert receipt["status"] == "blocked"
     assert receipt["effect"] == "none"
@@ -111,14 +132,18 @@ def test_stale_native_observation_projects_effect_free_reason(tmp_path):
 
 def test_legacy_facade_requires_immediate_native_hook(tmp_path):
     adapter = Adapter()
+
     def execute_without_hook(step, *, operation_id, cancel, deadline):
         return {"operation_id": operation_id, "status": "completed"}
+
     adapter.execute = execute_without_hook
     operation, _ = make_operation(tmp_path, adapter)
     with pytest.raises(Exception):
         operation.execute(
-            "motor:1", {"endpoint": "motor", "operation": "motor.execute", "payload": request(), "write": True},
-            10, authority=lambda binding: None,
+            "motor:1",
+            {"endpoint": "motor", "operation": "motor.execute", "payload": request(), "write": True},
+            10,
+            authority=lambda binding: None,
         )
     assert adapter.submissions == []
 
@@ -129,23 +154,34 @@ def test_legacy_facade_retains_unknown_native_effect_without_resubmitting(tmp_pa
             before_dispatch()
             self.submissions.append(operation_id)
             self.revision += 1
-            self.receipts[operation_id] = {"operation_id": operation_id, "status": "completed",
-                                           "revision": str(self.revision)}
+            self.receipts[operation_id] = {
+                "operation_id": operation_id,
+                "status": "completed",
+                "revision": str(self.revision),
+            }
             raise RuntimeError("crash after native submission")
 
     operation, adapter = make_operation(tmp_path, UnknownAdapter())
     with pytest.raises(RuntimeError):
         operation.execute(
-            "motor:1", {"endpoint": "motor", "operation": "motor.execute", "payload": request(), "write": True},
-            10, authority=lambda binding: None,
+            "motor:1",
+            {"endpoint": "motor", "operation": "motor.execute", "payload": request(), "write": True},
+            10,
+            authority=lambda binding: None,
         )
     with pytest.raises(Exception):
         operation.execute(
-            "motor:1", {"endpoint": "motor", "operation": "motor.execute", "payload": request(), "write": True},
-            10, authority=lambda binding: None,
+            "motor:1",
+            {"endpoint": "motor", "operation": "motor.execute", "payload": request(), "write": True},
+            10,
+            authority=lambda binding: None,
         )
     assert len(adapter.submissions) == 1
-    restarted = LegacyMotorOperation(adapter, MotorProfile(mode="deterministic", adapter=adapter.implementation), journal=tmp_path / "motor.sqlite")
+    restarted = LegacyMotorOperation(
+        adapter,
+        MotorProfile(mode="deterministic", adapter=adapter.implementation),
+        journal=tmp_path / "motor.sqlite",
+    )
     recovered = restarted.lookup("motor:1")
     assert recovered is not None and len(adapter.submissions) == 1
 

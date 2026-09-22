@@ -32,16 +32,21 @@ def test_migration_report_is_read_only_and_apply_resumes_after_interruption(tmp_
     source_db = _wal_database(source)
     source_db.close()
     transaction = MigrationTransaction(
-        tmp_path, version="runtime.v1", source_identity={"run": "legacy"},
-        destination_identity={"sdk": "decisions"}, source_files=[source],
+        tmp_path,
+        version="runtime.v1",
+        source_identity={"run": "legacy"},
+        destination_identity={"sdk": "decisions"},
+        source_files=[source],
     )
     before = transaction.report()
     assert before["phase"] == "not_started"
     assert not (tmp_path / ".decision-runtime").exists() or transaction.report() == before
 
     calls = []
+
     def check():
         calls.append("check")
+
     def interrupted(segment, record):
         calls.append("segment")
         raise RuntimeError("migration interrupted")
@@ -69,8 +74,11 @@ def test_migration_blocks_when_original_changes_after_backup(tmp_path):
     source_db = _wal_database(source)
     source_db.close()
     transaction = MigrationTransaction(
-        tmp_path, version="runtime.v1", source_identity={"run": "legacy"},
-        destination_identity={"sdk": "decisions"}, source_files=[source],
+        tmp_path,
+        version="runtime.v1",
+        source_identity={"run": "legacy"},
+        destination_identity={"sdk": "decisions"},
+        source_files=[source],
     )
     transaction.apply(check=lambda: None, create_segment=lambda segment, record: {"id": "sdk"})
     with source.open("ab") as file:

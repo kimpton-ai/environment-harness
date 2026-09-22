@@ -34,8 +34,14 @@ class JevError(RuntimeError):
 class JevResponseError(JevError):
     """The provider response cannot be safely interpreted."""
 
-    def __init__(self, message: str, *, provider_response: Any = None,
-                 model_input: dict[str, Any] | None = None, cost_micros: int | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        provider_response: Any = None,
+        model_input: dict[str, Any] | None = None,
+        cost_micros: int | None = None,
+    ) -> None:
         super().__init__(message)
         self.provider_response = provider_response
         self.raw_response = provider_response if isinstance(provider_response, dict) else {}
@@ -46,8 +52,14 @@ class JevResponseError(JevError):
 class JevBudgetError(JevError):
     """The verified bound or reported usage exceeds the operation budget."""
 
-    def __init__(self, message: str, *, provider_response: Any = None,
-                 model_input: dict[str, Any] | None = None, cost_micros: int | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        provider_response: Any = None,
+        model_input: dict[str, Any] | None = None,
+        cost_micros: int | None = None,
+    ) -> None:
         super().__init__(message)
         self.provider_response = provider_response
         self.raw_response = provider_response if isinstance(provider_response, dict) else {}
@@ -103,11 +115,13 @@ class ProviderEvidence:
 
 def _selection(**values: Any) -> Any:
     from .contracts import Selection
+
     return Selection(**values)
 
 
 def _answer(**values: Any) -> Any:
     from .contracts import Answer
+
     return Answer(**values)
 
 
@@ -178,7 +192,9 @@ class JevDecisionSelector:
                 if minimum is None or maximum is None or maximum < minimum:
                     raise ValueError(f"score question {question.id!r} has no valid range")
                 if not float(minimum).is_integer() or not float(maximum).is_integer():
-                    raise ValueError("score questions with fractional bounds require explicit discrete options")
+                    raise ValueError(
+                        "score questions with fractional bounds require explicit discrete options"
+                    )
                 payload["criteria"] = [str(value) for value in range(int(minimum), int(maximum) + 1)]
         else:
             raise ValueError(f"unsupported Jev question type: {kind!r}")
@@ -237,8 +253,13 @@ class JevDecisionSelector:
         request = self.model_input(observation, decisions)
         if cancel.is_set() or time.monotonic() >= deadline:
             return _selection(
-                answers=(), model=self.model, cost_micros=0, raw_response={},
-                model_input=request, abstention=ABSTENTION_CANCELLED, versions=self.evidence.as_dict()
+                answers=(),
+                model=self.model,
+                cost_micros=0,
+                raw_response={},
+                model_input=request,
+                abstention=ABSTENTION_CANCELLED,
+                versions=self.evidence.as_dict(),
             )
         body = json.dumps(request, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         try:
@@ -266,8 +287,9 @@ class JevDecisionSelector:
         try:
             response = json.loads(raw) if isinstance(raw, (bytes, bytearray, str)) else dict(raw)
         except Exception as exc:
-            raise JevResponseError("Jev response was not valid JSON", provider_response=raw,
-                                   model_input=request) from exc
+            raise JevResponseError(
+                "Jev response was not valid JSON", provider_response=raw, model_input=request
+            ) from exc
         try:
             result = self._parse(response, request, decisions)
         except (JevResponseError, JevBudgetError) as exc:
@@ -275,14 +297,22 @@ class JevDecisionSelector:
             exc.raw_response = response
             exc.model_input = request
             usage = response.get("usage") if isinstance(response, dict) else None
-            if exc.cost_micros is None and isinstance(usage, dict) and isinstance(usage.get("input_tokens"), int):
+            if (
+                exc.cost_micros is None
+                and isinstance(usage, dict)
+                and isinstance(usage.get("input_tokens"), int)
+            ):
                 exc.cost_micros = math.ceil(usage["input_tokens"] * self.price_micros_per_million / 1_000_000)
             raise
         if cancel.is_set() or time.monotonic() >= deadline:
             return _selection(
-                answers=result.answers, model=result.model, cost_micros=result.cost_micros,
-                raw_response=result.raw_response, model_input=result.model_input,
-                abstention=ABSTENTION_CANCELLED, versions=result.versions
+                answers=result.answers,
+                model=result.model,
+                cost_micros=result.cost_micros,
+                raw_response=result.raw_response,
+                model_input=result.model_input,
+                abstention=ABSTENTION_CANCELLED,
+                versions=result.versions,
             )
         return result
 
@@ -307,7 +337,10 @@ class JevDecisionSelector:
         except Exception as exc:
             raise JevResponseError("Jev request was not valid JSON") from exc
         if not isinstance(request, dict) or request.get("model") != self.model:
-            raise JevResponseError("Jev request omitted the pinned model", model_input=request if isinstance(request, dict) else {})
+            raise JevResponseError(
+                "Jev request omitted the pinned model",
+                model_input=request if isinstance(request, dict) else {},
+            )
         if len(body) > self.max_input_bytes:
             raise JevBudgetError("Jev input exceeds max_input_bytes", model_input=request)
         if isinstance(maximum_charge_micros, bool) or maximum_charge_micros < 0:
@@ -321,8 +354,11 @@ class JevDecisionSelector:
             raise ValueError("token_bound must return a nonnegative integer")
         reserved = math.ceil(bound * self.price_micros_per_million / 1_000_000)
         if reserved > maximum_charge_micros:
-            raise JevBudgetError("Jev verified charge bound exceeds operation budget", model_input=request,
-                                 cost_micros=reserved)
+            raise JevBudgetError(
+                "Jev verified charge bound exceeds operation budget",
+                model_input=request,
+                cost_micros=reserved,
+            )
         try:
             raw = self.transport(
                 self.endpoint,
@@ -346,48 +382,83 @@ class JevDecisionSelector:
         try:
             response = json.loads(raw) if isinstance(raw, (bytes, bytearray, str)) else dict(raw)
         except Exception as exc:
-            raise JevResponseError("Jev response was not valid JSON", provider_response=raw,
-                                   model_input=request) from exc
+            raise JevResponseError(
+                "Jev response was not valid JSON", provider_response=raw, model_input=request
+            ) from exc
         if not isinstance(response, dict) or response.get("model") != self.model:
-            raise JevResponseError("Jev response omitted or changed the pinned model",
-                                   provider_response=response, model_input=request)
+            raise JevResponseError(
+                "Jev response omitted or changed the pinned model",
+                provider_response=response,
+                model_input=request,
+            )
         usage = response.get("usage")
         if not isinstance(usage, dict) or not all(
             isinstance(usage.get(key), int) and not isinstance(usage.get(key), bool) and usage[key] >= 0
             for key in ("input_tokens", "output_tokens")
         ):
-            raise JevResponseError("Jev response omitted valid usage", provider_response=response, model_input=request)
+            raise JevResponseError(
+                "Jev response omitted valid usage", provider_response=response, model_input=request
+            )
         if usage["input_tokens"] > bound:
             cost = math.ceil(usage["input_tokens"] * self.price_micros_per_million / 1_000_000)
-            raise JevBudgetError("Jev usage exceeded the verified token bound", provider_response=response,
-                                 model_input=request, cost_micros=cost)
+            raise JevBudgetError(
+                "Jev usage exceeded the verified token bound",
+                provider_response=response,
+                model_input=request,
+                cost_micros=cost,
+            )
         cost = math.ceil(usage["input_tokens"] * self.price_micros_per_million / 1_000_000)
         if cost > reserved or cost > maximum_charge_micros:
-            raise JevBudgetError("Jev usage exceeded the verified charge bound", provider_response=response,
-                                 model_input=request, cost_micros=cost)
+            raise JevBudgetError(
+                "Jev usage exceeded the verified charge bound",
+                provider_response=response,
+                model_input=request,
+                cost_micros=cost,
+            )
         return response, cost, self.evidence.as_dict()
 
     def _parse(self, response: Any, request: dict[str, Any], decisions: Any) -> Any:
         if not isinstance(response, dict) or response.get("model") != self.model:
-            raise JevResponseError("Jev response omitted or changed the pinned model", provider_response=response, model_input=request)
+            raise JevResponseError(
+                "Jev response omitted or changed the pinned model",
+                provider_response=response,
+                model_input=request,
+            )
         usage = response.get("usage")
         if not isinstance(usage, dict) or not all(
             isinstance(usage.get(key), int) and not isinstance(usage.get(key), bool) and usage[key] >= 0
             for key in ("input_tokens", "output_tokens")
         ):
-            raise JevResponseError("Jev response omitted valid usage", provider_response=response, model_input=request)
+            raise JevResponseError(
+                "Jev response omitted valid usage", provider_response=response, model_input=request
+            )
         token_bound = self._verified_token_bound(request)
         if token_bound is not None and usage["input_tokens"] > token_bound:
-            raise JevBudgetError("Jev usage exceeded the verified token bound", provider_response=response,
-                                 model_input=request, cost_micros=math.ceil(usage["input_tokens"] * self.price_micros_per_million / 1_000_000))
+            raise JevBudgetError(
+                "Jev usage exceeded the verified token bound",
+                provider_response=response,
+                model_input=request,
+                cost_micros=math.ceil(usage["input_tokens"] * self.price_micros_per_million / 1_000_000),
+            )
         cost = math.ceil(usage["input_tokens"] * self.price_micros_per_million / 1_000_000)
-        maximum = self.maximum_charge_micros(None, type("Observation", (), {"model_input": request["state"]})(), decisions)
+        maximum = self.maximum_charge_micros(
+            None, type("Observation", (), {"model_input": request["state"]})(), decisions
+        )
         if maximum is not None and cost > maximum:
-            raise JevBudgetError("Jev usage exceeded the verified charge bound", provider_response=response,
-                                 model_input=request, cost_micros=cost)
+            raise JevBudgetError(
+                "Jev usage exceeded the verified charge bound",
+                provider_response=response,
+                model_input=request,
+                cost_micros=cost,
+            )
         answers_raw = response.get("answers")
         if not isinstance(answers_raw, dict):
-            raise JevResponseError("Jev response omitted answers", provider_response=response, model_input=request, cost_micros=cost)
+            raise JevResponseError(
+                "Jev response omitted answers",
+                provider_response=response,
+                model_input=request,
+                cost_micros=cost,
+            )
         answers = []
         for question in tuple(getattr(decisions, "questions", ()) or ()):
             answer = answers_raw.get(question.id)
@@ -399,7 +470,11 @@ class JevDecisionSelector:
                 valid = {option.id for option in tuple(getattr(question, "options", ()) or ())}
                 probabilities = answer.get("probabilities")
                 confidence = answer.get("confidence")
-                if choice not in valid or not self._probabilities(probabilities, valid) or not self._unit(confidence):
+                if (
+                    choice not in valid
+                    or not self._probabilities(probabilities, valid)
+                    or not self._unit(confidence)
+                ):
                     raise JevResponseError(f"invalid choice answer for {question.id!r}")
                 values.update(value=choice, probabilities=probabilities)
             elif question.kind == "noul":
@@ -414,7 +489,11 @@ class JevDecisionSelector:
                     raise JevResponseError(f"invalid score answer for {question.id!r}")
                 minimum = getattr(question, "minimum", None)
                 maximum_value = getattr(question, "maximum", None)
-                if minimum is not None and maximum_value is not None and not minimum <= value <= maximum_value:
+                if (
+                    minimum is not None
+                    and maximum_value is not None
+                    and not minimum <= value <= maximum_value
+                ):
                     raise JevResponseError(f"score answer outside bounds for {question.id!r}")
                 values["value"] = float(value)
                 probabilities = answer.get("probabilities")
@@ -422,17 +501,32 @@ class JevDecisionSelector:
                     values["probabilities"] = probabilities
             answers.append(_answer(**values))
         return _selection(
-            answers=tuple(answers), model=self.model, cost_micros=cost,
-            raw_response=response, model_input=request, abstention=None, versions=self.evidence.as_dict()
+            answers=tuple(answers),
+            model=self.model,
+            cost_micros=cost,
+            raw_response=response,
+            model_input=request,
+            abstention=None,
+            versions=self.evidence.as_dict(),
         )
 
     @staticmethod
     def _unit(value: Any) -> bool:
-        return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and 0 <= value <= 1
+        return (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+            and 0 <= value <= 1
+        )
 
     @classmethod
     def _probabilities(cls, value: Any, keys: set[str]) -> bool:
-        return isinstance(value, dict) and set(value) == keys and all(cls._unit(item) for item in value.values()) and abs(sum(value.values()) - 1) <= 1e-5
+        return (
+            isinstance(value, dict)
+            and set(value) == keys
+            and all(cls._unit(item) for item in value.values())
+            and abs(sum(value.values()) - 1) <= 1e-5
+        )
 
     @staticmethod
     def _httpx_transport(endpoint: str, headers: Mapping[str, str], body: bytes, timeout: float) -> bytes:
@@ -440,8 +534,9 @@ class JevDecisionSelector:
         try:
             import httpx
         except ImportError as exc:
-            raise JevProviderFailure("TypeSafe transport requires the [typesafe] extra",
-                                     submitted=False, uncharged=False) from exc
+            raise JevProviderFailure(
+                "TypeSafe transport requires the [typesafe] extra", submitted=False, uncharged=False
+            ) from exc
         try:
             with httpx.Client(follow_redirects=False, timeout=timeout, trust_env=False) as client:
                 response = client.post(endpoint, headers=dict(headers), content=body)
@@ -450,7 +545,9 @@ class JevDecisionSelector:
         except JevProviderFailure:
             raise
         except Exception as exc:
-            raise JevProviderFailure("Jev request outcome is unknown", submitted=True, uncharged=False) from exc
+            raise JevProviderFailure(
+                "Jev request outcome is unknown", submitted=True, uncharged=False
+            ) from exc
 
 
 # A concise alias retained for consumers that used the old motor adapter name.

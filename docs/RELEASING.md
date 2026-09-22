@@ -372,3 +372,14 @@ Every release pull request must check whether it needs updates to:
 
 Update this guide whenever version rules, artifacts, required checks, approvals, workflow names, or
 publisher configuration change.
+
+## Independently versioned decision companion
+
+`packages/decision-runtime` produces `environment-harness-decisions` with its own
+version and optional `typesafe` dependency. It is outside the coordinated core
+and TypeScript release. Do not include or publish it through the core release
+workflow. A companion change requires its focused contract, provider, recovery,
+migration and packaging checks. Validate core installation without the companion
+and TypeSafe. Consumers should pin tested immutable repository revisions,
+including the companion subdirectory. Publication requires a separate release
+request.

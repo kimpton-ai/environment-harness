@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "environment-harness-decisions"
+version = "0.1.0"
+description = "Durable bounded decisions for EnvironmentHarness operations"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+classifiers = ["Typing :: Typed"]
+dependencies = ["environment-harness>=0.2.4rc2,<0.3"]
+
+[project.optional-dependencies]
+typesafe = ["httpx>=0.28.1,<0.29"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/environment_harness_decisions"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "README.md", "LICENSE", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

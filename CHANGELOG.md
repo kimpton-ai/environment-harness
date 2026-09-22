@@ -121,6 +121,12 @@ declared `>=0.3.1,<0.4` extra and derives authorized rows from canonical traject
 integration changes have a path-routed CI job. RLlib, TRL, live OpenEnv training, Parquet, and the
 separately owned decision-selection seam are not claimed by this change.
 
+### Companion packages
+
+- Add the independently versioned `environment-harness-decisions` companion for bounded
+  decisions, durable charge and effect recovery, and explicit saved-run migration. Core stays
+  provider-neutral.
+
 Typed scenarios now expand into bounded concurrent experiment trials with durable
 status, deterministic seeds and resumable activity feeds. The evidence viewer adds
 experiment grouping, filtering, unequal-length comparison, progression and report

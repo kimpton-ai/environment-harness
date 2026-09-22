@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 import json
-import math
 import os
-import threading
 import time
 from math import ceil
 from typing import Any, Callable
 from urllib.parse import urlsplit
 
-from .contracts import Answer, ChoiceOption, DecisionQuestion, DecisionSet, Observation
+from .contracts import ChoiceOption, DecisionQuestion, DecisionSet, Observation
 from .jev import DEFAULT_ENDPOINT
 
 # Keep historical constants importable without importing the old motor package.
@@ -31,17 +29,29 @@ class JevBudgetExceeded(JevOutcomeUnknown):
 
 
 class JevSelector:
-    def __init__(self, api_key: str | None = None, *, model: str = DEFAULT_MODEL,
-                 endpoint: str = DEFAULT_ENDPOINT, transport: Callable | None = None,
-                 max_input_bytes: int = DEFAULT_MAX_INPUT_BYTES,
-                 price_micros_per_million: int = DEFAULT_PRICE_MICROS_PER_MILLION,
-                 token_bound_multiplier: int = DEFAULT_TOKEN_BOUND_MULTIPLIER,
-                 verified_token_bound: Callable[[bytes], int] | None = None,
-                 verified_token_bound_source: str | None = None):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        *,
+        model: str = DEFAULT_MODEL,
+        endpoint: str = DEFAULT_ENDPOINT,
+        transport: Callable | None = None,
+        max_input_bytes: int = DEFAULT_MAX_INPUT_BYTES,
+        price_micros_per_million: int = DEFAULT_PRICE_MICROS_PER_MILLION,
+        token_bound_multiplier: int = DEFAULT_TOKEN_BOUND_MULTIPLIER,
+        verified_token_bound: Callable[[bytes], int] | None = None,
+        verified_token_bound_source: str | None = None,
+    ):
         parsed_endpoint = urlsplit(endpoint)
-        if (not model or parsed_endpoint.scheme != "https" or not parsed_endpoint.netloc
-                or parsed_endpoint.username is not None or parsed_endpoint.password is not None
-                or parsed_endpoint.query or parsed_endpoint.fragment):
+        if (
+            not model
+            or parsed_endpoint.scheme != "https"
+            or not parsed_endpoint.netloc
+            or parsed_endpoint.username is not None
+            or parsed_endpoint.password is not None
+            or parsed_endpoint.query
+            or parsed_endpoint.fragment
+        ):
             raise ValueError("model is required and endpoint must use HTTPS")
         if (verified_token_bound is None) != (verified_token_bound_source is None):
             raise ValueError("verified token bound and source must be supplied together")
@@ -69,19 +79,27 @@ class JevSelector:
 
     def _make_inner(self):
         from .jev import JevDecisionSelector
+
         def call(endpoint, headers, body, timeout):
             if self._transport is None:
                 return JevDecisionSelector._httpx_transport(endpoint, headers, body, timeout)
             return self._transport(endpoint, headers, body, timeout)
-        return JevDecisionSelector(api_key=self.api_key, model=self.model, endpoint=self.endpoint,
-                                   transport=call, max_input_bytes=self.max_input_bytes,
-                                   price_micros_per_million=self.price_micros_per_million,
-                                   token_bound=self.verified_token_bound,
-                                   token_bound_source=self.verified_token_bound_source)
+
+        return JevDecisionSelector(
+            api_key=self.api_key,
+            model=self.model,
+            endpoint=self.endpoint,
+            transport=call,
+            max_input_bytes=self.max_input_bytes,
+            price_micros_per_million=self.price_micros_per_million,
+            token_bound=self.verified_token_bound,
+            token_bound_source=self.verified_token_bound_source,
+        )
 
     @staticmethod
     def _default_transport(endpoint, headers, body, timeout):
         from .jev import JevDecisionSelector
+
         return JevDecisionSelector._httpx_transport(endpoint, headers, body, timeout)
 
     @staticmethod
@@ -101,16 +119,27 @@ class JevSelector:
         self._candidate_values(candidates)
         if not isinstance(state, dict):
             raise ValueError("state must be an object")
-        body = {"state": state, "model": self.model, "questions": {"motor": {
-            "type": "choice",
-            "instructions": "Which supplied motor candidate should execute next? Choose a candidate ID, or abstain if none should execute.",
-            "criteria": {**{candidate.id: candidate.description for candidate in candidates},
-                         ABSTAIN_ID: "Do not execute a motor candidate; defer to the planner."},
-        }}}
+        body = {
+            "state": state,
+            "model": self.model,
+            "questions": {
+                "motor": {
+                    "type": "choice",
+                    "instructions": "Which supplied motor candidate should execute next? Choose a candidate ID, or abstain if none should execute.",
+                    "criteria": {
+                        **{candidate.id: candidate.description for candidate in candidates},
+                        ABSTAIN_ID: "Do not execute a motor candidate; defer to the planner.",
+                    },
+                }
+            },
+        }
         encoded = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode()
         if len(encoded) > self.max_input_bytes:
             raise ValueError("Jev input exceeds max_input_bytes")
         return encoded
+
+    def model_input(self, state, candidates):
+        return json.loads(self._body(state, candidates))
 
     def maximum_cost(self, state, candidates):
         """Legacy byte based estimate. It is never used as a hard bound."""
@@ -128,12 +157,24 @@ class JevSelector:
         return ceil(bound * self.price_micros_per_million / 1_000_000)
 
     def _decisions(self, candidates):
-        options = tuple(ChoiceOption(id=candidate.id, label=candidate.description) for candidate in candidates)
-        options += (ChoiceOption(id=ABSTAIN_ID, label="Do not execute a motor candidate; defer to the planner."),)
-        return DecisionSet(id="motor", observation_revision="legacy", questions=(DecisionQuestion(
-            id="motor", kind="choice",
-            prompt="Which supplied motor candidate should execute next? Choose a candidate ID, or abstain if none should execute.",
-            options=options),))
+        options = tuple(
+            ChoiceOption(id=candidate.id, label=candidate.description) for candidate in candidates
+        )
+        options += (
+            ChoiceOption(id=ABSTAIN_ID, label="Do not execute a motor candidate; defer to the planner."),
+        )
+        return DecisionSet(
+            id="motor",
+            observation_revision="legacy",
+            questions=(
+                DecisionQuestion(
+                    id="motor",
+                    kind="choice",
+                    prompt="Which supplied motor candidate should execute next? Choose a candidate ID, or abstain if none should execute.",
+                    options=options,
+                ),
+            ),
+        )
 
     def select(self, state, candidates, *, maximum_cost_micros, cancel, deadline):
         try:
@@ -147,8 +188,9 @@ class JevSelector:
                 return self._abstain()
             observation = Observation(revision="legacy", model_input=state)
             decisions = self._decisions(candidates)
-            result = self._inner.select("legacy-selection", None, observation, decisions,
-                                        cancel=cancel, deadline=deadline)
+            result = self._inner.select(
+                "legacy-selection", None, observation, decisions, cancel=cancel, deadline=deadline
+            )
             self.last_model_input = result.model_input
             self.last_raw_response = result.raw_response
             answers = {answer.question_id: answer for answer in result.answers}
@@ -169,15 +211,27 @@ class JevSelector:
 
     def _motor_selection(self, candidate_id, cost, probabilities, usage):
         from .legacy_contracts import MotorSelection
+
         if candidate_id == ABSTAIN_ID or candidate_id is None:
             return self._abstain(cost=cost, probabilities=probabilities, usage=usage)
-        return MotorSelection(candidate_id=candidate_id, model=self.model, cost_micros=cost,
-                              usage=usage, probabilities=probabilities)
+        return MotorSelection(
+            candidate_id=candidate_id,
+            model=self.model,
+            cost_micros=cost,
+            usage=usage,
+            probabilities=probabilities,
+        )
 
     def _abstain(self, *, cost=0, probabilities=None, usage=None):
         from .legacy_contracts import MotorSelection
-        return MotorSelection(candidate_id=None, model=self.model, cost_micros=cost,
-                              usage=dict(usage or {}), probabilities=dict(probabilities or {}))
+
+        return MotorSelection(
+            candidate_id=None,
+            model=self.model,
+            cost_micros=cost,
+            usage=dict(usage or {}),
+            probabilities=dict(probabilities or {}),
+        )
 
 
 JevCommandSelector = JevSelector
