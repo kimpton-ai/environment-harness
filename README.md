@@ -31,13 +31,6 @@ python -m pip install "environment-harness[server]"
 
 To install an editable source checkout instead, follow the [contributing guide](https://github.com/kimpton-ai/environment-harness/blob/main/CONTRIBUTING.md).
 
-Release candidates use PEP 440 versions such as `0.2.4rc1`. Pip excludes prereleases from ordinary installs; test one by requesting its exact version or by opting in:
-
-```sh
-python -m pip install "environment-harness[server]==0.2.4rc1"
-python -m pip install --pre --upgrade "environment-harness[server]"
-```
-
 Create a synthetic review dataset and open its evidence viewer:
 
 ```sh
