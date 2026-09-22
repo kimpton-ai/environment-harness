@@ -1,12 +1,22 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 
-from environment_harness import AgentSpec, EnvironmentSession, EvidenceStore, ExperimentSpec, Principal
+from environment_harness import (
+    AgentSpec,
+    EnvironmentHarness,
+    EnvironmentSession,
+    EvidenceStore,
+    ExperimentSpec,
+    Principal,
+    presentation,
+)
 from environment_harness.contracts import OperationSpec, RunPolicy
 from environment_harness.errors import BudgetExceeded, Conflict, Forbidden, Unsupported
 from environment_harness.fixtures import SyntheticEnvironment
-from environment_harness.operations import EnvironmentOperation, Operations
+from environment_harness.operations import EnvironmentOperation, Operations, environment_operations
+from environment_harness.store import encode
 
 
 def setup(tmp_path):
@@ -166,6 +176,137 @@ def test_environment_package_supplies_custom_operation_without_core_registration
     receipt = operations.dispatch(session, environment, researcher, lease, "teleport")
 
     assert receipt["location"] == {"x": 4, "y": 2}
+
+
+def test_environment_operation_defaults_and_runtime_contract_validation():
+    class WorldOperation(EnvironmentOperation):
+        endpoint = "world"
+        spec = OperationSpec(name="world.teleport", version="1")
+
+        def execute(self, operation_id, request, maximum_cost_micros, *, authority):
+            return {"operation_id": operation_id, "cost_micros": 0}
+
+    operation = WorldOperation()
+    assert operation.lookup("missing") is None
+
+    def configured(runtime, *, advertised=(operation.spec,)):
+        environment = SyntheticEnvironment()
+        environment.spec = environment.spec.model_copy(update={"operations": advertised})
+        environment.operations = runtime
+        return environment
+
+    for runtime, message in (
+        ([], "must be a mapping"),
+        ({"world.teleport": operation, "world.extra": operation}, "not advertised"),
+        ({"world.teleport": object()}, "must extend EnvironmentOperation"),
+    ):
+        with pytest.raises(Conflict, match=message):
+            environment_operations(configured(runtime))
+
+    changed_identity = WorldOperation()
+    changed_identity.spec = changed_identity.spec.model_copy(update={"name": "world.other"})
+    with pytest.raises(Conflict, match="advertised identity"):
+        environment_operations(configured({"world.teleport": changed_identity}))
+
+    missing_endpoint = WorldOperation()
+    missing_endpoint.endpoint = " "
+    with pytest.raises(Conflict, match="requires an endpoint"):
+        environment_operations(configured({"world.teleport": missing_endpoint}))
+
+
+def test_operation_supporting_guards_and_presentation(tmp_path):
+    with pytest.raises(TypeError, match="session_runner must be callable"):
+        EnvironmentHarness(
+            tmp_path,
+            environment_factory=SyntheticEnvironment,
+            agent_factories={"agent": object},
+            session_runner=None,
+        )
+    assert (
+        presentation.describe(
+            {
+                "kind": "operation.dispatched",
+                "revision": 1,
+                "payload": {"id": "inspect", "epoch": 2},
+            }
+        )
+        == "Operation inspect dispatched under lease epoch 2."
+    )
+
+
+def test_dispatch_rejects_missing_provider_and_stale_or_expired_authority(tmp_path):
+    store, session, researcher, environment, agent = setup(tmp_path)
+    operations = Operations(store)
+    lease = session.lease(environment, researcher, "worker")
+
+    prepare(operations, environment, agent, "missing-provider")
+    with pytest.raises(Forbidden, match="environment operation is unavailable"):
+        operations.dispatch(session, environment, researcher, lease, "missing-provider")
+
+    class StaleProvider:
+        endpoint = "https://provider.invalid"
+
+        def validate(self, request, manifest):
+            return SimpleNamespace(goal_revision="stale")
+
+    prepare(operations, environment, agent, "stale")
+    with pytest.raises(Conflict, match="goal revision is stale"):
+        operations.dispatch(session, environment, researcher, lease, "stale", StaleProvider())
+
+    class ExpiringOperation(EnvironmentOperation):
+        endpoint = "https://provider.invalid"
+        spec = OperationSpec(name="lookup", version="1")
+
+        def execute(self, operation_id, request, maximum_cost_micros, *, authority):
+            with store.transaction() as db:
+                row = db.execute(
+                    "SELECT participants FROM environments WHERE id=?", (environment,)
+                ).fetchone()
+                participants = json.loads(row["participants"])
+                participants["a"]["active"] = False
+                db.execute(
+                    "UPDATE environments SET participants=? WHERE id=?",
+                    (encode(participants), environment),
+                )
+            authority(request["payload"])
+            return {"operation_id": operation_id, "cost_micros": 0}
+
+    expiring = ExpiringOperation()
+    session.environment.spec = session.environment.spec.model_copy(update={"operations": (expiring.spec,)})
+    session.environment.operations = {expiring.spec.name: expiring}
+    with store.transaction() as db:
+        manifest = json.loads(
+            db.execute("SELECT manifest FROM environments WHERE id=?", (environment,)).fetchone()[0]
+        )
+        manifest["operations"] = [expiring.spec.model_dump(mode="json")]
+        db.execute("UPDATE environments SET manifest=? WHERE id=?", (encode(manifest), environment))
+    prepare(operations, environment, agent, "expired", maximum_cost_micros=0)
+    with pytest.raises(Forbidden, match="dispatch authority expired"):
+        operations.dispatch(session, environment, researcher, lease, "expired", expiring)
+
+
+def test_session_rejects_runtime_operation_configuration_drift(tmp_path):
+    class WorldOperation(EnvironmentOperation):
+        endpoint = "world"
+        spec = OperationSpec(name="world.teleport", version="1", config={"map": "runtime"})
+
+        def execute(self, operation_id, request, maximum_cost_micros, *, authority):
+            return {"operation_id": operation_id, "cost_micros": 0}
+
+    declared = OperationSpec(name="world.teleport", version="1", config={"map": "frozen"})
+    environment = SyntheticEnvironment()
+    environment.spec = environment.spec.model_copy(update={"operations": (declared,)})
+    environment.operations = {declared.name: WorldOperation()}
+    spec = ExperimentSpec(
+        environment=environment.spec,
+        participants=(AgentSpec(id="a", implementation="synthetic", policy_version="1"),),
+        operations=(declared,),
+    )
+
+    with pytest.raises(Conflict, match="no matching runtime implementation"):
+        EnvironmentSession(EvidenceStore(tmp_path), environment).create(
+            spec, Principal(tenant="tenant", subject="researcher", role="researcher")
+        )
 
 
 def test_experiment_rejects_operations_the_environment_does_not_supply():

@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from environment_harness import AgentSpec, EnvironmentSession, EvidenceStore, ExperimentSpec, Principal
-from environment_harness.contracts import Action, Capabilities, RunPolicy
+from environment_harness.contracts import Action, Capabilities, OperationSpec, RunPolicy
 from environment_harness.errors import Conflict, Forbidden, Unsupported
 from environment_harness.fixtures import SyntheticEnvironment
 from environment_harness.operations import Operations
@@ -43,6 +43,22 @@ def test_contract_invariants_reject_inconsistent_authority_and_purpose():
         specification(expanded, purpose="training", split="heldout")
     with pytest.raises(ValidationError, match="external writes unsupported"):
         specification(expanded, policy=RunPolicy(external_writes=True))
+
+
+def test_operation_contracts_reject_ambiguous_or_unserializable_configuration():
+    operation = OperationSpec(name="world.inspect", version="1")
+    environment = SyntheticEnvironment()
+
+    with pytest.raises(ValidationError, match="JSON serializable"):
+        OperationSpec(name="world.inspect", version="1", config={"threshold": float("nan")})
+    with pytest.raises(ValidationError, match="duplicate environment operation"):
+        environment.spec.model_copy(update={"operations": (operation, operation)}).model_validate(
+            environment.spec.model_copy(update={"operations": (operation, operation)}).model_dump()
+        )
+
+    environment.spec = environment.spec.model_copy(update={"operations": (operation,)})
+    with pytest.raises(ValidationError, match="duplicate operation"):
+        specification(environment, operations=(operation, operation))
 
 
 def test_session_creation_is_scoped_idempotent_and_split_safe(tmp_path):
