@@ -23,18 +23,18 @@ from .contracts import (
     Selection,
     Verification,
 )
-from .runtime import DecisionOperation
-from .selectors import FakeSelector, RecordedSelector
 from .gateway import (
     DecisionGatewayRequest,
     DecisionGatewayResponse,
     EvalRouterGatewaySelector,
     EvalRouterGenerationClient,
+    GatewayError,
     GenerationGatewayRequest,
     GenerationGatewayResponse,
-    GatewayError,
     QualifiedImageInput,
 )
+from .runtime import DecisionOperation
+from .selectors import FakeSelector, RecordedSelector
 
 __version__ = "0.1.0"
 __all__ = [
