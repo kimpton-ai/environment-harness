@@ -151,6 +151,7 @@ class EvalRouterGenerationClient:
         if max_output_tokens < 1 or max_output_tokens > 131072:
             raise ValueError("max_output_tokens must be between 1 and 131072")
         self.max_output_tokens = max_output_tokens
+        self._local = threading.local()
         self.gateway_token = gateway_token if gateway_token is not None else os.environ.get("EVALROUTER_TOKEN")
 
     def __call__(self, request: Mapping[str, Any], *, operation_id: str,
@@ -176,15 +177,23 @@ class EvalRouterGenerationClient:
             raise ProviderFailure("gateway generation response identity mismatch", submitted=True, uncharged=False)
         if response.charged_micros is None or response.charged_micros > maximum_charge_micros:
             raise ProviderFailure("gateway generation charge exceeded bound", submitted=True, uncharged=False)
+        self._local.last_charge_micros = response.charged_micros
         if response.status != "completed" or not response.result:
             error = response.error
             raise JevProviderFailure(error.message if error else "gateway generation failed",
                                      submitted=True if error is None else error.submitted,
                                      uncharged=False if error is None else not error.charged)
+        response_model = response.result.get("model")
+        if response_model is not None and response_model != self.model:
+            raise ProviderFailure("gateway generation model mismatch", submitted=True, uncharged=False)
         content = response.result.get("content")
         if not isinstance(content, str):
             raise ProviderFailure("gateway generation omitted content", submitted=True, uncharged=False)
         return content
+
+    @property
+    def last_charge_micros(self):
+        return getattr(self._local, "last_charge_micros", None)
 
     def lookup(self, operation_id: str) -> GenerationGatewayResponse | None:
         if self.lookup_transport is None:
