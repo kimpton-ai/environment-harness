@@ -19,6 +19,7 @@ from environment_harness import (
 )
 from environment_harness.adapters.remote import PROTOCOL_V2, RemoteEnvironment
 from environment_harness.contracts import Action, Capabilities, OperationSpec, RunPolicy, Transition
+from environment_harness.coordinator import advance
 from environment_harness.errors import BudgetExceeded, Conflict, Forbidden, Unsupported
 from environment_harness.operations import EnvironmentOperation
 from environment_harness.server import create_app
@@ -331,6 +332,59 @@ def test_v2_runtime_journals_plan_and_reconciles_unknown_without_redispatch(tmp_
     first_close = session.close_phase(environment, researcher, lease, revision=1)
     second_close = session.close_phase(environment, researcher, lease, revision=1)
     assert first_close == second_close == {"revision": 1, "closed": True}
+
+
+def test_coordinator_advance_reconciles_closed_phase_before_resolving_again(tmp_path):
+    provider = SampleOperation(lose_first_response=True)
+    implementation = V2Environment(provider)
+    implementation.spec = implementation.spec.model_copy(update={"phase_deadline": "coordinator"})
+    store = EvidenceStore(tmp_path)
+    session = EnvironmentSession(store, implementation)
+    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    experiment = ExperimentSpec(
+        environment=implementation.spec,
+        participants=(AgentSpec(id="alice", implementation="agent@1", policy_version="1"),),
+        operations=(provider.spec,),
+        policy=RunPolicy(
+            max_turns=10,
+            max_cost_micros=20,
+            allowed_endpoints=(ENDPOINT,),
+            allowed_operations=(provider.spec.name,),
+        ),
+    )
+    environment = session.create(experiment, researcher)["id"]
+    agent = Principal(
+        tenant="tenant", subject="alice", role="agent", environment=environment, participant="alice"
+    )
+    observation = session.observe(environment, agent)
+    session.submit(
+        environment,
+        agent,
+        Action(
+            operation_id="action-coordinator-recovery",
+            participant="alice",
+            observation_id=observation["id"],
+            revision=0,
+            payload={},
+        ),
+    )
+
+    with pytest.raises(TimeoutError, match="lost"):
+        advance(session, environment, researcher, owner="first-coordinator")
+
+    first_operation_id = provider.calls[0][0]
+    assert len(provider.calls) == 1
+    with store.transaction() as db:
+        row = db.execute("SELECT scheduler FROM environments WHERE id=?", (environment,)).fetchone()
+        assert json.loads(row["scheduler"])["closed"] is True
+
+    result = advance(session, environment, researcher, owner="recovery-coordinator")
+
+    assert result["revision"] == 1
+    assert len(provider.calls) == 2
+    assert provider.calls[0][0] == first_operation_id
+    assert provider.lookups == [first_operation_id]
+    assert session.get(environment, researcher)["reserved_micros"] == 0
 
 
 def test_v2_plan_reserves_all_requests_atomically_within_the_frozen_budget(tmp_path):
