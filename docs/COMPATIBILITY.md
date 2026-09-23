@@ -1,5 +1,28 @@
 # Session reliability and compatibility
 
+## Portable-resource evolution
+
+Trajectory resources begin at `environmentharness.dev/v1alpha1`. The Python package version is
+independent. Additive optional fields, resource kinds, and namespaced record types stay in this
+family. A new API version is reserved for an incompatible removal, restructure, validation change,
+or semantic change and requires an explicit converter while both forms are served.
+
+Top-level envelopes and mutation inputs remain strict. Nested portable evidence preserves unknown
+optional fields recursively; unknown required features fail. Unknown namespaced records decode as
+inert extension records and survive parse/serialize. Preserved fields participate in canonical
+digests. Python's sorted compact finite JSON encoding is the `v1alpha1` digest authority;
+TypeScript consumes server-supplied digests and does not recompute them.
+
+Existing environment manifests, events, reports, checkpoints, actions, and evidence hashes are not
+rewritten. Policy resources are synthesized from existing participant implementation and
+`policy_version`. The earlier action-row rollout export remains readable but is not the portable
+trajectory authority; consumers migrate to trajectory snapshots and datasets.
+
+EnvironmentHarness is the upstream authority for the public environment-boundary contracts. A
+downstream product may need a version pin, adapter, or intentional breaking migration when adopting
+them; product storage and APIs do not become SDK contracts merely to avoid that migration. No
+downstream product code or private schema is included in this repository.
+
 These changes keep existing SQLite and PostgreSQL stores readable. They require no schema migration and do not rewrite stored manifests, reports, checkpoints or evidence hashes. Python and TypeScript client calls keep their existing arguments. Response additions are described below.
 
 ## Cancellation and recovery

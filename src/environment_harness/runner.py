@@ -5,12 +5,28 @@ import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import contextmanager, suppress
+from contextvars import ContextVar
 
 from .contracts import Action, Principal
 from .errors import Conflict
 from .store import digest, encode, uid
 
 _monotonic = time.monotonic
+_inference_context: ContextVar[dict | None] = ContextVar("environment_harness_inference", default=None)
+
+
+def current_inference_context():
+    value = _inference_context.get()
+    return dict(value) if value is not None else None
+
+
+@contextmanager
+def inference_context(value):
+    token = _inference_context.set(value)
+    try:
+        yield
+    finally:
+        _inference_context.reset(token)
 
 
 @contextmanager
@@ -113,7 +129,17 @@ def _invoke(session, environment, principal, observation, agent, work, lease, ca
         if cancel_event.is_set():
             raise Conflict("agent execution cancelled")
         cancellable = getattr(agent, "act_cancellable", None)
-        payload = cancellable(observation, cancel_event) if callable(cancellable) else agent.act(observation)
+        correlation = {
+            "agent_operation_id": work["id"],
+            "observation_id": observation["id"],
+            "participant": principal.participant,
+            "generation": principal.generation,
+            "revision": observation["revision"],
+        }
+        with inference_context(correlation):
+            payload = (
+                cancellable(observation, cancel_event) if callable(cancellable) else agent.act(observation)
+            )
         if not isinstance(payload, dict):
             raise ValueError("agent returned a non-object action")
         state = agent.checkpoint() if member["agent_state"] is not None else None

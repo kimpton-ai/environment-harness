@@ -21,6 +21,20 @@ from .errors import BudgetExceeded, Conflict, Forbidden, HarnessError, Unsupport
 from .evaluation import compare, rollouts, turn_series
 from .operations import Operations
 from .store import encode
+from .training import DatasetCreate, TrainingRepository, TrainingRun, TrajectoryDataset
+from .trajectories import (
+    SourceAcknowledgement,
+    SourceIngestionBatch,
+    SourceRegistration,
+    SourceRegistrationReceipt,
+    SourceStatus,
+    SourceStatusUpdate,
+    Trajectory,
+    TrajectoryRecordPage,
+    TrajectoryRepository,
+    TrajectorySnapshot,
+    TrajectorySummary,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +157,10 @@ OPENAPI_TAGS = [
         "description": "Create, list, inspect, observe, and control environment sessions.",
     },
     {
+        "name": "Trajectories",
+        "description": "Inspect native and imported trajectory resources and immutable snapshots.",
+    },
+    {
         "name": "Evidence",
         "description": "Read event evidence and store or retrieve session artifacts.",
     },
@@ -175,8 +193,10 @@ def _error_response(request: Request, code: str, message: str, status: int, deta
     )
 
 
-def create_app(session, *, local_access=None):
+def create_app(session, *, local_access=None, trajectory_ingestion=False):
     store = session.store
+    trajectories = TrajectoryRepository(store)
+    training = TrainingRepository(store)
     app = FastAPI(
         title="EnvironmentHarness HTTP API",
         version="1.0.0",
@@ -353,6 +373,211 @@ def create_app(session, *, local_access=None):
     )
     def environment(who=Depends(actor)):
         return session.environment.spec
+
+    @app.get(
+        "/v1/trajectories",
+        tags=["Trajectories"],
+        summary="List native and imported trajectories",
+        response_model=list[TrajectorySummary],
+        openapi_extra={"x-roles": ["researcher", "scorer"]},
+    )
+    def trajectory_index(
+        response: Response,
+        who=Depends(actor),
+        limit: int = Query(100, ge=1, le=1000),
+        cursor: str | None = Query(None, min_length=1, max_length=200),
+    ):
+        page, next_cursor = trajectories.list_page(who, limit, cursor)
+        if next_cursor is not None:
+            response.headers["X-Next-Cursor"] = next_cursor
+            response.headers["Link"] = f'</v1/trajectories?limit={limit}&cursor={next_cursor}>; rel="next"'
+        return page
+
+    @app.get(
+        "/v1/trajectories/{trajectory}",
+        tags=["Trajectories"],
+        summary="Get a portable trajectory",
+        response_model=Trajectory,
+        openapi_extra={"x-roles": ["researcher", "scorer"]},
+    )
+    def trajectory_resource(trajectory: str, who=Depends(actor)):
+        return trajectories.get(trajectory, who)
+
+    @app.get(
+        "/v1/trajectories/{trajectory}/records",
+        tags=["Trajectories"],
+        summary="Page through trajectory records",
+        response_model=TrajectoryRecordPage,
+        openapi_extra={"x-roles": ["researcher", "scorer"]},
+    )
+    def trajectory_records(
+        trajectory: str,
+        response: Response,
+        who=Depends(actor),
+        after: int = Query(0, ge=0),
+        limit: int = Query(200, ge=1, le=1000),
+    ):
+        page = trajectories.records_page(trajectory, who, after=after, limit=limit)
+        if page.has_more:
+            response.headers["X-Next-Cursor"] = str(page.cursor)
+            response.headers["Link"] = (
+                f'</v1/trajectories/{trajectory}/records?after={page.cursor}&limit={limit}>; rel="next"'
+            )
+        return page
+
+    @app.post(
+        "/v1/trajectories/{trajectory}/snapshots",
+        tags=["Trajectories"],
+        summary="Freeze an authorized trajectory snapshot",
+        response_model=TrajectorySnapshot,
+        openapi_extra={"x-roles": ["researcher", "scorer"]},
+    )
+    def freeze_trajectory_snapshot(trajectory: str, who=Depends(actor)):
+        return trajectories.freeze(trajectory, who)
+
+    @app.get(
+        "/v1/trajectory-snapshots",
+        tags=["Trajectories"],
+        summary="List immutable snapshot boundaries for a trajectory",
+        response_model=list[TrajectorySnapshot],
+        openapi_extra={"x-roles": ["researcher", "scorer"]},
+    )
+    def trajectory_snapshots(
+        trajectory: str = Query(min_length=1),
+        limit: int = Query(100, ge=1, le=1000),
+        who=Depends(actor),
+    ):
+        return trajectories.list_snapshots(trajectory, who, limit=limit)
+
+    @app.get(
+        "/v1/trajectory-snapshots/{snapshot}",
+        tags=["Trajectories"],
+        summary="Get an immutable trajectory snapshot",
+        response_model=TrajectorySnapshot,
+        openapi_extra={"x-roles": ["researcher", "scorer"]},
+    )
+    def trajectory_snapshot(snapshot: str, who=Depends(actor)):
+        return trajectories.get_snapshot(snapshot, who)
+
+    @app.get(
+        "/v1/trajectory-snapshots/{snapshot}/export",
+        tags=["Trajectories"],
+        summary="Export an immutable trajectory snapshot as JSONL",
+        openapi_extra={"x-roles": ["researcher", "scorer"]},
+    )
+    def export_trajectory_snapshot(snapshot: str, who=Depends(actor)):
+        return StreamingResponse(
+            (encode(row) + "\n" for row in trajectories.export_snapshot(snapshot, who)),
+            media_type="application/x-ndjson",
+        )
+
+    @app.post(
+        "/v1/trajectory-datasets",
+        tags=["Trajectories"],
+        summary="Freeze a training-entitled trajectory dataset",
+        response_model=TrajectoryDataset,
+        openapi_extra={"x-roles": ["researcher"]},
+    )
+    def freeze_trajectory_dataset(body: DatasetCreate, who=Depends(actor)):
+        return training.freeze_dataset(body.name, body.trajectories, who)
+
+    @app.get(
+        "/v1/trajectory-datasets",
+        tags=["Trajectories"],
+        summary="List immutable trajectory datasets",
+        response_model=list[TrajectoryDataset],
+        openapi_extra={"x-roles": ["researcher", "scorer"]},
+    )
+    def trajectory_datasets(who=Depends(actor), limit: int = Query(100, ge=1, le=1000)):
+        return training.list_datasets(who, limit=limit)
+
+    @app.get(
+        "/v1/trajectory-datasets/{dataset}",
+        tags=["Trajectories"],
+        summary="Get an immutable trajectory dataset",
+        response_model=TrajectoryDataset,
+        openapi_extra={"x-roles": ["researcher", "scorer"]},
+    )
+    def trajectory_dataset(dataset: str, who=Depends(actor)):
+        return training.get_dataset(dataset, who)
+
+    @app.get(
+        "/v1/trajectory-datasets/{dataset}/export",
+        tags=["Trajectories"],
+        summary="Export an immutable trajectory dataset as JSONL",
+        openapi_extra={"x-roles": ["researcher", "scorer"]},
+    )
+    def export_trajectory_dataset(dataset: str, who=Depends(actor)):
+        return StreamingResponse(
+            (encode(row) + "\n" for row in training.export_dataset(dataset, who)),
+            media_type="application/x-ndjson",
+        )
+
+    @app.get(
+        "/v1/training-runs/{training_run}",
+        tags=["Trajectories"],
+        summary="Get a recorded local training result",
+        response_model=TrainingRun,
+        openapi_extra={"x-roles": ["researcher", "scorer"]},
+    )
+    def training_run(training_run: str, who=Depends(actor)):
+        return training.get_run(training_run, who)
+
+    @app.get(
+        "/v1/training-runs",
+        tags=["Trajectories"],
+        summary="List recorded local training results",
+        response_model=list[TrainingRun],
+        openapi_extra={"x-roles": ["researcher", "scorer"]},
+    )
+    def training_runs(
+        who=Depends(actor),
+        dataset: str | None = Query(None, min_length=1, max_length=200),
+        limit: int = Query(100, ge=1, le=1000),
+    ):
+        return training.list_runs(who, dataset=dataset, limit=limit)
+
+    @app.get(
+        "/v1/trajectory-sources/{source}/status",
+        tags=["Trajectories"],
+        summary="Inspect trajectory-source collection and execution status",
+        response_model=SourceStatus,
+        openapi_extra={"x-roles": ["researcher", "scorer"]},
+    )
+    def trajectory_source_status(source: str, who=Depends(actor)):
+        return trajectories.source_status(source, who)
+
+    if trajectory_ingestion:
+
+        @app.post(
+            "/v1/trajectory-sources",
+            tags=["Trajectories"],
+            summary="Register an external trajectory source",
+            response_model=SourceRegistrationReceipt,
+            openapi_extra={"x-roles": ["researcher"]},
+        )
+        def register_trajectory_source(body: SourceRegistration, who=Depends(actor)):
+            return trajectories.register_source(body, who)
+
+        @app.post(
+            "/v1/trajectory-sources/{source}/records",
+            tags=["Trajectories"],
+            summary="Ingest a bounded trajectory-source batch",
+            response_model=SourceAcknowledgement,
+            openapi_extra={"x-roles": ["researcher"]},
+        )
+        def ingest_trajectory_records(source: str, body: SourceIngestionBatch, who=Depends(actor)):
+            return trajectories.ingest(source, body.records, who)
+
+        @app.put(
+            "/v1/trajectory-sources/{source}/status",
+            tags=["Trajectories"],
+            summary="Update trajectory-source collection and execution status",
+            response_model=SourceStatusUpdate,
+            openapi_extra={"x-roles": ["researcher"]},
+        )
+        def update_trajectory_source_status(source: str, body: SourceStatusUpdate, who=Depends(actor)):
+            return trajectories.update_source_status(source, body, who)
 
     @app.post(
         "/v1/environments",
@@ -762,6 +987,11 @@ def create_app(session, *, local_access=None):
         del experiment
         return FileResponse(Path(__file__).parent / "viewer" / "index.html")
 
+    @app.get("/trajectory/{trajectory}", include_in_schema=False)
+    def viewer_trajectory(trajectory: str):
+        del trajectory
+        return FileResponse(Path(__file__).parent / "viewer" / "index.html")
+
     @app.get("/experiment/{experiment}/scenarios/{scenario}", include_in_schema=False)
     def viewer_experiment_scenario(experiment: str, scenario: str):
         del experiment, scenario
@@ -770,7 +1000,7 @@ def create_app(session, *, local_access=None):
     @app.get("/experiment/{experiment}/{section}", include_in_schema=False)
     def viewer_experiment_section(experiment: str, section: str):
         del experiment
-        if section not in ("scenarios", "sessions"):
+        if section not in ("scenarios", "sessions", "training"):
             raise HTTPException(404)
         return FileResponse(Path(__file__).parent / "viewer" / "index.html")
 

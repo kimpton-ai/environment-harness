@@ -1,0 +1,287 @@
+{
+  "$defs": {
+    "ArtifactBoundary": {
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "sha256"
+      ],
+      "title": "ArtifactBoundary",
+      "type": "object"
+    },
+    "ResourceFeatures": {
+      "additionalProperties": true,
+      "properties": {
+        "optional": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Optional",
+          "type": "array"
+        },
+        "required": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Required",
+          "type": "array"
+        }
+      },
+      "required": [
+        "required",
+        "optional"
+      ],
+      "title": "ResourceFeatures",
+      "type": "object"
+    },
+    "ResourceMetadata": {
+      "additionalProperties": true,
+      "properties": {
+        "createdAt": {
+          "minLength": 1,
+          "title": "Createdat",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Labels",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "createdAt",
+        "labels"
+      ],
+      "title": "ResourceMetadata",
+      "type": "object"
+    },
+    "ScoreReportBoundary": {
+      "additionalProperties": true,
+      "properties": {
+        "hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Hash",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 0,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "scorer": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Scorer",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scorer",
+        "revision",
+        "hash"
+      ],
+      "title": "ScoreReportBoundary",
+      "type": "object"
+    },
+    "SourceBoundary": {
+      "additionalProperties": true,
+      "properties": {
+        "hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Hash",
+          "type": "string"
+        },
+        "position": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Position",
+          "type": "string"
+        }
+      },
+      "required": [
+        "position",
+        "hash"
+      ],
+      "title": "SourceBoundary",
+      "type": "object"
+    },
+    "TrajectorySnapshotSpec": {
+      "additionalProperties": true,
+      "properties": {
+        "artifacts": {
+          "items": {
+            "$ref": "#/$defs/ArtifactBoundary"
+          },
+          "title": "Artifacts",
+          "type": "array"
+        },
+        "audience": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Audience",
+          "type": "array"
+        },
+        "evidenceHead": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Evidencehead",
+          "type": "string"
+        },
+        "scoreReports": {
+          "items": {
+            "$ref": "#/$defs/ScoreReportBoundary"
+          },
+          "title": "Scorereports",
+          "type": "array"
+        },
+        "sequenceEnd": {
+          "minimum": 1,
+          "title": "Sequenceend",
+          "type": "integer"
+        },
+        "sequenceStart": {
+          "minimum": 1,
+          "title": "Sequencestart",
+          "type": "integer"
+        },
+        "sourceBoundary": {
+          "$ref": "#/$defs/SourceBoundary"
+        },
+        "trajectoryDigest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Trajectorydigest",
+          "type": "string"
+        },
+        "trajectoryId": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Trajectoryid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "trajectoryId",
+        "trajectoryDigest",
+        "sourceBoundary",
+        "evidenceHead",
+        "sequenceStart",
+        "sequenceEnd",
+        "scoreReports",
+        "artifacts",
+        "audience"
+      ],
+      "title": "TrajectorySnapshotSpec",
+      "type": "object"
+    },
+    "TrajectorySnapshotStatus": {
+      "additionalProperties": true,
+      "properties": {
+        "artifactCount": {
+          "minimum": 0,
+          "title": "Artifactcount",
+          "type": "integer"
+        },
+        "complete": {
+          "title": "Complete",
+          "type": "boolean"
+        },
+        "manifestDigest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Manifestdigest",
+          "type": "string"
+        },
+        "recordCount": {
+          "minimum": 0,
+          "title": "Recordcount",
+          "type": "integer"
+        },
+        "recordsDigest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Recordsdigest",
+          "type": "string"
+        },
+        "snapshotDigest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Snapshotdigest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "recordCount",
+        "artifactCount",
+        "manifestDigest",
+        "recordsDigest",
+        "snapshotDigest",
+        "complete"
+      ],
+      "title": "TrajectorySnapshotStatus",
+      "type": "object"
+    }
+  },
+  "$id": "urn:environment-harness:v1:TrajectorySnapshot",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Immutable export boundary for an authorized trajectory projection.",
+  "properties": {
+    "apiVersion": {
+      "const": "environmentharness.dev/v1alpha1",
+      "title": "Apiversion",
+      "type": "string"
+    },
+    "extensions": {
+      "additionalProperties": true,
+      "title": "Extensions",
+      "type": "object"
+    },
+    "features": {
+      "$ref": "#/$defs/ResourceFeatures"
+    },
+    "kind": {
+      "const": "TrajectorySnapshot",
+      "title": "Kind",
+      "type": "string"
+    },
+    "metadata": {
+      "$ref": "#/$defs/ResourceMetadata"
+    },
+    "spec": {
+      "$ref": "#/$defs/TrajectorySnapshotSpec"
+    },
+    "status": {
+      "$ref": "#/$defs/TrajectorySnapshotStatus"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "features",
+    "spec",
+    "status",
+    "extensions"
+  ],
+  "title": "TrajectorySnapshot",
+  "type": "object"
+}

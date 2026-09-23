@@ -1,5 +1,10 @@
 # Environment-session v1
 
+Environment-session v1 remains the native execution protocol. Portable resources use the separate,
+additively evolving `environmentharness.dev/v1alpha1` family. A trace is the authoritative native
+or imported journal; a trajectory is a digest-bound projection of that trace. Neither resource
+family replaces or rewrites environment-session evidence.
+
 ## Authority and transport
 
 The supplier service owns the environment. HTTPS commands use bearer credentials. Loopback HTTP is an explicit development option. Credentials bind tenant, role, environment, participant and authority generation. Researcher, worker, scorer and participant permissions are separate. Participant credential issuance is researcher-only. Expired credentials fail closed; researchers may issue replacements without changing participant generation. Authority transfer increments generation and invalidates the old controller.
@@ -94,3 +99,32 @@ Findings validate participant/action/observation links and existence of referenc
 PostgreSQL and S3 support lives in `hosted.py`. Initialize its dedicated schema explicitly. It is not a migration authority for a platform database. Object access stays server-mediated. Production deployment additionally requires resource admission, backup/restore, rotation, transport hardening and the omitted live acceptance checks.
 
 [Session reliability and compatibility](COMPATIBILITY.md) specifies lease-independent cancellation, guarded response recovery, metric grouping, inherited chunks and legacy-store behavior.
+
+## Portable trajectory resources
+
+`Policy`, `Trajectory`, `TrajectorySnapshot`, `TrajectoryDataset`, and `TrainingRun` use a strict
+top-level envelope containing `apiVersion`, `kind`, `metadata`, `features`, `spec`, `status`, and
+`extensions`. Commands and mutations reject unknown fields. Nested portable evidence preserves
+unknown optional fields; required feature names must be understood before a reader accepts the
+resource. Python's canonical sorted compact JSON encoding is the digest authority for `v1alpha1`.
+
+A trajectory manifest freezes environment, participant, purpose, policy, and source identity. One
+trajectory can contain multiple segments and an ordered record stream. Durable sequence and
+explicit `causes` links determine order. Wall time and native clocks remain coordinates, not
+authority. Unknown record types must be reverse-domain namespaced and are inert.
+
+Collection, execution, termination/truncation, and verified outcome are independent. Ingestion
+completion cannot imply task success. A source registration is immutable within its tenant,
+namespace, and run ID. Each accepted batch continues a canonical hash chain and returns the
+acknowledged native position plus hash. Identical retries are idempotent; conflicting identities or
+broken chains fail. Gaps, capture failures, backlog, or an unacknowledged terminal boundary prevent
+a complete collection state.
+
+Snapshots freeze source/evidence cursors, segment and record ranges, score revisions, artifact
+digests, schema/features, and audience projection. Re-export is ordered JSONL and does not change
+after later appends or regrading. Reward supersession chains must be complete, acyclic, unambiguous,
+finite, and unretracted before they enter a training dataset. See [Trajectories](TRAJECTORIES.md).
+
+The provider-neutral decision payloads described by **Pluggable Decision-Selection Seam** attach to
+this record envelope. They remain separate from environment execution authorization and do not
+introduce another journal or registry.

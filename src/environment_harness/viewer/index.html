@@ -70,6 +70,7 @@
           <button type="button" role="tab" data-experiment-tab="overview" aria-selected="true">Overview</button>
           <button type="button" role="tab" data-experiment-tab="scenarios" aria-selected="false">Scenarios</button>
           <button type="button" role="tab" data-experiment-tab="sessions" aria-selected="false">Sessions</button>
+          <button type="button" role="tab" data-experiment-tab="training" aria-selected="false" hidden>Training</button>
         </nav>
         <section id="experiment-overview" class="experiment-page" hidden></section>
         <section id="experiment-scenarios" class="experiment-page" hidden>
@@ -89,6 +90,13 @@
               <div id="scenario-detail-body"></div>
             </article>
           </div>
+        </section>
+        <section id="experiment-training" class="experiment-page" hidden></section>
+        <section id="imported-trajectories" class="imported-trajectories" hidden>
+          <div class="overview-heading">
+            <div><h2>Imported Trajectories</h2><p>Historical evidence collected from external source journals.</p></div>
+          </div>
+          <div id="imported-trajectory-list" class="imported-trajectory-list"></div>
         </section>
         <div id="home-list-content" class="home-list-content">
         <div class="home-list-heading">
@@ -145,6 +153,30 @@
             </div>
           </div>
         </nav>
+        </div>
+      </section>
+
+      <section id="trajectory-shell" class="trajectory-shell" hidden>
+        <header class="page-context">
+          <div><p class="eyebrow">Trajectory</p><h1 id="trajectory-title">Trajectory</h1><p id="trajectory-description">Portable evidence from an authoritative source journal.</p></div>
+        </header>
+        <div class="trajectory-detail">
+          <section class="overview-section">
+            <div class="overview-heading"><div><h2>Collection Health</h2><p>Evidence delivery and execution are independent states.</p></div></div>
+            <dl id="trajectory-health" class="frozen-summary"></dl>
+          </section>
+          <section class="overview-section">
+            <div class="overview-heading"><div><h2>Segments</h2><p>Execution intervals and their recorded sequence boundaries.</p></div></div>
+            <div id="trajectory-segments" class="trajectory-segments"></div>
+          </section>
+          <section class="overview-section">
+            <div class="overview-heading"><div><h2>Snapshots</h2><p>Immutable evidence boundaries frozen for repeatable export.</p></div></div>
+            <div id="trajectory-snapshots" class="trajectory-segments"></div>
+          </section>
+          <section class="overview-section">
+            <div class="overview-heading"><div><h2>Records</h2><p>Inert summaries only; extension payloads and sensitive content stay hidden.</p></div></div>
+            <div id="trajectory-records" class="trajectory-records"></div>
+          </section>
         </div>
       </section>
 

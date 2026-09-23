@@ -1,5 +1,22 @@
 # Connect an agent
 
+## Correlated model evidence
+
+Wrap an in-process generation callback with `InstrumentedModel` when a trajectory needs attributable
+model evidence. During runner invocation, request, response, and failure events share a unique call
+ID and the durable agent-work operation, observation, participant, generation, and revision. Calls
+outside runner context remain valid diagnostics but are explicitly uncorrelated.
+
+Token IDs must be non-negative integers. Log probabilities must be finite and non-positive, and
+paired token/logprob arrays must have equal lengths. Rendered content is opt-in. Detail that exceeds
+the event limit spills to a participant-scoped JSON artifact; the event keeps identity, usage,
+finish reason, validation state, request digest, and the artifact reference. The artifact limit
+still applies.
+
+`CommandAgent` and remote HTTP participants submit the existing strict action contract and cannot
+attach inference evidence. Do not place tokens or model responses in an action. A future
+transport-neutral inference endpoint requires a separate protocol and security review.
+
 Run the included custom JSON program:
 
 ```sh

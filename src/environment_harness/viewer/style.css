@@ -395,6 +395,30 @@ button.session-name { padding: 0; color: var(--ink); background: none; border: 0
 .session-overview { height: calc(100vh - 221px - var(--app-footer-height)); padding: 26px 42px 40px; overflow-y: auto; }
 .overview-section { padding-bottom: 26px; }
 .overview-section + .overview-section { padding-top: 24px; border-top: 1px solid var(--border); }
+.training-zero { padding-block: 24px; border-block: 1px solid var(--border); }
+.training-resource { padding-block: 20px; }
+.training-resource-heading, .training-run-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.training-resource-heading h3 { margin: 0 0 4px; font-size: 15px; font-weight: 650; }
+.training-resource-heading .identity { margin: 0; font-family: var(--mono); font-size: 10px; }
+.training-run { padding: 16px 0; border-top: 1px solid var(--border); }
+.training-run p { margin: 5px 0 0; }
+.imported-trajectories { padding-block: 22px; border-bottom: 1px solid var(--border); }
+.imported-trajectory-list { border-block: 1px solid var(--border); }
+.imported-trajectory-row { width: 100%; display: grid; grid-template-columns: minmax(220px, 1fr) 120px 120px 90px; align-items: center; gap: 18px; padding: 13px 0; border: 0; border-bottom: 1px solid var(--border-soft); border-radius: 0; background: transparent; color: inherit; text-align: left; }
+.imported-trajectory-row:last-child { border-bottom: 0; }
+.imported-trajectory-row:hover { background: var(--bg-subtle); }
+.imported-trajectory-identity { display: grid; gap: 3px; }
+.imported-trajectory-identity small { color: var(--muted); }
+.trajectory-shell { height: calc(100vh - 51px - var(--app-footer-height)); overflow: hidden; }
+.trajectory-detail { height: calc(100% - 120px); overflow-y: auto; padding: 26px 42px 48px; }
+.trajectory-segments, .trajectory-records { border-block: 1px solid var(--border); }
+.trajectory-segment { padding: 14px 0; border-bottom: 1px solid var(--border-soft); }
+.trajectory-segment:last-child { border-bottom: 0; }
+.trajectory-segment-heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.trajectory-segment p { margin: 5px 0 0; }
+.trajectory-record { display: grid; grid-template-columns: 48px minmax(180px, 1fr) 100px 190px minmax(160px, 1fr); align-items: center; gap: 14px; padding: 11px 0; border-bottom: 1px solid var(--border-soft); font-size: 11px; }
+.trajectory-record:last-child { border-bottom: 0; }
+.trajectory-record-sequence { font-family: var(--mono); color: var(--muted); }
 .overview-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 20px; margin-bottom: 14px; }
 .overview-heading p { margin-top: 4px; font-size: 11px; }
 .overview-heading-actions { display: flex; gap: 18px; }

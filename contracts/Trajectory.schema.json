@@ -1,0 +1,518 @@
+{
+  "$defs": {
+    "LifecycleStatus": {
+      "additionalProperties": true,
+      "properties": {
+        "state": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "title": "LifecycleStatus",
+      "type": "object"
+    },
+    "NativeTimeCoordinate": {
+      "additionalProperties": true,
+      "properties": {
+        "clock": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Clock",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value"
+        }
+      },
+      "required": [
+        "clock",
+        "value"
+      ],
+      "title": "NativeTimeCoordinate",
+      "type": "object"
+    },
+    "PolicyReference": {
+      "additionalProperties": true,
+      "properties": {
+        "digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Digest",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "implementation": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Implementation",
+          "type": "string"
+        },
+        "participant": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Participant",
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "id",
+        "participant",
+        "implementation",
+        "digest"
+      ],
+      "title": "PolicyReference",
+      "type": "object"
+    },
+    "RecordTime": {
+      "additionalProperties": true,
+      "properties": {
+        "native": {
+          "items": {
+            "$ref": "#/$defs/NativeTimeCoordinate"
+          },
+          "title": "Native",
+          "type": "array"
+        },
+        "wallTime": {
+          "minLength": 1,
+          "title": "Walltime",
+          "type": "string"
+        }
+      },
+      "required": [
+        "wallTime",
+        "native"
+      ],
+      "title": "RecordTime",
+      "type": "object"
+    },
+    "ResourceFeatures": {
+      "additionalProperties": true,
+      "properties": {
+        "optional": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Optional",
+          "type": "array"
+        },
+        "required": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Required",
+          "type": "array"
+        }
+      },
+      "required": [
+        "required",
+        "optional"
+      ],
+      "title": "ResourceFeatures",
+      "type": "object"
+    },
+    "ResourceMetadata": {
+      "additionalProperties": true,
+      "properties": {
+        "createdAt": {
+          "minLength": 1,
+          "title": "Createdat",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Labels",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "createdAt",
+        "labels"
+      ],
+      "title": "ResourceMetadata",
+      "type": "object"
+    },
+    "SourceIdentity": {
+      "additionalProperties": true,
+      "properties": {
+        "namespace": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Namespace",
+          "type": "string"
+        },
+        "runId": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Runid",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Schemaversion",
+          "type": "string"
+        }
+      },
+      "required": [
+        "namespace",
+        "runId",
+        "schemaVersion"
+      ],
+      "title": "SourceIdentity",
+      "type": "object"
+    },
+    "TerminationStatus": {
+      "additionalProperties": true,
+      "properties": {
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "terminated": {
+          "title": "Terminated",
+          "type": "boolean"
+        },
+        "truncated": {
+          "title": "Truncated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "terminated",
+        "truncated",
+        "reason"
+      ],
+      "title": "TerminationStatus",
+      "type": "object"
+    },
+    "TrajectoryManifest": {
+      "additionalProperties": true,
+      "properties": {
+        "environment": {
+          "additionalProperties": true,
+          "title": "Environment",
+          "type": "object"
+        },
+        "participants": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Participants",
+          "type": "array"
+        },
+        "policies": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PolicyReference"
+          },
+          "title": "Policies",
+          "type": "array"
+        },
+        "purpose": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Purpose",
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceIdentity"
+        }
+      },
+      "required": [
+        "environment",
+        "source",
+        "participants",
+        "purpose"
+      ],
+      "title": "TrajectoryManifest",
+      "type": "object"
+    },
+    "TrajectoryRecord": {
+      "additionalProperties": true,
+      "properties": {
+        "causes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Causes",
+          "type": "array"
+        },
+        "data": {
+          "additionalProperties": true,
+          "title": "Data",
+          "type": "object"
+        },
+        "extensions": {
+          "additionalProperties": true,
+          "title": "Extensions",
+          "type": "object"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "participant": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Participant"
+        },
+        "revision": {
+          "minimum": 0,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "segment": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Segment",
+          "type": "string"
+        },
+        "sequence": {
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "time": {
+          "$ref": "#/$defs/RecordTime"
+        },
+        "type": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "sequence",
+        "segment",
+        "participant",
+        "revision",
+        "causes",
+        "time",
+        "data",
+        "extensions"
+      ],
+      "title": "TrajectoryRecord",
+      "type": "object"
+    },
+    "TrajectorySegment": {
+      "additionalProperties": true,
+      "properties": {
+        "collection": {
+          "$ref": "#/$defs/LifecycleStatus"
+        },
+        "execution": {
+          "$ref": "#/$defs/LifecycleStatus"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "sequenceEnd": {
+          "minimum": 1,
+          "title": "Sequenceend",
+          "type": "integer"
+        },
+        "sequenceStart": {
+          "minimum": 1,
+          "title": "Sequencestart",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "sequenceStart",
+        "sequenceEnd",
+        "collection",
+        "execution"
+      ],
+      "title": "TrajectorySegment",
+      "type": "object"
+    },
+    "TrajectorySpec": {
+      "additionalProperties": true,
+      "properties": {
+        "manifest": {
+          "$ref": "#/$defs/TrajectoryManifest"
+        }
+      },
+      "required": [
+        "manifest"
+      ],
+      "title": "TrajectorySpec",
+      "type": "object"
+    },
+    "TrajectoryStatus": {
+      "additionalProperties": true,
+      "properties": {
+        "collection": {
+          "$ref": "#/$defs/LifecycleStatus"
+        },
+        "evidenceHead": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Evidencehead",
+          "type": "string"
+        },
+        "execution": {
+          "$ref": "#/$defs/LifecycleStatus"
+        },
+        "records": {
+          "items": {
+            "$ref": "#/$defs/TrajectoryRecord"
+          },
+          "title": "Records",
+          "type": "array"
+        },
+        "segments": {
+          "items": {
+            "$ref": "#/$defs/TrajectorySegment"
+          },
+          "title": "Segments",
+          "type": "array"
+        },
+        "termination": {
+          "$ref": "#/$defs/TerminationStatus"
+        },
+        "trajectoryDigest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Trajectorydigest",
+          "type": "string"
+        },
+        "verifiedOutcome": {
+          "$ref": "#/$defs/VerifiedOutcome"
+        }
+      },
+      "required": [
+        "segments",
+        "records",
+        "collection",
+        "execution",
+        "termination",
+        "verifiedOutcome",
+        "evidenceHead",
+        "trajectoryDigest"
+      ],
+      "title": "TrajectoryStatus",
+      "type": "object"
+    },
+    "VerifiedOutcome": {
+      "additionalProperties": true,
+      "properties": {
+        "evidence": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "state": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "evidence"
+      ],
+      "title": "VerifiedOutcome",
+      "type": "object"
+    }
+  },
+  "$id": "urn:environment-harness:v1:Trajectory",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Immutable, portable projection of one native or imported trace.",
+  "properties": {
+    "apiVersion": {
+      "const": "environmentharness.dev/v1alpha1",
+      "title": "Apiversion",
+      "type": "string"
+    },
+    "extensions": {
+      "additionalProperties": true,
+      "title": "Extensions",
+      "type": "object"
+    },
+    "features": {
+      "$ref": "#/$defs/ResourceFeatures"
+    },
+    "kind": {
+      "const": "Trajectory",
+      "title": "Kind",
+      "type": "string"
+    },
+    "metadata": {
+      "$ref": "#/$defs/ResourceMetadata"
+    },
+    "spec": {
+      "$ref": "#/$defs/TrajectorySpec"
+    },
+    "status": {
+      "$ref": "#/$defs/TrajectoryStatus"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "features",
+    "spec",
+    "status",
+    "extensions"
+  ],
+  "title": "Trajectory",
+  "type": "object"
+}

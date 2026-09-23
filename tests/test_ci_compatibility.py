@@ -41,6 +41,43 @@ def test_python_source_change_runs_compatibility_matrix():
     assert classifier.requires_compatibility(files, changed_files=1) is True
 
 
+def test_schema_integration_viewer_and_documentation_jobs_are_classified_independently():
+    classifier = load_script()
+
+    assert classifier.classify_impacts(
+        [file_change("contracts/Trajectory.schema.json")], changed_files=1
+    ) == {
+        "compatibility": True,
+        "schema": True,
+        "integrations": False,
+        "viewer": False,
+        "documentation": False,
+    }
+    assert (
+        classifier.classify_impacts(
+            [file_change("src/environment_harness/adapters/frameworks.py")], changed_files=1
+        )["integrations"]
+        is True
+    )
+    assert classifier.classify_impacts([file_change("packages/typescript/src/app.ts")], changed_files=1) == {
+        "compatibility": False,
+        "schema": False,
+        "integrations": False,
+        "viewer": True,
+        "documentation": False,
+    }
+    assert (
+        classifier.classify_impacts([file_change("docs/TRAINING.md")], changed_files=1)["documentation"]
+        is True
+    )
+
+
+def test_impact_classification_fails_closed_on_incomplete_metadata():
+    classifier = load_script()
+
+    assert all(classifier.classify_impacts([file_change("docs/one.md")], changed_files=2).values())
+
+
 def test_rename_from_sensitive_path_runs_compatibility_matrix():
     classifier = load_script()
     files = [

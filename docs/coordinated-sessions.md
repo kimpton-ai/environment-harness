@@ -1,5 +1,18 @@
 # Coordinated persistent sessions
 
+## Trajectory continuity
+
+An environment session is the complete execution identity. Pausing and resuming it creates a new
+trajectory continuation segment rather than a new environment session. The resume record begins
+that segment and remains causally linked to the final record of the prior segment. A branch is a new
+environment session with parent/checkpoint lineage; it does not overwrite the parent's trajectory.
+
+Concurrent participants and overlapping work use durable operation IDs and causal links. A final
+decision may authorize zero, one, or many operations, and fan-out/fan-in must preserve those exact
+links; no consumer should reconstruct causality from timestamps. The decision payload itself is
+owned by **Pluggable Decision-Selection Seam**, while the journal and trajectory envelope remain
+core EnvironmentHarness contracts.
+
 `EnvironmentSpec.phase_deadline` defaults to `wall`. An environment may declare `coordinator` when only explicit phase closure advances execution. For that mode, a trusted researcher or worker with the current writer lease calls `close_phase(environment, principal, lease, revision=...)` before `resolve`. Closure is durable and idempotent. Actions submitted after closure are rejected. Waiting for inference or reconnecting does not change simulation time.
 
 `AgentJournal` stores serializable, revision-scoped work through the participant checkpoint hook. A program can preserve tool responses and final decisions before submitting an action. State writes check participant authority and the expected environment revision. External operations still use the operation journal and receipt reconciliation; agent memory does not authorize redispatch of an ambiguous effect.

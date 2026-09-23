@@ -33,6 +33,11 @@ class Response:
         return self.body
 
 
+class StreamingResponse(Response):
+    def __iter__(self):
+        return iter(self.body.splitlines(keepends=True))
+
+
 def test_remote_client_validates_transport_and_builds_public_requests(monkeypatch):
     for endpoint in (
         "http://example.test",
@@ -83,6 +88,91 @@ def test_remote_client_validates_transport_and_builds_public_requests(monkeypatc
     assert client.activity(3)[1].endswith("activity/events?after=3")
     assert client.experiment_activity("a/b", 4)[1].endswith("experiments/a%2Fb/events?after=4")
     assert client.session_activity("a/b", 5)[1].endswith("environments/a%2Fb/activity?after=5")
+    assert client.trajectories(limit=25, cursor="source-a")[1].endswith(
+        "/v1/trajectories?limit=25&cursor=source-a"
+    )
+    assert client.trajectory("a/b")[1].endswith("/v1/trajectories/a%2Fb")
+    assert client.trajectory_records("a/b", after=12, limit=50)[1].endswith(
+        "/v1/trajectories/a%2Fb/records?after=12&limit=50"
+    )
+    assert client.register_trajectory_source({"namespace": "example"})[1] == "/v1/trajectory-sources"
+    assert client.ingest_trajectory_source("a/b", {"records": []})[1].endswith(
+        "/v1/trajectory-sources/a%2Fb/records"
+    )
+    assert client.update_trajectory_source("a/b", {"collection_state": "current"})[0] == "PUT"
+    assert client.trajectory_source_status("a/b")[1].endswith("/v1/trajectory-sources/a%2Fb/status")
+    assert client.freeze_trajectory("a/b")[1].endswith("/v1/trajectories/a%2Fb/snapshots")
+    assert client.trajectory_snapshots("a/b", limit=25)[1].endswith(
+        "/v1/trajectory-snapshots?trajectory=a%2Fb&limit=25"
+    )
+    assert client.trajectory_snapshot("a/b")[1].endswith("/v1/trajectory-snapshots/a%2Fb")
+    assert client.freeze_trajectory_dataset("training", ["a/b"])[1] == "/v1/trajectory-datasets"
+    assert client.trajectory_dataset("a/b")[1].endswith("/v1/trajectory-datasets/a%2Fb")
+    assert client.training_run("a/b")[1].endswith("/v1/training-runs/a%2Fb")
+    assert client.trajectory_datasets(limit=25)[1] == "/v1/trajectory-datasets?limit=25"
+    assert client.training_runs(dataset="a/b", limit=25)[1].endswith(
+        "/v1/training-runs?dataset=a%2Fb&limit=25"
+    )
+
+
+def test_remote_client_streams_snapshot_and_dataset_jsonl_without_materializing_response(monkeypatch):
+    client = EnvironmentClient("http://127.0.0.1:8000", "token", allow_loopback=True)
+    seen = []
+
+    class Opener:
+        def open(self, request, timeout):
+            seen.append((request, timeout))
+            return StreamingResponse(b'{"row":1}\n\n{"row":2}\n')
+
+    client.opener = Opener()
+
+    assert list(client.export_trajectory_snapshot("a/b")) == [{"row": 1}, {"row": 2}]
+    assert list(client.export_trajectory_dataset("c/d")) == [{"row": 1}, {"row": 2}]
+    assert seen[0][0].full_url.endswith("/v1/trajectory-snapshots/a%2Fb/export")
+    assert seen[1][0].full_url.endswith("/v1/trajectory-datasets/c%2Fd/export")
+    assert seen[0][0].get_header("Accept") == "application/x-ndjson"
+
+
+@pytest.mark.parametrize(
+    ("result", "message"),
+    [
+        (StreamingResponse(b"x" * 16777217 + b"\n"), "size limit"),
+        (StreamingResponse(b"{broken\n"), "malformed JSONL"),
+        (StreamingResponse(b"[]\n"), "malformed JSONL"),
+        (urllib.error.URLError("offline"), "unavailable"),
+    ],
+)
+def test_remote_client_streaming_fails_closed(result, message):
+    client = EnvironmentClient("http://127.0.0.1:8000", "token", allow_loopback=True)
+
+    class Opener:
+        def open(self, *_args, **_kwargs):
+            if isinstance(result, BaseException):
+                raise result
+            return result
+
+    client.opener = Opener()
+    with pytest.raises(HarnessError, match=message):
+        list(client.export_trajectory_snapshot("snapshot"))
+
+
+def test_remote_client_streaming_translates_http_errors():
+    client = EnvironmentClient("https://example.test", "token")
+    error = urllib.error.HTTPError(
+        "https://example.test",
+        403,
+        "forbidden",
+        {"Content-Type": "application/json"},
+        io.BytesIO(b"{}"),
+    )
+
+    class Opener:
+        def open(self, *_args, **_kwargs):
+            raise error
+
+    client.opener = Opener()
+    with pytest.raises(HarnessError):
+        list(client.export_trajectory_snapshot("snapshot"))
 
 
 def test_advanced_module_exposes_the_low_level_workflow():
@@ -194,11 +284,18 @@ def test_plugin_discovery_loading_and_diagnostics(monkeypatch):
     assert plugins.discover() == [
         {"name": "custom", "distribution": "installed-package", "target": "package:Environment"}
     ]
+    assert plugins.discover_training() == [
+        {"name": "custom", "distribution": "installed-package", "target": "package:Environment"}
+    ]
+    loaded = plugins.training_integration("custom", mode="event")
+    assert isinstance(loaded, SyntheticEnvironment)
     assert isinstance(plugins.environment("custom", mode="event"), SyntheticEnvironment)
     assert isinstance(plugins.environment("synthetic-protocol"), SyntheticEnvironment)
     monkeypatch.setattr(plugins, "entry_points", lambda **kwargs: [])
     with pytest.raises(Unsupported, match="install one"):
         plugins.environment("missing")
+    with pytest.raises(Unsupported, match="training integration"):
+        plugins.training_integration("missing")
 
     monkeypatch.setattr(
         plugins,
@@ -478,7 +575,12 @@ def test_http_model_and_mcp_adapters_record_boundaries(monkeypatch):
                 return None
 
         transaction = Transaction
-        environment = staticmethod(lambda *_args: {"revision": 2})
+        environment = staticmethod(
+            lambda *_args: {
+                "revision": 2,
+                "manifest": json.dumps({"policy": {"max_event_bytes": 1_048_576}}),
+            }
+        )
         append = staticmethod(lambda *args: appended.append(args[3:]))
 
     principal = Principal(tenant="t", subject="a", role="agent", participant="a")

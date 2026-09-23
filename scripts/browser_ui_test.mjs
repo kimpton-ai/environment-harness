@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import {writeFileSync} from 'node:fs';
 
-const [origin, debugPort] = process.argv.slice(2);
-if (!origin || !debugPort) throw new Error('origin and debug port are required');
+const [origin, debugPort, trajectoryId] = process.argv.slice(2);
+if (!origin || !debugPort || !trajectoryId) throw new Error('origin, debug port, and trajectory ID are required');
 
 const target = await fetch(
   `http://127.0.0.1:${debugPort}/json/new?${encodeURIComponent(origin)}`,
@@ -455,13 +455,14 @@ try {
       /^\\/experiment\\/[^/]+$/.test(location.pathname),
       document.querySelector('.home-heading h1')?.textContent,
       Array.from(document.querySelectorAll('#experiment-tabs [role=tab]')).map(tab => tab.textContent),
+      document.querySelector('[data-experiment-tab="training"]')?.hidden,
       document.querySelector('#experiment-tabs')?.hidden,
       document.querySelector('#experiment-overview')?.hidden,
       document.querySelector('#home-list-content')?.hidden,
       document.querySelector('#experiment-frozen-summary')?.textContent.includes('synthetic-protocol@1'),
       getComputedStyle(document.querySelector('#home-view')).backgroundColor,
     ]`),
-    [true, 'Support response evaluation', ['Overview', 'Scenarios', 'Sessions'], false, false, true, true, 'rgb(255, 255, 255)'],
+    [true, 'Support response evaluation', ['Overview', 'Scenarios', 'Sessions', 'Training'], true, false, false, true, true, 'rgb(255, 255, 255)'],
     'the experiment name opens its configuration overview with subordinate navigation on the session canvas',
   );
   await evaluate(`document.querySelector('[data-experiment-tab="scenarios"]').click()`);
@@ -637,9 +638,9 @@ try {
   );
   assert.deepEqual(
     await evaluate(`[
-      document.querySelector('.page-context .eyebrow')?.textContent,
-      getComputedStyle(document.querySelector('.page-context .eyebrow')).textTransform,
-      getComputedStyle(document.querySelector('.page-context .eyebrow')).fontSize,
+      document.querySelector('#session-shell .page-context .eyebrow')?.textContent,
+      getComputedStyle(document.querySelector('#session-shell .page-context .eyebrow')).textTransform,
+      getComputedStyle(document.querySelector('#session-shell .page-context .eyebrow')).fontSize,
       getComputedStyle(document.querySelector('.home-heading .eyebrow')).fontSize,
     ]`),
     ['Session', 'none', '12px', '12px'],
@@ -1089,6 +1090,26 @@ try {
   await evaluate('history.back()');
   await waitFor('document.querySelector("#compare-sessions-view")?.hidden === false');
   await evaluate('history.back()');
+  await waitFor('document.querySelector("#home-view")?.hidden === false');
+  await command('Page.navigate', {url: `${origin}/trajectory/${encodeURIComponent(trajectoryId)}`});
+  await waitFor('document.querySelector("#trajectory-shell")?.hidden === false');
+  assert.deepEqual(
+    await evaluate(`[
+      document.querySelectorAll('#trajectory-snapshots .trajectory-segment').length,
+      document.querySelector('#trajectory-snapshots .trajectory-segment p')?.textContent.includes('frozen'),
+      document.querySelector('#trajectory-records')?.textContent.includes('payload'),
+    ]`),
+    [1, true, false],
+    'trajectory inspection shows immutable snapshot boundaries without sensitive record payloads',
+  );
+  await command('Page.reload');
+  await waitFor('document.querySelector("#trajectory-shell")?.hidden === false && document.querySelectorAll("#trajectory-snapshots .trajectory-segment").length === 1');
+  assert.equal(
+    await evaluate('location.pathname'),
+    `/trajectory/${trajectoryId}`,
+    'trajectory snapshot inspection survives a deep-link refresh',
+  );
+  await evaluate('document.querySelector("#home").click()');
   await waitFor('document.querySelector("#home-view")?.hidden === false');
   for (const [width, label] of [[768, 'tablet'], [375, 'mobile'], [241, 'narrow-mobile']]) {
     await command('Emulation.setDeviceMetricsOverride', {width, height: 800, deviceScaleFactor: 1, mobile: width < 500});

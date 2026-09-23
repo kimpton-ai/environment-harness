@@ -70,6 +70,47 @@ export class EnvironmentClient {
             throw new Error('Response size limit exceeded');
         return JSON.parse(text);
     }
+    async *streamJsonl(path) {
+        const response = await fetch(this.endpoint + path, { method: 'GET', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(30000),
+            headers: { Authorization: `Bearer ${this.token}`, Accept: 'application/x-ndjson' } });
+        if (!response.ok)
+            throw await serviceError(response);
+        if (!response.body)
+            throw new Error('Environment service returned no stream');
+        const reader = response.body.getReader(), decoder = new TextDecoder();
+        let buffered = '';
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                buffered += decoder.decode(value, { stream: !done });
+                if (buffered.length > 16777216 && !buffered.includes('\n'))
+                    throw new Error('Stream record size limit exceeded');
+                const lines = buffered.split('\n');
+                buffered = lines.pop() ?? '';
+                for (const line of lines) {
+                    if (!line.trim())
+                        continue;
+                    if (line.length > 16777216)
+                        throw new Error('Stream record size limit exceeded');
+                    const parsed = JSON.parse(line);
+                    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed))
+                        throw new Error('Environment service returned malformed JSONL');
+                    yield parsed;
+                }
+                if (done)
+                    break;
+            }
+            if (buffered.trim()) {
+                const parsed = JSON.parse(buffered);
+                if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed))
+                    throw new Error('Environment service returned malformed JSONL');
+                yield parsed;
+            }
+        }
+        finally {
+            reader.releaseLock();
+        }
+    }
     list(options = {}) {
         const query = new URLSearchParams();
         if (options.limit !== undefined)
@@ -117,6 +158,42 @@ export class EnvironmentClient {
     credentials(environment, participant, ttl = 3600) { return this.request('POST', `/v1/environments/${encodeURIComponent(environment)}/credentials`, { participant, ttl }); }
     reports(environment) { return this.request('GET', `/v1/environments/${encodeURIComponent(environment)}/reports`); }
     compare(environments) { return this.request('POST', '/v1/compare', { environments }); }
+    trajectories(options = {}) {
+        const query = new URLSearchParams();
+        if (options.limit !== undefined)
+            query.set('limit', String(options.limit));
+        if (options.cursor !== undefined)
+            query.set('cursor', options.cursor);
+        return this.request('GET', `/v1/trajectories${query.size ? '?' + query : ''}`);
+    }
+    trajectory(trajectory) { return this.request('GET', `/v1/trajectories/${encodeURIComponent(trajectory)}`); }
+    trajectoryRecords(trajectory, options = {}) {
+        const query = new URLSearchParams({ after: String(options.after ?? 0), limit: String(options.limit ?? 200) });
+        return this.request('GET', `/v1/trajectories/${encodeURIComponent(trajectory)}/records?${query}`);
+    }
+    registerTrajectorySource(registration) { return this.request('POST', '/v1/trajectory-sources', registration); }
+    ingestTrajectorySource(source, batch) { return this.request('POST', `/v1/trajectory-sources/${encodeURIComponent(source)}/records`, batch); }
+    trajectorySourceStatus(source) { return this.request('GET', `/v1/trajectory-sources/${encodeURIComponent(source)}/status`); }
+    updateTrajectorySource(source, status) { return this.request('PUT', `/v1/trajectory-sources/${encodeURIComponent(source)}/status`, status); }
+    freezeTrajectory(trajectory) { return this.request('POST', `/v1/trajectories/${encodeURIComponent(trajectory)}/snapshots`); }
+    trajectorySnapshots(trajectory, options = {}) {
+        const query = new URLSearchParams({ trajectory, limit: String(options.limit ?? 100) });
+        return this.request('GET', `/v1/trajectory-snapshots?${query}`);
+    }
+    trajectorySnapshot(snapshot) { return this.request('GET', `/v1/trajectory-snapshots/${encodeURIComponent(snapshot)}`); }
+    exportTrajectorySnapshot(snapshot) { return this.streamJsonl(`/v1/trajectory-snapshots/${encodeURIComponent(snapshot)}/export`); }
+    freezeTrajectoryDataset(name, trajectories) { return this.request('POST', '/v1/trajectory-datasets', { name, trajectories }); }
+    trajectoryDataset(dataset) { return this.request('GET', `/v1/trajectory-datasets/${encodeURIComponent(dataset)}`); }
+    exportTrajectoryDataset(dataset) { return this.streamJsonl(`/v1/trajectory-datasets/${encodeURIComponent(dataset)}/export`); }
+    trainingRun(trainingRun) { return this.request('GET', `/v1/training-runs/${encodeURIComponent(trainingRun)}`); }
+    trajectoryDatasets(options = {}) { return this.request('GET', `/v1/trajectory-datasets?limit=${options.limit ?? 100}`); }
+    trainingRuns(options = {}) {
+        const query = new URLSearchParams();
+        if (options.dataset !== undefined)
+            query.set('dataset', options.dataset);
+        query.set('limit', String(options.limit ?? 100));
+        return this.request('GET', `/v1/training-runs?${query}`);
+    }
     async *replay(environment) {
         let cursor = 0;
         while (true) {

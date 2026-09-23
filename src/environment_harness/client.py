@@ -96,6 +96,34 @@ class EnvironmentClient:
         except urllib.error.URLError:
             raise HarnessError("environment service unavailable; reconcile before retrying a write") from None
 
+    def stream_jsonl(self, path):
+        request = urllib.request.Request(
+            self.endpoint + path,
+            headers={
+                "Authorization": "Bearer " + self.token,
+                "Accept": "application/x-ndjson",
+            },
+            method="GET",
+        )
+        try:
+            with self.opener.open(request, timeout=self.timeout) as response:
+                for raw in response:
+                    if len(raw) > 16777216:
+                        raise HarnessError("stream record size limit exceeded")
+                    if not raw.strip():
+                        continue
+                    try:
+                        value = json.loads(raw)
+                    except (UnicodeDecodeError, json.JSONDecodeError):
+                        raise HarnessError("environment service returned malformed JSONL") from None
+                    if not isinstance(value, dict):
+                        raise HarnessError("environment service returned malformed JSONL")
+                    yield value
+        except urllib.error.HTTPError as error:
+            raise _service_error(error) from None
+        except urllib.error.URLError:
+            raise HarnessError("environment service unavailable; reconcile before retrying a write") from None
+
     def create(self, experiment, operation_id=None):
         body = experiment.model_dump(mode="json") if hasattr(experiment, "model_dump") else experiment
         return self.request("POST", "/v1/environments", body, operation_id=operation_id or uid())
@@ -164,6 +192,80 @@ class EnvironmentClient:
     def session_activity(self, environment, after=0):
         key = urllib.parse.quote(environment, safe="")
         return self.request("GET", f"/v1/environments/{key}/activity?after={after}")
+
+    def trajectories(self, *, limit=100, cursor=None):
+        query = {"limit": limit}
+        if cursor is not None:
+            query["cursor"] = cursor
+        return self.request("GET", "/v1/trajectories?" + urllib.parse.urlencode(query))
+
+    def trajectory(self, trajectory):
+        key = urllib.parse.quote(trajectory, safe="")
+        return self.request("GET", f"/v1/trajectories/{key}")
+
+    def trajectory_records(self, trajectory, *, after=0, limit=200):
+        key = urllib.parse.quote(trajectory, safe="")
+        query = urllib.parse.urlencode({"after": after, "limit": limit})
+        return self.request("GET", f"/v1/trajectories/{key}/records?{query}")
+
+    def register_trajectory_source(self, registration):
+        body = registration.model_dump(mode="json") if hasattr(registration, "model_dump") else registration
+        return self.request("POST", "/v1/trajectory-sources", body)
+
+    def ingest_trajectory_source(self, source, batch):
+        key = urllib.parse.quote(source, safe="")
+        body = batch.model_dump(mode="json") if hasattr(batch, "model_dump") else batch
+        return self.request("POST", f"/v1/trajectory-sources/{key}/records", body)
+
+    def update_trajectory_source(self, source, status):
+        key = urllib.parse.quote(source, safe="")
+        body = status.model_dump(mode="json") if hasattr(status, "model_dump") else status
+        return self.request("PUT", f"/v1/trajectory-sources/{key}/status", body)
+
+    def trajectory_source_status(self, source):
+        key = urllib.parse.quote(source, safe="")
+        return self.request("GET", f"/v1/trajectory-sources/{key}/status")
+
+    def freeze_trajectory(self, trajectory):
+        key = urllib.parse.quote(trajectory, safe="")
+        return self.request("POST", f"/v1/trajectories/{key}/snapshots")
+
+    def trajectory_snapshots(self, trajectory, *, limit=100):
+        query = urllib.parse.urlencode({"trajectory": trajectory, "limit": limit})
+        return self.request("GET", f"/v1/trajectory-snapshots?{query}")
+
+    def trajectory_snapshot(self, snapshot):
+        key = urllib.parse.quote(snapshot, safe="")
+        return self.request("GET", f"/v1/trajectory-snapshots/{key}")
+
+    def export_trajectory_snapshot(self, snapshot):
+        key = urllib.parse.quote(snapshot, safe="")
+        yield from self.stream_jsonl(f"/v1/trajectory-snapshots/{key}/export")
+
+    def freeze_trajectory_dataset(self, name, trajectories):
+        return self.request("POST", "/v1/trajectory-datasets", {"name": name, "trajectories": trajectories})
+
+    def trajectory_dataset(self, dataset):
+        key = urllib.parse.quote(dataset, safe="")
+        return self.request("GET", f"/v1/trajectory-datasets/{key}")
+
+    def export_trajectory_dataset(self, dataset):
+        key = urllib.parse.quote(dataset, safe="")
+        yield from self.stream_jsonl(f"/v1/trajectory-datasets/{key}/export")
+
+    def trajectory_datasets(self, *, limit=100):
+        return self.request("GET", "/v1/trajectory-datasets?" + urllib.parse.urlencode({"limit": limit}))
+
+    def training_run(self, training_run):
+        key = urllib.parse.quote(training_run, safe="")
+        return self.request("GET", f"/v1/training-runs/{key}")
+
+    def training_runs(self, *, dataset=None, limit=100):
+        query = {}
+        if dataset is not None:
+            query["dataset"] = dataset
+        query["limit"] = limit
+        return self.request("GET", "/v1/training-runs?" + urllib.parse.urlencode(query))
 
     def replay(self, environment):
         cursor = 0

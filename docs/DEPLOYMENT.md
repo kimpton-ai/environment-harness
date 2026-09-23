@@ -148,6 +148,25 @@ The current browser bundle must be served by the same EnvironmentHarness applica
 The server rejects browser requests whose `Origin` differs from its own base URL. A UI hosted on a
 separate domain therefore requires a future, reviewed authentication and cross-origin design.
 
+### Historical trajectory ingestion
+
+`create_app(session)` is read-only for historical sources. It exposes authenticated trajectory,
+source-status, snapshot, dataset, and recorded-training-result reads but omits source registration,
+record ingestion, and status mutation. An explicitly managed ingestion service may use:
+
+```python
+app = create_app(session, trajectory_ingestion=True)
+```
+
+That flag adds only bearer-authenticated researcher management routes. It does not make ingestion
+public, authorize environment actions, run selectors, or execute trainer plugins. Keep a source's
+domain journal as the delivery backlog during service outages and resume from its last acknowledged
+position and hash. Do not configure ingestion on a supplier/viewer process that is intended to be
+read-only.
+
+The server never executes `TrainingIntegration` code. Trusted local Python or the CLI may invoke an
+explicitly installed integration and record its immutable receipt; HTTP can only read that receipt.
+
 ## Optional PostgreSQL and object-storage seam
 
 Install the PostgreSQL dependency with:
@@ -186,6 +205,10 @@ supported `/session/{id}/{section}` deep links. A generic static-file server doe
 meaningful scenario snapshots, and its Sessions tab retains a flat, filterable list. Each child
 session links to its canonical `/session/{id}/{section}` inspection route.
 
+`/experiment/{id}/training` is refresh-safe even when its conditional tab is hidden, and
+`/trajectory/{id}` restores imported-trajectory inspection. Both remain authenticated read-only
+viewer routes.
+
 ### The local viewer shows “Local viewer unavailable”
 
 Confirm that the URL uses the exact origin printed by `serve`, including port and `127.0.0.1`.
@@ -209,6 +232,7 @@ Update this guide in the same pull request when any of these change:
 
 - `serve` flags, bind address, authentication, routes, or health response;
 - store location, migration, backup, or restoration behavior;
+- historical-ingestion or training-result boundaries;
 - supported Python version or installation extras;
 - remote browser topology or cross-origin policy; or
 - hosted-deployment qualification in [Release scope](STATUS.md).

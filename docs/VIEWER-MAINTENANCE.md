@@ -42,6 +42,8 @@ The FastAPI application serves the same viewer shell at:
 - `/experiment/{experiment}`;
 - `/experiment/{experiment}/scenarios` and `/experiment/{experiment}/scenarios/{scenario}`;
 - `/experiment/{experiment}/sessions`;
+- `/experiment/{experiment}/training` when a matching frozen dataset exists;
+- `/trajectory/{trajectory}` for imported-trajectory inspection;
 - `/session/{environment}`; and
 - `/session/{environment}/overview`, `/turns`, `/progression`, or `/reports`.
 
@@ -88,6 +90,12 @@ underscores with spaces while preserving the recorded receipt unchanged.
 The Progression page derives time series from executed rewards, public numeric signals, and score
 reports. Missing score revisions remain gaps rather than invented values. Comparison only pools
 compatible metric definitions and units.
+
+Home lists imported trajectories separately from experiments and standalone environment sessions.
+The trajectory route shows collection health, execution/outcome/termination distinctions, segment
+continuity, native time, and a bounded first record page. Extension data, raw token arrays, rendered
+requests, and model responses stay suppressed. The Training route shows immutable dataset and
+recorded integration provenance; it never invokes training code.
 
 ## Make a viewer change
 
@@ -207,6 +215,10 @@ source distribution, and TypeScript artifact contain the intended files.
 - Progression shows change over time without inventing missing points.
 - Reports summarize scores and findings before exposing raw records.
 - Session comparison explains compatible aggregates and keeps incompatible metrics separate.
+- Imported trajectories distinguish collection, execution, termination, and verified outcome;
+  show gaps/backlog/capture failures; and render unknown extensions as inert summaries.
+- Training navigation appears only when a matching dataset exists and never exposes raw inference
+  detail or a control that executes a trainer.
 - Keyboard focus, labels, live regions, scrolling containers, and narrow layouts still work.
 - Refresh, a copied deep link, browser back/forward, and a second local tab still connect.
 - Local mode never shows the credential form; supplier mode never exposes the workspace before

@@ -13,6 +13,20 @@ def discover():
     ]
 
 
+def discover_training():
+    return [
+        {"name": entry.name, "distribution": entry.dist.name if entry.dist else None, "target": entry.value}
+        for entry in entry_points(group="environment_harness.training")
+    ]
+
+
+def training_integration(name, **config):
+    matches = list(entry_points(group="environment_harness.training", name=name))
+    if len(matches) != 1:
+        raise Unsupported("install one training integration with the requested name")
+    return matches[0].load()(**config)
+
+
 def environment(name, **config):
     if name == "synthetic-protocol":
         return SyntheticEnvironment(**config)
@@ -44,6 +58,7 @@ def doctor():
         "protocol": "environment-session.v1",
         "dependencies": dependencies,
         "plugins": discover(),
+        "training_integrations": discover_training(),
         "hosted_qualification": "not asserted by installation",
         "private_suppliers": "installed separately",
     }

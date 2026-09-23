@@ -52,6 +52,26 @@ Use a release candidate when the release needs real installation and integration
 the stable version. PyPI prereleases are immutable production-PyPI releases, but ordinary
 `pip install environment-harness` does not select them.
 
+### Trajectory program manifest
+
+The trajectory-contract program uses exactly one coordinated candidate, `0.3.0rc1`, followed by
+`0.3.0`. Do not introduce alpha, beta, or routine additional candidates to stage internal
+workstreams. Freeze the candidate manifest only after every selected core feature, schema, client,
+viewer asset, document, and optional integration has passed its release gate. The final keeps the
+same package set and public feature surface.
+
+The core manifest includes the trajectory/resource envelope, native and historical projection,
+source health and bounded ingestion, snapshots/JSONL export, training-entitled datasets, local
+integration receipts, correlated inference evidence, the read-only viewer, and the bounded
+Verifiers legacy bridge. RLlib, TRL, live OpenEnv training, Parquet, remote training workers, and
+the separately owned **Pluggable Decision-Selection Seam** are excluded unless their complete code,
+dependency, fixture, documentation, and distribution gates land before the manifest freezes.
+
+Attach a downstream-impact appendix to the release PR. For every known incompatible consumer,
+record the last compatible pin, affected API or stored representation, and required adapter,
+converter, or migration. Do not copy private consumer code, deployment state, supplier data, or
+credentials into this repository or release artifacts.
+
 ## Prepare a release candidate
 
 Release preparation is an explicitly dispatched workflow that changes the coordinated version on a
@@ -121,6 +141,11 @@ make security
 viewer drift, browser UI checks, and TypeScript tests. `make build` creates and validates the wheel,
 source distribution, and TypeScript tarball. `make security` performs the full repository policy,
 dependency, and audit checks.
+
+Changes to optional adapters, `training.py`, plugin discovery, or dependency bounds also run the
+path-routed optional-integration job. Contract paths are separately classified as schema impact;
+malformed or incomplete GitHub change metadata fails closed. Before freezing `0.3.0rc1`, verify the
+shared compatibility fixtures are required rather than advisory.
 
 The PostgreSQL integration test runs in CI against its configured service. Do not claim a local
 PostgreSQL pass when `ENVIRONMENT_HARNESS_POSTGRES_URL` was absent and the test was skipped.

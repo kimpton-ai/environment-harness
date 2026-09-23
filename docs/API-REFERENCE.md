@@ -451,6 +451,38 @@ curl --fail-with-body -X POST \
 
 The request accepts 1 to 100 authorized environment-session IDs. The response contains session lineage, selected report revisions, metric groups, warnings, raw values, and aggregate summaries. Related turns and branches are not treated as independent experiments.
 
+## Trajectories, sources, snapshots, and training records
+
+| Method and path | Availability | Purpose |
+| --- | --- | --- |
+| `GET /v1/trajectories` | Always authenticated | Page native and imported trajectory summaries. |
+| `GET /v1/trajectories/{id}` | Always authenticated | Read one portable trajectory projection. |
+| `GET /v1/trajectories/{id}/records` | Always authenticated | Page records with `after` and bounded `limit`. |
+| `POST /v1/trajectories/{id}/snapshots` | Always authenticated | Freeze the caller's authorized trajectory projection. |
+| `GET /v1/trajectory-snapshots?trajectory={id}` | Always authenticated | List the trajectory's immutable snapshot boundaries for inspection. |
+| `GET /v1/trajectory-snapshots/{id}` | Always authenticated | Read immutable snapshot boundaries and digests. |
+| `GET /v1/trajectory-snapshots/{id}/export` | Always authenticated | Stream snapshot manifest and records as NDJSON. |
+| `GET /v1/trajectory-sources/{id}/status` | Always authenticated | Inspect acknowledgement and collection/execution/outcome health. |
+| `POST /v1/trajectory-sources` | Configured ingestion only | Register an immutable namespaced source/run identity. |
+| `POST /v1/trajectory-sources/{id}/records` | Configured ingestion only | Ingest 1–1000 hash-chained records. |
+| `PUT /v1/trajectory-sources/{id}/status` | Configured ingestion only | Record source health; it never executes the source. |
+| `POST /v1/trajectory-datasets` | Always authenticated | Freeze complete training-entitled trajectories. |
+| `GET /v1/trajectory-datasets` | Always authenticated | List immutable datasets. |
+| `GET /v1/trajectory-datasets/{id}` | Always authenticated | Read one dataset. |
+| `GET /v1/trajectory-datasets/{id}/export` | Always authenticated | Stream its snapshots and records as NDJSON. |
+| `GET /v1/training-runs` | Always authenticated | List recorded local integration receipts. |
+| `GET /v1/training-runs/{id}` | Always authenticated | Read one recorded receipt. |
+
+The server has no training-execution endpoint. Source mutation routes exist only when the embedding
+application calls `create_app(session, trajectory_ingestion=True)`. Supplier/read-only mode omits
+them. Every route still requires a bearer credential and authority check.
+
+Training sources must declare both `purpose="training"` and `split="training"`; evaluation defaults
+to heldout. A source cannot become complete until its terminal position/hash matches the
+acknowledged boundary and backlog, gaps, and capture failures are clear. Remote clients should use
+cursor paging and their incremental JSONL helpers, and treat server digests as opaque. See
+[Trajectories](TRAJECTORIES.md) and [Training](TRAINING.md).
+
 ## Errors
 
 Every HTTP error uses the same JSON envelope:

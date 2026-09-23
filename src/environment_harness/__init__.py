@@ -4,6 +4,8 @@ from .contracts import AgentSpec, EnvironmentSpec, ExperimentSpec, OperationSpec
 from .harness import EnvironmentHarness, EnvironmentSession, Experiment, ExperimentResult, SessionRunner
 from .operations import EnvironmentOperation
 from .store import EvidenceStore
+from .training import TrainingRepository, TrainingRun, TrajectoryDataset
+from .trajectories import Policy, ResourceRegistry, Trajectory, TrajectoryRepository, TrajectorySnapshot
 
 __all__ = [
     "AgentSpec",
@@ -12,6 +14,7 @@ __all__ = [
     "OperationSpec",
     "EnvironmentOperation",
     "Principal",
+    "Policy",
     "Scenario",
     "EnvironmentSession",
     "EnvironmentHarness",
@@ -19,5 +22,12 @@ __all__ = [
     "ExperimentResult",
     "SessionRunner",
     "EvidenceStore",
+    "ResourceRegistry",
+    "Trajectory",
+    "TrajectoryRepository",
+    "TrajectorySnapshot",
+    "TrajectoryDataset",
+    "TrainingRepository",
+    "TrainingRun",
 ]
 __version__ = "0.2.4rc2"

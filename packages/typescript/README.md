@@ -13,6 +13,21 @@ const environments = await client.list({limit: 100});
 
 The third argument explicitly permits a local HTTP endpoint. Use HTTPS for remote services. Keep credentials outside source control and public browser bundles. The service enforces credential scope. The client does not restore arbitrary agent processes or qualify hosted execution.
 
+Portable trajectory reads use `trajectories()`, `trajectory()`, and cursor-paged
+`trajectoryRecords()`. `trajectorySourceStatus()` is available in read-only deployments; source
+registration, ingestion, and status mutation require an explicitly configured server.
+`trajectorySnapshots()` lists the immutable boundaries shown by the viewer. Snapshot and dataset
+exports are incremental async generators:
+
+```ts
+for await (const row of client.exportTrajectorySnapshot(snapshotId)) {
+  process(row);
+}
+```
+
+Digests are server-authoritative and opaque to this client. The server exposes no trainer-execution
+method.
+
 Source and documentation: https://github.com/kimpton-ai/environment-harness
 
 MIT licensed. See LICENSE.

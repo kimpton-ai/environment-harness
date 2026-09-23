@@ -594,6 +594,28 @@
         "title": "ApiError",
         "type": "object"
       },
+      "ArtifactBoundary": {
+        "additionalProperties": true,
+        "properties": {
+          "id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sha256"
+        ],
+        "title": "ArtifactBoundary",
+        "type": "object"
+      },
       "Capabilities": {
         "additionalProperties": false,
         "properties": {
@@ -724,6 +746,81 @@
           "token"
         ],
         "title": "CredentialResponse",
+        "type": "object"
+      },
+      "DatasetCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "trajectories": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "minItems": 1,
+            "title": "Trajectories",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "trajectories"
+        ],
+        "title": "DatasetCreate",
+        "type": "object"
+      },
+      "DatasetMember": {
+        "additionalProperties": true,
+        "properties": {
+          "purpose": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Purpose",
+            "type": "string"
+          },
+          "schemaVersion": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Schemaversion",
+            "type": "string"
+          },
+          "snapshotDigest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Snapshotdigest",
+            "type": "string"
+          },
+          "snapshotId": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Snapshotid",
+            "type": "string"
+          },
+          "trajectoryDigest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Trajectorydigest",
+            "type": "string"
+          },
+          "trajectoryId": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Trajectoryid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trajectoryId",
+          "snapshotId",
+          "trajectoryDigest",
+          "snapshotDigest",
+          "schemaVersion",
+          "purpose"
+        ],
+        "title": "DatasetMember",
         "type": "object"
       },
       "EnvironmentSpec": {
@@ -1113,6 +1210,22 @@
         "title": "Finding",
         "type": "object"
       },
+      "LifecycleStatus": {
+        "additionalProperties": true,
+        "properties": {
+          "state": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "LifecycleStatus",
+        "type": "object"
+      },
       "MetricDefinition": {
         "additionalProperties": false,
         "properties": {
@@ -1141,6 +1254,26 @@
           "unit"
         ],
         "title": "MetricDefinition",
+        "type": "object"
+      },
+      "NativeTimeCoordinate": {
+        "additionalProperties": true,
+        "properties": {
+          "clock": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Clock",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "clock",
+          "value"
+        ],
+        "title": "NativeTimeCoordinate",
         "type": "object"
       },
       "OperationIntentRequest": {
@@ -1239,6 +1372,239 @@
           "version"
         ],
         "title": "OperationSpec",
+        "type": "object"
+      },
+      "Policy": {
+        "additionalProperties": false,
+        "description": "Portable identity for an agent policy without serializing live framework state.",
+        "properties": {
+          "apiVersion": {
+            "const": "environmentharness.dev/v1alpha1",
+            "title": "Apiversion",
+            "type": "string"
+          },
+          "extensions": {
+            "additionalProperties": true,
+            "title": "Extensions",
+            "type": "object"
+          },
+          "features": {
+            "$ref": "#/components/schemas/ResourceFeatures"
+          },
+          "kind": {
+            "const": "Policy",
+            "title": "Kind",
+            "type": "string"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/ResourceMetadata"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/PolicySpec"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PolicyStatus"
+          }
+        },
+        "required": [
+          "apiVersion",
+          "kind",
+          "metadata",
+          "features",
+          "spec",
+          "status",
+          "extensions"
+        ],
+        "title": "Policy",
+        "type": "object"
+      },
+      "PolicyReference": {
+        "additionalProperties": true,
+        "properties": {
+          "digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Digest",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "implementation": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Implementation",
+            "type": "string"
+          },
+          "participant": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Participant",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "required": [
+          "id",
+          "participant",
+          "implementation",
+          "digest"
+        ],
+        "title": "PolicyReference",
+        "type": "object"
+      },
+      "PolicySpec": {
+        "additionalProperties": true,
+        "properties": {
+          "artifact": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact"
+          },
+          "implementation": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Implementation",
+            "type": "string"
+          },
+          "lineage": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Lineage",
+            "type": "array"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "required": [
+          "implementation"
+        ],
+        "title": "PolicySpec",
+        "type": "object"
+      },
+      "PolicyStatus": {
+        "additionalProperties": true,
+        "properties": {
+          "digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "digest"
+        ],
+        "title": "PolicyStatus",
+        "type": "object"
+      },
+      "RecordTime": {
+        "additionalProperties": true,
+        "properties": {
+          "native": {
+            "items": {
+              "$ref": "#/components/schemas/NativeTimeCoordinate"
+            },
+            "title": "Native",
+            "type": "array"
+          },
+          "wallTime": {
+            "minLength": 1,
+            "title": "Walltime",
+            "type": "string"
+          }
+        },
+        "required": [
+          "wallTime",
+          "native"
+        ],
+        "title": "RecordTime",
+        "type": "object"
+      },
+      "ResourceFeatures": {
+        "additionalProperties": true,
+        "properties": {
+          "optional": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Optional",
+            "type": "array"
+          },
+          "required": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Required",
+            "type": "array"
+          }
+        },
+        "required": [
+          "required",
+          "optional"
+        ],
+        "title": "ResourceFeatures",
+        "type": "object"
+      },
+      "ResourceMetadata": {
+        "additionalProperties": true,
+        "properties": {
+          "createdAt": {
+            "minLength": 1,
+            "title": "Createdat",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "createdAt",
+          "labels"
+        ],
+        "title": "ResourceMetadata",
         "type": "object"
       },
       "RunPolicy": {
@@ -1372,6 +1738,969 @@
           "provenance"
         ],
         "title": "ScoreReport",
+        "type": "object"
+      },
+      "ScoreReportBoundary": {
+        "additionalProperties": true,
+        "properties": {
+          "hash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Hash",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 0.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "scorer": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Scorer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scorer",
+          "revision",
+          "hash"
+        ],
+        "title": "ScoreReportBoundary",
+        "type": "object"
+      },
+      "SourceBoundary": {
+        "additionalProperties": true,
+        "properties": {
+          "hash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Hash",
+            "type": "string"
+          },
+          "position": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Position",
+            "type": "string"
+          }
+        },
+        "required": [
+          "position",
+          "hash"
+        ],
+        "title": "SourceBoundary",
+        "type": "object"
+      },
+      "SourceIdentity": {
+        "additionalProperties": true,
+        "properties": {
+          "namespace": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Namespace",
+            "type": "string"
+          },
+          "runId": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Runid",
+            "type": "string"
+          },
+          "schemaVersion": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Schemaversion",
+            "type": "string"
+          }
+        },
+        "required": [
+          "namespace",
+          "runId",
+          "schemaVersion"
+        ],
+        "title": "SourceIdentity",
+        "type": "object"
+      },
+      "SourceStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "acknowledged_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acknowledged Hash"
+          },
+          "acknowledged_position": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acknowledged Position"
+          },
+          "backlog": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backlog"
+          },
+          "capture_failures": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Capture Failures",
+            "type": "array"
+          },
+          "collection_state": {
+            "title": "Collection State",
+            "type": "string"
+          },
+          "execution_state": {
+            "title": "Execution State",
+            "type": "string"
+          },
+          "gaps": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Gaps",
+            "type": "array"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "registration_hash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Registration Hash",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "termination": {
+            "$ref": "#/components/schemas/TerminationStatus"
+          },
+          "verified_outcome": {
+            "$ref": "#/components/schemas/VerifiedOutcome"
+          }
+        },
+        "required": [
+          "source",
+          "namespace",
+          "run_id",
+          "registration_hash",
+          "collection_state",
+          "execution_state",
+          "acknowledged_position",
+          "acknowledged_hash",
+          "backlog",
+          "gaps",
+          "capture_failures",
+          "termination",
+          "verified_outcome"
+        ],
+        "title": "SourceStatus",
+        "type": "object"
+      },
+      "TerminationStatus": {
+        "additionalProperties": true,
+        "properties": {
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "terminated": {
+            "title": "Terminated",
+            "type": "boolean"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "terminated",
+          "truncated",
+          "reason"
+        ],
+        "title": "TerminationStatus",
+        "type": "object"
+      },
+      "TrainingRun": {
+        "additionalProperties": false,
+        "properties": {
+          "apiVersion": {
+            "const": "environmentharness.dev/v1alpha1",
+            "title": "Apiversion",
+            "type": "string"
+          },
+          "extensions": {
+            "additionalProperties": true,
+            "title": "Extensions",
+            "type": "object"
+          },
+          "features": {
+            "$ref": "#/components/schemas/ResourceFeatures"
+          },
+          "kind": {
+            "const": "TrainingRun",
+            "title": "Kind",
+            "type": "string"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/ResourceMetadata"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/TrainingRunSpec"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TrainingRunStatus"
+          }
+        },
+        "required": [
+          "apiVersion",
+          "kind",
+          "metadata",
+          "features",
+          "spec",
+          "status",
+          "extensions"
+        ],
+        "title": "TrainingRun",
+        "type": "object"
+      },
+      "TrainingRunSpec": {
+        "additionalProperties": true,
+        "properties": {
+          "configDigest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Configdigest",
+            "type": "string"
+          },
+          "datasetDigest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Datasetdigest",
+            "type": "string"
+          },
+          "datasetId": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Datasetid",
+            "type": "string"
+          },
+          "integration": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Integration",
+            "type": "string"
+          },
+          "integrationVersion": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Integrationversion",
+            "type": "string"
+          }
+        },
+        "required": [
+          "datasetId",
+          "datasetDigest",
+          "integration",
+          "integrationVersion",
+          "configDigest"
+        ],
+        "title": "TrainingRunSpec",
+        "type": "object"
+      },
+      "TrainingRunStatus": {
+        "additionalProperties": true,
+        "properties": {
+          "artifacts": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "completedAt": {
+            "minLength": 1,
+            "title": "Completedat",
+            "type": "string"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "metrics": {
+            "additionalProperties": true,
+            "title": "Metrics",
+            "type": "object"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/Policy"
+          },
+          "state": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "policy",
+          "metrics",
+          "artifacts",
+          "limitations",
+          "completedAt"
+        ],
+        "title": "TrainingRunStatus",
+        "type": "object"
+      },
+      "Trajectory": {
+        "additionalProperties": false,
+        "description": "Immutable, portable projection of one native or imported trace.",
+        "properties": {
+          "apiVersion": {
+            "const": "environmentharness.dev/v1alpha1",
+            "title": "Apiversion",
+            "type": "string"
+          },
+          "extensions": {
+            "additionalProperties": true,
+            "title": "Extensions",
+            "type": "object"
+          },
+          "features": {
+            "$ref": "#/components/schemas/ResourceFeatures"
+          },
+          "kind": {
+            "const": "Trajectory",
+            "title": "Kind",
+            "type": "string"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/ResourceMetadata"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/TrajectorySpec"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TrajectoryStatus"
+          }
+        },
+        "required": [
+          "apiVersion",
+          "kind",
+          "metadata",
+          "features",
+          "spec",
+          "status",
+          "extensions"
+        ],
+        "title": "Trajectory",
+        "type": "object"
+      },
+      "TrajectoryDataset": {
+        "additionalProperties": false,
+        "properties": {
+          "apiVersion": {
+            "const": "environmentharness.dev/v1alpha1",
+            "title": "Apiversion",
+            "type": "string"
+          },
+          "extensions": {
+            "additionalProperties": true,
+            "title": "Extensions",
+            "type": "object"
+          },
+          "features": {
+            "$ref": "#/components/schemas/ResourceFeatures"
+          },
+          "kind": {
+            "const": "TrajectoryDataset",
+            "title": "Kind",
+            "type": "string"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/ResourceMetadata"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/TrajectoryDatasetSpec"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TrajectoryDatasetStatus"
+          }
+        },
+        "required": [
+          "apiVersion",
+          "kind",
+          "metadata",
+          "features",
+          "spec",
+          "status",
+          "extensions"
+        ],
+        "title": "TrajectoryDataset",
+        "type": "object"
+      },
+      "TrajectoryDatasetSpec": {
+        "additionalProperties": true,
+        "properties": {
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/DatasetMember"
+            },
+            "minItems": 1,
+            "title": "Members",
+            "type": "array"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "members"
+        ],
+        "title": "TrajectoryDatasetSpec",
+        "type": "object"
+      },
+      "TrajectoryDatasetStatus": {
+        "additionalProperties": true,
+        "properties": {
+          "datasetDigest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Datasetdigest",
+            "type": "string"
+          },
+          "recordCount": {
+            "minimum": 1.0,
+            "title": "Recordcount",
+            "type": "integer"
+          },
+          "rewardState": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Rewardstate",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recordCount",
+          "datasetDigest",
+          "rewardState"
+        ],
+        "title": "TrajectoryDatasetStatus",
+        "type": "object"
+      },
+      "TrajectoryManifest": {
+        "additionalProperties": true,
+        "properties": {
+          "environment": {
+            "additionalProperties": true,
+            "title": "Environment",
+            "type": "object"
+          },
+          "participants": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Participants",
+            "type": "array"
+          },
+          "policies": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PolicyReference"
+            },
+            "title": "Policies",
+            "type": "array"
+          },
+          "purpose": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Purpose",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/SourceIdentity"
+          }
+        },
+        "required": [
+          "environment",
+          "source",
+          "participants",
+          "purpose"
+        ],
+        "title": "TrajectoryManifest",
+        "type": "object"
+      },
+      "TrajectoryRecord": {
+        "additionalProperties": true,
+        "properties": {
+          "causes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Causes",
+            "type": "array"
+          },
+          "data": {
+            "additionalProperties": true,
+            "title": "Data",
+            "type": "object"
+          },
+          "extensions": {
+            "additionalProperties": true,
+            "title": "Extensions",
+            "type": "object"
+          },
+          "id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "participant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Participant"
+          },
+          "revision": {
+            "minimum": 0.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "segment": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Segment",
+            "type": "string"
+          },
+          "sequence": {
+            "minimum": 1.0,
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "time": {
+            "$ref": "#/components/schemas/RecordTime"
+          },
+          "type": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "id",
+          "sequence",
+          "segment",
+          "participant",
+          "revision",
+          "causes",
+          "time",
+          "data",
+          "extensions"
+        ],
+        "title": "TrajectoryRecord",
+        "type": "object"
+      },
+      "TrajectoryRecordPage": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "minimum": 0.0,
+            "title": "Cursor",
+            "type": "integer"
+          },
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "records": {
+            "items": {
+              "$ref": "#/components/schemas/TrajectoryRecord"
+            },
+            "title": "Records",
+            "type": "array"
+          }
+        },
+        "required": [
+          "records",
+          "cursor",
+          "has_more"
+        ],
+        "title": "TrajectoryRecordPage",
+        "type": "object"
+      },
+      "TrajectorySegment": {
+        "additionalProperties": true,
+        "properties": {
+          "collection": {
+            "$ref": "#/components/schemas/LifecycleStatus"
+          },
+          "execution": {
+            "$ref": "#/components/schemas/LifecycleStatus"
+          },
+          "id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          },
+          "sequenceEnd": {
+            "minimum": 1.0,
+            "title": "Sequenceend",
+            "type": "integer"
+          },
+          "sequenceStart": {
+            "minimum": 1.0,
+            "title": "Sequencestart",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "sequenceStart",
+          "sequenceEnd",
+          "collection",
+          "execution"
+        ],
+        "title": "TrajectorySegment",
+        "type": "object"
+      },
+      "TrajectorySnapshot": {
+        "additionalProperties": false,
+        "description": "Immutable export boundary for an authorized trajectory projection.",
+        "properties": {
+          "apiVersion": {
+            "const": "environmentharness.dev/v1alpha1",
+            "title": "Apiversion",
+            "type": "string"
+          },
+          "extensions": {
+            "additionalProperties": true,
+            "title": "Extensions",
+            "type": "object"
+          },
+          "features": {
+            "$ref": "#/components/schemas/ResourceFeatures"
+          },
+          "kind": {
+            "const": "TrajectorySnapshot",
+            "title": "Kind",
+            "type": "string"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/ResourceMetadata"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/TrajectorySnapshotSpec"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TrajectorySnapshotStatus"
+          }
+        },
+        "required": [
+          "apiVersion",
+          "kind",
+          "metadata",
+          "features",
+          "spec",
+          "status",
+          "extensions"
+        ],
+        "title": "TrajectorySnapshot",
+        "type": "object"
+      },
+      "TrajectorySnapshotSpec": {
+        "additionalProperties": true,
+        "properties": {
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactBoundary"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "audience": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Audience",
+            "type": "array"
+          },
+          "evidenceHead": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Evidencehead",
+            "type": "string"
+          },
+          "scoreReports": {
+            "items": {
+              "$ref": "#/components/schemas/ScoreReportBoundary"
+            },
+            "title": "Scorereports",
+            "type": "array"
+          },
+          "sequenceEnd": {
+            "minimum": 1.0,
+            "title": "Sequenceend",
+            "type": "integer"
+          },
+          "sequenceStart": {
+            "minimum": 1.0,
+            "title": "Sequencestart",
+            "type": "integer"
+          },
+          "sourceBoundary": {
+            "$ref": "#/components/schemas/SourceBoundary"
+          },
+          "trajectoryDigest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Trajectorydigest",
+            "type": "string"
+          },
+          "trajectoryId": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Trajectoryid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trajectoryId",
+          "trajectoryDigest",
+          "sourceBoundary",
+          "evidenceHead",
+          "sequenceStart",
+          "sequenceEnd",
+          "scoreReports",
+          "artifacts",
+          "audience"
+        ],
+        "title": "TrajectorySnapshotSpec",
+        "type": "object"
+      },
+      "TrajectorySnapshotStatus": {
+        "additionalProperties": true,
+        "properties": {
+          "artifactCount": {
+            "minimum": 0.0,
+            "title": "Artifactcount",
+            "type": "integer"
+          },
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "manifestDigest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Manifestdigest",
+            "type": "string"
+          },
+          "recordCount": {
+            "minimum": 0.0,
+            "title": "Recordcount",
+            "type": "integer"
+          },
+          "recordsDigest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Recordsdigest",
+            "type": "string"
+          },
+          "snapshotDigest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Snapshotdigest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recordCount",
+          "artifactCount",
+          "manifestDigest",
+          "recordsDigest",
+          "snapshotDigest",
+          "complete"
+        ],
+        "title": "TrajectorySnapshotStatus",
+        "type": "object"
+      },
+      "TrajectorySpec": {
+        "additionalProperties": true,
+        "properties": {
+          "manifest": {
+            "$ref": "#/components/schemas/TrajectoryManifest"
+          }
+        },
+        "required": [
+          "manifest"
+        ],
+        "title": "TrajectorySpec",
+        "type": "object"
+      },
+      "TrajectoryStatus": {
+        "additionalProperties": true,
+        "properties": {
+          "collection": {
+            "$ref": "#/components/schemas/LifecycleStatus"
+          },
+          "evidenceHead": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Evidencehead",
+            "type": "string"
+          },
+          "execution": {
+            "$ref": "#/components/schemas/LifecycleStatus"
+          },
+          "records": {
+            "items": {
+              "$ref": "#/components/schemas/TrajectoryRecord"
+            },
+            "title": "Records",
+            "type": "array"
+          },
+          "segments": {
+            "items": {
+              "$ref": "#/components/schemas/TrajectorySegment"
+            },
+            "title": "Segments",
+            "type": "array"
+          },
+          "termination": {
+            "$ref": "#/components/schemas/TerminationStatus"
+          },
+          "trajectoryDigest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Trajectorydigest",
+            "type": "string"
+          },
+          "verifiedOutcome": {
+            "$ref": "#/components/schemas/VerifiedOutcome"
+          }
+        },
+        "required": [
+          "segments",
+          "records",
+          "collection",
+          "execution",
+          "termination",
+          "verifiedOutcome",
+          "evidenceHead",
+          "trajectoryDigest"
+        ],
+        "title": "TrajectoryStatus",
+        "type": "object"
+      },
+      "TrajectorySummary": {
+        "additionalProperties": false,
+        "properties": {
+          "collection_state": {
+            "title": "Collection State",
+            "type": "string"
+          },
+          "execution_state": {
+            "title": "Execution State",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "origin": {
+            "enum": [
+              "native",
+              "imported"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "trajectory_id": {
+            "title": "Trajectory Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "trajectory_id",
+          "origin",
+          "collection_state",
+          "execution_state",
+          "namespace",
+          "run_id"
+        ],
+        "title": "TrajectorySummary",
+        "type": "object"
+      },
+      "VerifiedOutcome": {
+        "additionalProperties": true,
+        "properties": {
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "state": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "evidence"
+        ],
+        "title": "VerifiedOutcome",
         "type": "object"
       }
     },
@@ -5201,6 +6530,2209 @@
           "worker"
         ]
       }
+    },
+    "/v1/training-runs": {
+      "get": {
+        "operationId": "training_runs_v1_training_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "dataset",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dataset"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TrainingRun"
+                  },
+                  "title": "Response Training Runs V1 Training Runs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "402": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Budget exhausted"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Operation forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request too large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List recorded local training results",
+        "tags": [
+          "Trajectories"
+        ],
+        "x-roles": [
+          "researcher",
+          "scorer"
+        ]
+      }
+    },
+    "/v1/training-runs/{training_run}": {
+      "get": {
+        "operationId": "training_run_v1_training_runs__training_run__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "training_run",
+            "required": true,
+            "schema": {
+              "title": "Training Run",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrainingRun"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "402": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Budget exhausted"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Operation forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request too large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Get a recorded local training result",
+        "tags": [
+          "Trajectories"
+        ],
+        "x-roles": [
+          "researcher",
+          "scorer"
+        ]
+      }
+    },
+    "/v1/trajectories": {
+      "get": {
+        "operationId": "trajectory_index_v1_trajectories_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TrajectorySummary"
+                  },
+                  "title": "Response Trajectory Index V1 Trajectories Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "402": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Budget exhausted"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Operation forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request too large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List native and imported trajectories",
+        "tags": [
+          "Trajectories"
+        ],
+        "x-roles": [
+          "researcher",
+          "scorer"
+        ]
+      }
+    },
+    "/v1/trajectories/{trajectory}": {
+      "get": {
+        "operationId": "trajectory_resource_v1_trajectories__trajectory__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trajectory",
+            "required": true,
+            "schema": {
+              "title": "Trajectory",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Trajectory"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "402": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Budget exhausted"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Operation forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request too large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Get a portable trajectory",
+        "tags": [
+          "Trajectories"
+        ],
+        "x-roles": [
+          "researcher",
+          "scorer"
+        ]
+      }
+    },
+    "/v1/trajectories/{trajectory}/records": {
+      "get": {
+        "operationId": "trajectory_records_v1_trajectories__trajectory__records_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trajectory",
+            "required": true,
+            "schema": {
+              "title": "Trajectory",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "After",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrajectoryRecordPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "402": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Budget exhausted"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Operation forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request too large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Page through trajectory records",
+        "tags": [
+          "Trajectories"
+        ],
+        "x-roles": [
+          "researcher",
+          "scorer"
+        ]
+      }
+    },
+    "/v1/trajectories/{trajectory}/snapshots": {
+      "post": {
+        "operationId": "freeze_trajectory_snapshot_v1_trajectories__trajectory__snapshots_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trajectory",
+            "required": true,
+            "schema": {
+              "title": "Trajectory",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrajectorySnapshot"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "402": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Budget exhausted"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Operation forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request too large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Freeze an authorized trajectory snapshot",
+        "tags": [
+          "Trajectories"
+        ],
+        "x-roles": [
+          "researcher",
+          "scorer"
+        ]
+      }
+    },
+    "/v1/trajectory-datasets": {
+      "get": {
+        "operationId": "trajectory_datasets_v1_trajectory_datasets_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TrajectoryDataset"
+                  },
+                  "title": "Response Trajectory Datasets V1 Trajectory Datasets Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "402": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Budget exhausted"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Operation forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request too large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List immutable trajectory datasets",
+        "tags": [
+          "Trajectories"
+        ],
+        "x-roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "post": {
+        "operationId": "freeze_trajectory_dataset_v1_trajectory_datasets_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DatasetCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrajectoryDataset"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "402": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Budget exhausted"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Operation forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request too large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Freeze a training-entitled trajectory dataset",
+        "tags": [
+          "Trajectories"
+        ],
+        "x-roles": [
+          "researcher"
+        ]
+      }
+    },
+    "/v1/trajectory-datasets/{dataset}": {
+      "get": {
+        "operationId": "trajectory_dataset_v1_trajectory_datasets__dataset__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "title": "Dataset",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrajectoryDataset"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "402": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Budget exhausted"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Operation forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request too large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Get an immutable trajectory dataset",
+        "tags": [
+          "Trajectories"
+        ],
+        "x-roles": [
+          "researcher",
+          "scorer"
+        ]
+      }
+    },
+    "/v1/trajectory-datasets/{dataset}/export": {
+      "get": {
+        "operationId": "export_trajectory_dataset_v1_trajectory_datasets__dataset__export_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "title": "Dataset",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "402": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Budget exhausted"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Operation forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request too large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Export an immutable trajectory dataset as JSONL",
+        "tags": [
+          "Trajectories"
+        ],
+        "x-roles": [
+          "researcher",
+          "scorer"
+        ]
+      }
+    },
+    "/v1/trajectory-snapshots": {
+      "get": {
+        "operationId": "trajectory_snapshots_v1_trajectory_snapshots_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "trajectory",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Trajectory",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TrajectorySnapshot"
+                  },
+                  "title": "Response Trajectory Snapshots V1 Trajectory Snapshots Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "402": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Budget exhausted"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Operation forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request too large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List immutable snapshot boundaries for a trajectory",
+        "tags": [
+          "Trajectories"
+        ],
+        "x-roles": [
+          "researcher",
+          "scorer"
+        ]
+      }
+    },
+    "/v1/trajectory-snapshots/{snapshot}": {
+      "get": {
+        "operationId": "trajectory_snapshot_v1_trajectory_snapshots__snapshot__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "snapshot",
+            "required": true,
+            "schema": {
+              "title": "Snapshot",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrajectorySnapshot"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "402": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Budget exhausted"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Operation forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request too large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Get an immutable trajectory snapshot",
+        "tags": [
+          "Trajectories"
+        ],
+        "x-roles": [
+          "researcher",
+          "scorer"
+        ]
+      }
+    },
+    "/v1/trajectory-snapshots/{snapshot}/export": {
+      "get": {
+        "operationId": "export_trajectory_snapshot_v1_trajectory_snapshots__snapshot__export_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "snapshot",
+            "required": true,
+            "schema": {
+              "title": "Snapshot",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "402": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Budget exhausted"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Operation forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request too large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Export an immutable trajectory snapshot as JSONL",
+        "tags": [
+          "Trajectories"
+        ],
+        "x-roles": [
+          "researcher",
+          "scorer"
+        ]
+      }
+    },
+    "/v1/trajectory-sources/{source}/status": {
+      "get": {
+        "operationId": "trajectory_source_status_v1_trajectory_sources__source__status_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source",
+            "required": true,
+            "schema": {
+              "title": "Source",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "402": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Budget exhausted"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Operation forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Method not allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "State conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request too large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Inspect trajectory-source collection and execution status",
+        "tags": [
+          "Trajectories"
+        ],
+        "x-roles": [
+          "researcher",
+          "scorer"
+        ]
+      }
     }
   },
   "servers": [
@@ -5217,6 +8749,10 @@
     {
       "description": "Create, list, inspect, observe, and control environment sessions.",
       "name": "Environment sessions"
+    },
+    {
+      "description": "Inspect native and imported trajectory resources and immutable snapshots.",
+      "name": "Trajectories"
     },
     {
       "description": "Read event evidence and store or retrieve session artifacts.",

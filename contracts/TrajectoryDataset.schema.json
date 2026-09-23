@@ -1,0 +1,204 @@
+{
+  "$defs": {
+    "DatasetMember": {
+      "additionalProperties": true,
+      "properties": {
+        "purpose": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Purpose",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Schemaversion",
+          "type": "string"
+        },
+        "snapshotDigest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Snapshotdigest",
+          "type": "string"
+        },
+        "snapshotId": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Snapshotid",
+          "type": "string"
+        },
+        "trajectoryDigest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Trajectorydigest",
+          "type": "string"
+        },
+        "trajectoryId": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Trajectoryid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "trajectoryId",
+        "snapshotId",
+        "trajectoryDigest",
+        "snapshotDigest",
+        "schemaVersion",
+        "purpose"
+      ],
+      "title": "DatasetMember",
+      "type": "object"
+    },
+    "ResourceFeatures": {
+      "additionalProperties": true,
+      "properties": {
+        "optional": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Optional",
+          "type": "array"
+        },
+        "required": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Required",
+          "type": "array"
+        }
+      },
+      "required": [
+        "required",
+        "optional"
+      ],
+      "title": "ResourceFeatures",
+      "type": "object"
+    },
+    "ResourceMetadata": {
+      "additionalProperties": true,
+      "properties": {
+        "createdAt": {
+          "minLength": 1,
+          "title": "Createdat",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Labels",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "createdAt",
+        "labels"
+      ],
+      "title": "ResourceMetadata",
+      "type": "object"
+    },
+    "TrajectoryDatasetSpec": {
+      "additionalProperties": true,
+      "properties": {
+        "members": {
+          "items": {
+            "$ref": "#/$defs/DatasetMember"
+          },
+          "minItems": 1,
+          "title": "Members",
+          "type": "array"
+        },
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "members"
+      ],
+      "title": "TrajectoryDatasetSpec",
+      "type": "object"
+    },
+    "TrajectoryDatasetStatus": {
+      "additionalProperties": true,
+      "properties": {
+        "datasetDigest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Datasetdigest",
+          "type": "string"
+        },
+        "recordCount": {
+          "minimum": 1,
+          "title": "Recordcount",
+          "type": "integer"
+        },
+        "rewardState": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Rewardstate",
+          "type": "string"
+        }
+      },
+      "required": [
+        "recordCount",
+        "datasetDigest",
+        "rewardState"
+      ],
+      "title": "TrajectoryDatasetStatus",
+      "type": "object"
+    }
+  },
+  "$id": "urn:environment-harness:v1:TrajectoryDataset",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "environmentharness.dev/v1alpha1",
+      "title": "Apiversion",
+      "type": "string"
+    },
+    "extensions": {
+      "additionalProperties": true,
+      "title": "Extensions",
+      "type": "object"
+    },
+    "features": {
+      "$ref": "#/$defs/ResourceFeatures"
+    },
+    "kind": {
+      "const": "TrajectoryDataset",
+      "title": "Kind",
+      "type": "string"
+    },
+    "metadata": {
+      "$ref": "#/$defs/ResourceMetadata"
+    },
+    "spec": {
+      "$ref": "#/$defs/TrajectoryDatasetSpec"
+    },
+    "status": {
+      "$ref": "#/$defs/TrajectoryDatasetStatus"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "features",
+    "spec",
+    "status",
+    "extensions"
+  ],
+  "title": "TrajectoryDataset",
+  "type": "object"
+}

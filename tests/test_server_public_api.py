@@ -49,6 +49,8 @@ ROUTE_ROLE_MATRIX = {
     "environment-schema": {"researcher", "worker", "scorer", "agent"},
     "create": {"researcher"},
     "list": {"researcher"},
+    "trajectory-list": {"researcher", "scorer"},
+    "trajectory-get": {"researcher", "scorer"},
     "get": {"researcher", "worker", "scorer", "agent"},
     "observation": {"researcher", "worker", "scorer", "agent"},
     "actions": {"agent"},
@@ -106,6 +108,10 @@ def test_every_http_route_has_an_explicit_role_decision(tmp_path, case, role):
         )
     elif case == "list":
         response = client.get("/v1/environments", headers=headers)
+    elif case == "trajectory-list":
+        response = client.get("/v1/trajectories", headers=headers)
+    elif case == "trajectory-get":
+        response = client.get(f"/v1/trajectories/{environment}", headers=headers)
     elif case == "get":
         response = client.get(f"/v1/environments/{environment}", headers=headers)
     elif case == "observation":
@@ -394,6 +400,8 @@ def test_interactive_api_reference_has_route_scoped_asset_policy(tmp_path):
     assert client.get("/experiment/example/scenarios").status_code == 200
     assert client.get("/experiment/example/scenarios/one").status_code == 200
     assert client.get("/experiment/example/sessions").status_code == 200
+    assert client.get("/experiment/example/training").status_code == 200
+    assert client.get("/trajectory/source-example").status_code == 200
     assert client.get("/experiment/example/unknown").status_code == 404
 
 

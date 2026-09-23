@@ -1,5 +1,25 @@
 # Implement an environment
 
+## Design for portable trajectories
+
+Keep environment-native action semantics, state, rewards, and verification in the environment.
+EnvironmentHarness projects the frozen manifest and recorded evidence into a trajectory; authors do
+not write a second journal. Give policy implementations stable identifiers and increment
+`policy_version` when resuming with different behavior would be incompatible.
+
+Domain evidence that has no core record type uses a reverse-domain namespace such as
+`com.example.unreal.frame` or `com.example.drone.telemetry`. Extension payloads must be JSON,
+bounded, and observational. They cannot grant authority, choose credentials, relax limits, or alter
+core reward semantics. Put large binary or random-access detail in an artifact and record its digest.
+
+For delayed rewards, emit stable reward identities and use `supersedes` to replace provisional
+values. Do not mutate old evidence. Training datasets reject missing, cyclic, ambiguous, retracted,
+or non-finite reward chains. Keep `terminated`, `truncated`, and verified outcome distinct.
+
+The separately owned **Pluggable Decision-Selection Seam** defines candidate selection records. An
+environment still owns candidate-to-action meaning and every externally visible operation remains
+individually authorized, receipted, and reconcilable.
+
 An environment owns its rules and serializable environment state. EnvironmentHarness owns the session journal, participant delivery, checkpoint storage and execution coordination. The included [SyntheticEnvironment](../src/environment_harness/fixtures.py) is a complete, small reference implementation.
 
 Implement these members (`operations` is optional):

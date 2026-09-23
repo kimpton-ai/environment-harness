@@ -65,6 +65,30 @@ CREATE TABLE IF NOT EXISTS artifacts (
 CREATE TABLE IF NOT EXISTS reports (
  environment TEXT NOT NULL, revision INTEGER NOT NULL, body TEXT NOT NULL, hash TEXT NOT NULL,
  PRIMARY KEY(environment,revision));
+CREATE TABLE IF NOT EXISTS trajectory_snapshots (
+ id TEXT PRIMARY KEY, tenant TEXT NOT NULL, environment TEXT NOT NULL,
+ body TEXT NOT NULL, digest TEXT NOT NULL, created REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS trajectory_snapshot_records (
+ snapshot TEXT NOT NULL, sequence INTEGER NOT NULL, body TEXT NOT NULL,
+ PRIMARY KEY(snapshot,sequence));
+CREATE TABLE IF NOT EXISTS trajectory_sources (
+ id TEXT PRIMARY KEY, tenant TEXT NOT NULL, namespace TEXT NOT NULL, run_id TEXT NOT NULL,
+ registration TEXT NOT NULL, registration_hash TEXT NOT NULL,
+ collection_state TEXT NOT NULL, execution_state TEXT NOT NULL,
+ termination TEXT NOT NULL, verified_outcome TEXT NOT NULL,
+ acknowledged_position TEXT, acknowledged_hash TEXT,
+ backlog INTEGER, gaps TEXT NOT NULL, capture_failures TEXT NOT NULL, created REAL NOT NULL,
+ UNIQUE(tenant,namespace,run_id));
+CREATE TABLE IF NOT EXISTS trajectory_source_records (
+ source TEXT NOT NULL, ordinal INTEGER NOT NULL, record_id TEXT NOT NULL, position TEXT NOT NULL,
+ source_hash TEXT NOT NULL, previous_hash TEXT NOT NULL, body TEXT NOT NULL, created REAL NOT NULL,
+ PRIMARY KEY(source,ordinal), UNIQUE(source,record_id), UNIQUE(source,position));
+CREATE TABLE IF NOT EXISTS trajectory_datasets (
+ id TEXT PRIMARY KEY, tenant TEXT NOT NULL, body TEXT NOT NULL, digest TEXT NOT NULL,
+ created REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS training_runs (
+ id TEXT PRIMARY KEY, tenant TEXT NOT NULL, dataset TEXT NOT NULL, body TEXT NOT NULL,
+ created REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS artifact_aliases (
  environment TEXT NOT NULL, alias TEXT NOT NULL, artifact TEXT NOT NULL, PRIMARY KEY(environment,alias));
 CREATE TABLE IF NOT EXISTS credentials (
@@ -107,6 +131,26 @@ CREATE TRIGGER IF NOT EXISTS reports_no_update BEFORE UPDATE ON reports BEGIN SE
 CREATE TRIGGER IF NOT EXISTS reports_no_delete BEFORE DELETE ON reports BEGIN SELECT RAISE(ABORT,'immutable'); END;
 CREATE TRIGGER IF NOT EXISTS checkpoints_no_update BEFORE UPDATE ON checkpoints BEGIN SELECT RAISE(ABORT,'immutable'); END;
 CREATE TRIGGER IF NOT EXISTS checkpoints_no_delete BEFORE DELETE ON checkpoints BEGIN SELECT RAISE(ABORT,'immutable'); END;
+CREATE TRIGGER IF NOT EXISTS trajectory_snapshots_no_update BEFORE UPDATE ON trajectory_snapshots
+ BEGIN SELECT RAISE(ABORT,'immutable'); END;
+CREATE TRIGGER IF NOT EXISTS trajectory_snapshots_no_delete BEFORE DELETE ON trajectory_snapshots
+ BEGIN SELECT RAISE(ABORT,'immutable'); END;
+CREATE TRIGGER IF NOT EXISTS trajectory_snapshot_records_no_update
+ BEFORE UPDATE ON trajectory_snapshot_records BEGIN SELECT RAISE(ABORT,'immutable'); END;
+CREATE TRIGGER IF NOT EXISTS trajectory_snapshot_records_no_delete
+ BEFORE DELETE ON trajectory_snapshot_records BEGIN SELECT RAISE(ABORT,'immutable'); END;
+CREATE TRIGGER IF NOT EXISTS trajectory_source_records_no_update
+ BEFORE UPDATE ON trajectory_source_records BEGIN SELECT RAISE(ABORT,'immutable'); END;
+CREATE TRIGGER IF NOT EXISTS trajectory_source_records_no_delete
+ BEFORE DELETE ON trajectory_source_records BEGIN SELECT RAISE(ABORT,'immutable'); END;
+CREATE TRIGGER IF NOT EXISTS trajectory_datasets_no_update BEFORE UPDATE ON trajectory_datasets
+ BEGIN SELECT RAISE(ABORT,'immutable'); END;
+CREATE TRIGGER IF NOT EXISTS trajectory_datasets_no_delete BEFORE DELETE ON trajectory_datasets
+ BEGIN SELECT RAISE(ABORT,'immutable'); END;
+CREATE TRIGGER IF NOT EXISTS training_runs_no_update BEFORE UPDATE ON training_runs
+ BEGIN SELECT RAISE(ABORT,'immutable'); END;
+CREATE TRIGGER IF NOT EXISTS training_runs_no_delete BEFORE DELETE ON training_runs
+ BEGIN SELECT RAISE(ABORT,'immutable'); END;
 """
 
 

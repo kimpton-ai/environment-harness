@@ -10,7 +10,7 @@ Run agents in persistent shared environments, then inspect exactly what they obs
 
 EnvironmentHarness records participant-specific observations, actions, outcomes, checkpoints, score reports, and branch lineage as durable evidence. You provide the environment rules, agent programs, and grading method.
 
-[Quickstart](#quickstart) · [Connect an agent](https://github.com/kimpton-ai/environment-harness/blob/main/docs/AGENT-INTEGRATION.md) · [Implement an environment](https://github.com/kimpton-ai/environment-harness/blob/main/docs/AUTHORING.md) · [API reference](https://github.com/kimpton-ai/environment-harness/blob/main/docs/API-REFERENCE.md) · [Protocol](https://github.com/kimpton-ai/environment-harness/blob/main/docs/PROTOCOL.md)
+[Quickstart](#quickstart) · [Trajectories](https://github.com/kimpton-ai/environment-harness/blob/main/docs/TRAJECTORIES.md) · [Training](https://github.com/kimpton-ai/environment-harness/blob/main/docs/TRAINING.md) · [Connect an agent](https://github.com/kimpton-ai/environment-harness/blob/main/docs/AGENT-INTEGRATION.md) · [Implement an environment](https://github.com/kimpton-ai/environment-harness/blob/main/docs/AUTHORING.md) · [API reference](https://github.com/kimpton-ai/environment-harness/blob/main/docs/API-REFERENCE.md)
 
 ## What you can do
 
@@ -20,6 +20,8 @@ EnvironmentHarness records participant-specific observations, actions, outcomes,
 - Checkpoint an environment session, branch it with a declared intervention, and continue both sessions.
 - Inspect timelines, compare related environment sessions, and export evidence as JSONL.
 - Validate typed scenarios and run related scenario/trial experiments concurrently.
+- Project native or imported traces into one portable trajectory contract, then freeze reproducible
+  snapshots and training-entitled datasets.
 
 ## Quickstart
 
@@ -182,10 +184,42 @@ grouping is an orchestration choice, not a different environment type. Start wit
 [external simulator example](examples/external_environment_experiment.py) when your implementation
 owns a long-lived process or engine connection.
 
+## Inspect and export trajectories
+
+Environment sessions keep their existing append-only evidence journal. A trajectory is a portable,
+digest-bound view of that trace; it is not another writer. Pauses and resumes appear as causally
+linked execution segments, while collection, execution, termination, and verified outcome remain
+independent states.
+
+```python
+from environment_harness import EvidenceStore, Principal, TrajectoryRepository
+
+store = EvidenceStore(".local/my-environment")
+researcher = Principal(tenant="local", subject="researcher", role="researcher")
+trajectories = TrajectoryRepository(store)
+
+trajectory = trajectories.get(environment_session.id, researcher)
+snapshot = trajectories.freeze(environment_session.id, researcher)
+for row in trajectories.export_snapshot(snapshot.metadata.id, researcher):
+    print(row)
+```
+
+The same interface accepts hash-chained historical records from a namespaced external source.
+Identical retries are idempotent, conflicting identities fail, and source health exposes the
+acknowledged position/hash, backlog, gaps, and capture failures. See
+[Trajectories and historical evidence](docs/TRAJECTORIES.md) for the Python, CLI, and authenticated
+HTTP workflow.
+
+Training datasets are immutable ordered snapshot selections and require complete, terminal,
+training-entitled evidence with resolved reward chains. Trainer instances are injected locally;
+the browser server never executes them. See [Frozen datasets and local training integrations](docs/TRAINING.md).
+
 ## Documentation
 
 | Goal | Guide |
 | --- | --- |
+| Import, inspect, snapshot, and export trajectories | [Trajectories](https://github.com/kimpton-ai/environment-harness/blob/main/docs/TRAJECTORIES.md) |
+| Freeze datasets and invoke local training integrations | [Training](https://github.com/kimpton-ai/environment-harness/blob/main/docs/TRAINING.md) |
 | Connect a Python agent, model integration, or JSON program | [Agent integration](https://github.com/kimpton-ai/environment-harness/blob/main/docs/AGENT-INTEGRATION.md) |
 | Implement environment rules and custom operation classes | [Environment authoring](https://github.com/kimpton-ai/environment-harness/blob/main/docs/AUTHORING.md) · [Complete experiment](https://github.com/kimpton-ai/environment-harness/blob/main/examples/custom_environment_experiment.py) |
 | Connect an external simulator or engine | [External simulator experiment](https://github.com/kimpton-ai/environment-harness/blob/main/examples/external_environment_experiment.py) |

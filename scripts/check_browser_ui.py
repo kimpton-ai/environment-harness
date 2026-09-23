@@ -12,7 +12,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-from environment_harness import EnvironmentHarness, EvidenceStore, Principal, Scenario
+from environment_harness import EnvironmentHarness, EvidenceStore, Principal, Scenario, TrajectoryRepository
 from environment_harness.fixtures import SyntheticAgent, SyntheticEnvironment
 from environment_harness.showcase import create_synthetic_showcase
 
@@ -36,7 +36,7 @@ def wait_for(url: str, deadline: float) -> None:
         time.sleep(0.05)
 
 
-def create_sessions(root: Path) -> None:
+def create_sessions(root: Path) -> str:
     store = EvidenceStore(root)
     who = Principal(tenant="local", subject="browser-test", role="researcher")
     participants = (
@@ -53,8 +53,11 @@ def create_sessions(root: Path) -> None:
         "mallory",
         "oscar",
     )
+    trajectory = ""
     for turns in (24, 18, 12):
-        create_synthetic_showcase(store, who, turns=turns, participants=participants)
+        created = create_synthetic_showcase(store, who, turns=turns, participants=participants)
+        if not trajectory:
+            trajectory = created["id"]
     EnvironmentHarness(
         store,
         environment_factory=SyntheticEnvironment,
@@ -69,6 +72,8 @@ def create_sessions(root: Path) -> None:
         trials=2,
         turns=2,
     ).run()
+    TrajectoryRepository(store).freeze(trajectory, who)
+    return trajectory
 
 
 def main() -> None:
@@ -92,7 +97,7 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="environment-browser-ui-") as directory:
         root = Path(directory)
         store = root / "evidence"
-        create_sessions(store)
+        trajectory = create_sessions(store)
         server_port = available_port()
         debug_port = available_port()
         origin = f"http://127.0.0.1:{server_port}"
@@ -140,6 +145,7 @@ def main() -> None:
                     "scripts/browser_ui_test.mjs",
                     origin,
                     str(debug_port),
+                    trajectory,
                 ],
                 check=True,
                 env=os.environ.copy(),

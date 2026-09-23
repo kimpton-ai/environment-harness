@@ -13,6 +13,8 @@ from .runner import run
 from .runtime import EnvironmentSession
 from .showcase import create_synthetic_review_demo
 from .store import EvidenceStore, encode
+from .training import TrainingRepository
+from .trajectories import SourceRecord, SourceRegistration, SourceStatusUpdate, TrajectoryRepository
 
 
 def main():
@@ -21,6 +23,38 @@ def main():
     parser.add_argument("--tenant", default="local")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("doctor")
+    trajectory_list = sub.add_parser("trajectory-list")
+    trajectory_list.add_argument("--limit", type=int, default=100)
+    trajectory_list.add_argument("--cursor")
+    trajectory_show = sub.add_parser("trajectory-show")
+    trajectory_show.add_argument("trajectory")
+    trajectory_records = sub.add_parser("trajectory-records")
+    trajectory_records.add_argument("trajectory")
+    trajectory_records.add_argument("--after", type=int, default=0)
+    trajectory_records.add_argument("--limit", type=int, default=200)
+    snapshot = sub.add_parser("snapshot")
+    snapshot.add_argument("trajectory")
+    snapshot_export = sub.add_parser("snapshot-export")
+    snapshot_export.add_argument("snapshot")
+    dataset_create = sub.add_parser("dataset-create")
+    dataset_create.add_argument("name")
+    dataset_create.add_argument("trajectories", nargs="+")
+    dataset_show = sub.add_parser("dataset-show")
+    dataset_show.add_argument("dataset")
+    dataset_export = sub.add_parser("dataset-export")
+    dataset_export.add_argument("dataset")
+    source_register = sub.add_parser("source-register")
+    source_register.add_argument("registration")
+    source_ingest = sub.add_parser("source-ingest")
+    source_ingest.add_argument("source")
+    source_ingest.add_argument("records")
+    source_status = sub.add_parser("source-status")
+    source_status.add_argument("source")
+    source_status.add_argument("status", nargs="?", help="Optional JSON status update; omit to inspect")
+    train = sub.add_parser("train")
+    train.add_argument("dataset")
+    train.add_argument("integration")
+    train.add_argument("--config", default="{}")
     quick = sub.add_parser("quickstart")
     quick.add_argument("--turns", type=int, default=10)
     quick.add_argument("--training", action="store_true")
@@ -68,6 +102,58 @@ def main():
         return
     store = EvidenceStore(args.store)
     who = Principal(tenant=args.tenant, subject="local-researcher", role="researcher")
+    if args.command.startswith("trajectory-") or args.command in ("snapshot", "snapshot-export"):
+        repository = TrajectoryRepository(store)
+        if args.command == "trajectory-list":
+            page, _ = repository.list_page(who, limit=args.limit, cursor=args.cursor)
+            print(json.dumps([item.model_dump(mode="json") for item in page], indent=2))
+        elif args.command == "trajectory-show":
+            print(repository.get(args.trajectory, who).model_dump_json(by_alias=True, indent=2))
+        elif args.command == "trajectory-records":
+            print(
+                repository.records_page(
+                    args.trajectory, who, after=args.after, limit=args.limit
+                ).model_dump_json(by_alias=True, indent=2)
+            )
+        elif args.command == "snapshot":
+            print(repository.freeze(args.trajectory, who).model_dump_json(by_alias=True, indent=2))
+        else:
+            for row in repository.export_snapshot(args.snapshot, who):
+                print(encode(row))
+        return
+    if args.command.startswith("dataset-") or args.command == "train":
+        repository = TrainingRepository(store)
+        if args.command == "dataset-create":
+            result = repository.freeze_dataset(args.name, tuple(args.trajectories), who)
+            print(result.model_dump_json(by_alias=True, indent=2))
+        elif args.command == "dataset-show":
+            print(repository.get_dataset(args.dataset, who).model_dump_json(by_alias=True, indent=2))
+        elif args.command == "dataset-export":
+            for row in repository.export_dataset(args.dataset, who):
+                print(encode(row))
+        else:
+            from .plugins import training_integration
+
+            integration = training_integration(args.integration)
+            result = repository.run(args.dataset, integration, json.loads(args.config), who)
+            print(result.model_dump_json(by_alias=True, indent=2))
+        return
+    if args.command.startswith("source-"):
+        repository = TrajectoryRepository(store)
+        if args.command == "source-register":
+            registration = SourceRegistration.model_validate_json(Path(args.registration).read_text())
+            result = repository.register_source(registration, who)
+        elif args.command == "source-ingest":
+            raw = Path(args.records).read_text().splitlines()
+            records = tuple(SourceRecord.model_validate_json(line) for line in raw if line.strip())
+            result = repository.ingest(args.source, records, who)
+        elif args.status is not None:
+            status = SourceStatusUpdate.model_validate_json(Path(args.status).read_text())
+            result = repository.update_source_status(args.source, status, who)
+        else:
+            result = repository.source_status(args.source, who)
+        print(result.model_dump_json(by_alias=True, indent=2))
+        return
     if args.command in ("replay", "export"):
         source = (
             rollouts(store, args.environment, who)

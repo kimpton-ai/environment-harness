@@ -1,0 +1,38 @@
+{
+  "$id": "urn:environment-harness:v1:SourceAcknowledgement",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "accepted": {
+      "minimum": 0,
+      "title": "Accepted",
+      "type": "integer"
+    },
+    "collection_state": {
+      "title": "Collection State",
+      "type": "string"
+    },
+    "hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Hash",
+      "type": "string"
+    },
+    "position": {
+      "title": "Position",
+      "type": "string"
+    },
+    "source": {
+      "title": "Source",
+      "type": "string"
+    }
+  },
+  "required": [
+    "source",
+    "accepted",
+    "position",
+    "hash",
+    "collection_state"
+  ],
+  "title": "SourceAcknowledgement",
+  "type": "object"
+}

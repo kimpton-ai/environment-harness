@@ -1,4 +1,48 @@
 export type Json = null | boolean | number | string | Json[] | {[key: string]: Json};
+export interface ResourceMetadata {id:string;createdAt:string;labels:Record<string,string>;}
+export interface ResourceFeatures {required:string[];optional:string[];}
+export interface LifecycleStatus {state:string;[key:string]:Json;}
+export interface TrajectoryRecord {
+  type:string;id:string;sequence:number;segment:string;participant:string|null;revision:number;
+  causes:string[];time:{wallTime:string;native:{clock:string;value:Json}[]};data:Record<string,Json>;
+  extensions:Record<string,Json>;
+}
+export interface TrajectorySegment {
+  id:string;kind:string;sequenceStart:number;sequenceEnd:number;
+  collection:LifecycleStatus;execution:LifecycleStatus;
+}
+export interface Trajectory {
+  apiVersion:'environmentharness.dev/v1alpha1';kind:'Trajectory';metadata:ResourceMetadata;
+  features:ResourceFeatures;spec:{manifest:Record<string,Json>};status:{segments:TrajectorySegment[];
+    records:TrajectoryRecord[];collection:LifecycleStatus;execution:LifecycleStatus;
+    termination:{terminated:boolean;truncated:boolean;reason:string};
+    verifiedOutcome:{state:string;evidence:string[]};evidenceHead:string;trajectoryDigest:string};
+  extensions:Record<string,Json>;
+}
+export interface TrajectorySnapshot {
+  apiVersion:'environmentharness.dev/v1alpha1';kind:'TrajectorySnapshot';metadata:ResourceMetadata;
+  features:ResourceFeatures;spec:Record<string,Json>;status:{recordCount:number;artifactCount:number;
+    manifestDigest:string;recordsDigest:string;snapshotDigest:string;complete:boolean};extensions:Record<string,Json>;
+}
+export interface TrajectorySummary {id:string;trajectory_id:string;origin:'native'|'imported';collection_state:string;execution_state:string;namespace:string;run_id:string;}
+export interface TrajectoryRecordPage {records:TrajectoryRecord[];cursor:number;has_more:boolean;}
+export interface DatasetMember {trajectoryId:string;snapshotId:string;trajectoryDigest:string;snapshotDigest:string;schemaVersion:string;purpose:string;}
+export interface TrajectoryDataset {
+  apiVersion:'environmentharness.dev/v1alpha1';kind:'TrajectoryDataset';metadata:ResourceMetadata;
+  features:ResourceFeatures;spec:{name:string;members:DatasetMember[]};
+  status:{recordCount:number;datasetDigest:string;rewardState:string};extensions:Record<string,Json>;
+}
+export interface TrainingRun {
+  apiVersion:'environmentharness.dev/v1alpha1';kind:'TrainingRun';metadata:ResourceMetadata;
+  features:ResourceFeatures;spec:{datasetId:string;datasetDigest:string;integration:string;integrationVersion:string;configDigest:string};
+  status:{state:string;policy:Record<string,Json>;metrics:Json;artifacts:Json[];limitations:string[];completedAt:string};extensions:Record<string,Json>;
+}
+export interface SourceRegistration {namespace:string;run_id:string;schema_version:string;environment:Record<string,Json>;participants:string[];purpose:'evaluation'|'training';split?:'training'|'heldout';}
+export interface SourceRegistrationReceipt {id:string;namespace:string;run_id:string;registration_hash:string;collection_state:string;}
+export interface SourceRecord {id:string;position:string;previous_hash:string;source_hash:string;type:string;segment:string;participant:string|null;revision:number;time:{wallTime:string;native:{clock:string;value:Json}[]};data:Record<string,Json>;audience:string[];}
+export interface SourceAcknowledgement {source:string;accepted:number;position:string;hash:string;collection_state:string;}
+export interface SourceStatus {source:string;namespace:string;run_id:string;registration_hash:string;collection_state:string;execution_state:string;acknowledged_position:string|null;acknowledged_hash:string|null;backlog:number|null;gaps:string[];capture_failures:string[];termination:{terminated:boolean;truncated:boolean;reason:string};verified_outcome:{state:string;evidence:string[]};}
+export interface SourceStatusUpdate {collection_state:string;execution_state:string;termination:{terminated:boolean;truncated:boolean;reason:string};verified_outcome:{state:string;evidence:string[]};terminal_position:string;terminal_hash:string;backlog:number|null;gaps:string[];capture_failures:string[];}
 export type CommandOperation = 'advance'|'lease'|'release'|'cancel'|'resolve'|'close_phase'|'checkpoint'|'reconcile_agent'|'resume'|'branch'|'control'|'memory'|'transfer'|'external_event'|'finalize_outcomes';
 export interface AdvanceResponse {status:string;revision:number;deadline_exceeded?:boolean;event?:number;}
 export interface Scenario<Input extends Json = Json> {id:string;input:Input;reference:Json;metadata:Record<string,Json>;}

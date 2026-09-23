@@ -178,6 +178,26 @@ class PostgresEvidenceStore(EvidenceStore):
             ]
             deleted = sum(self.object_store.purge_prefix(identity + "/") for identity in identities)
             db.execute("SELECT set_config('environment_harness.erase_tenant',?,true)", (tenant,))
+            source_ids = [
+                row["id"]
+                for row in db.execute(
+                    "SELECT id FROM trajectory_sources WHERE tenant=?", (tenant,)
+                ).fetchall()
+            ]
+            snapshot_ids = [
+                row["id"]
+                for row in db.execute(
+                    "SELECT id FROM trajectory_snapshots WHERE tenant=?", (tenant,)
+                ).fetchall()
+            ]
+            if snapshot_ids:
+                db.execute("DELETE FROM trajectory_snapshot_records WHERE snapshot=ANY(?)", (snapshot_ids,))
+            db.execute("DELETE FROM trajectory_snapshots WHERE tenant=?", (tenant,))
+            if source_ids:
+                db.execute("DELETE FROM trajectory_source_records WHERE source=ANY(?)", (source_ids,))
+            db.execute("DELETE FROM trajectory_sources WHERE tenant=?", (tenant,))
+            db.execute("DELETE FROM training_runs WHERE tenant=?", (tenant,))
+            db.execute("DELETE FROM trajectory_datasets WHERE tenant=?", (tenant,))
             for table in (
                 "agent_work",
                 "transitions",

@@ -1,0 +1,152 @@
+{
+  "$defs": {
+    "TerminationStatus": {
+      "additionalProperties": true,
+      "properties": {
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "terminated": {
+          "title": "Terminated",
+          "type": "boolean"
+        },
+        "truncated": {
+          "title": "Truncated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "terminated",
+        "truncated",
+        "reason"
+      ],
+      "title": "TerminationStatus",
+      "type": "object"
+    },
+    "VerifiedOutcome": {
+      "additionalProperties": true,
+      "properties": {
+        "evidence": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "state": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "evidence"
+      ],
+      "title": "VerifiedOutcome",
+      "type": "object"
+    }
+  },
+  "$id": "urn:environment-harness:v1:SourceStatus",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "acknowledged_hash": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Acknowledged Hash"
+    },
+    "acknowledged_position": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Acknowledged Position"
+    },
+    "backlog": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Backlog"
+    },
+    "capture_failures": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Capture Failures",
+      "type": "array"
+    },
+    "collection_state": {
+      "title": "Collection State",
+      "type": "string"
+    },
+    "execution_state": {
+      "title": "Execution State",
+      "type": "string"
+    },
+    "gaps": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Gaps",
+      "type": "array"
+    },
+    "namespace": {
+      "title": "Namespace",
+      "type": "string"
+    },
+    "registration_hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Registration Hash",
+      "type": "string"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "source": {
+      "title": "Source",
+      "type": "string"
+    },
+    "termination": {
+      "$ref": "#/$defs/TerminationStatus"
+    },
+    "verified_outcome": {
+      "$ref": "#/$defs/VerifiedOutcome"
+    }
+  },
+  "required": [
+    "source",
+    "namespace",
+    "run_id",
+    "registration_hash",
+    "collection_state",
+    "execution_state",
+    "acknowledged_position",
+    "acknowledged_hash",
+    "backlog",
+    "gaps",
+    "capture_failures",
+    "termination",
+    "verified_outcome"
+  ],
+  "title": "SourceStatus",
+  "type": "object"
+}

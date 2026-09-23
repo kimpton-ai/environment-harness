@@ -5,9 +5,15 @@ import types
 
 from fastapi.testclient import TestClient
 
-from environment_harness import cli, local_viewer
+from environment_harness import cli, local_viewer, plugins
 from environment_harness.contracts import Principal
 from environment_harness.store import EvidenceStore
+from environment_harness.trajectories import (
+    SourceRecord,
+    SourceRegistration,
+    SourceStatusUpdate,
+    TrajectoryRepository,
+)
 
 
 def invoke(monkeypatch, capsys, store, *arguments):
@@ -104,6 +110,28 @@ def test_cli_public_session_journey(tmp_path, monkeypatch, capsys):
     assert compared["environments"]
 
 
+def test_cli_source_status_inspects_registered_sources_without_a_mutation_file(tmp_path, monkeypatch, capsys):
+    store_path = tmp_path / "source-status"
+    store = EvidenceStore(store_path)
+    who = Principal(tenant="local", subject="local-researcher", role="researcher")
+    source = TrajectoryRepository(store).register_source(
+        SourceRegistration(
+            namespace="com.example.simulator",
+            run_id="run-cli",
+            schema_version="example.trace.v1",
+            environment={"id": "example", "version": "1"},
+            participants=("alice",),
+            purpose="evaluation",
+        ),
+        who,
+    )
+
+    status = json.loads(invoke(monkeypatch, capsys, store_path, "source-status", source.id))
+
+    assert status["source"] == source.id
+    assert status["collection_state"] == "registered"
+
+
 def test_quickstart_builds_a_grouped_experiment_and_review_routes(tmp_path, monkeypatch, capsys):
     store_path = tmp_path / "review"
 
@@ -183,6 +211,139 @@ def test_cli_training_export_and_doctor(tmp_path, monkeypatch, capsys):
     result = json.loads(invoke(monkeypatch, capsys, store_path, "quickstart", "--turns", "1", "--training"))
     exported = invoke(monkeypatch, capsys, store_path, "export", result["id"], "--training")
     assert '"schema":"environment-rollout.v1"' in exported
+
+
+def test_cli_trajectory_snapshot_and_dataset_workflow(tmp_path, monkeypatch, capsys):
+    store_path = tmp_path / "trajectory-training"
+    result = json.loads(invoke(monkeypatch, capsys, store_path, "quickstart", "--turns", "1", "--training"))
+    environment = result["id"]
+
+    listed = json.loads(invoke(monkeypatch, capsys, store_path, "trajectory-list"))
+    shown = json.loads(invoke(monkeypatch, capsys, store_path, "trajectory-show", environment))
+    page = json.loads(
+        invoke(monkeypatch, capsys, store_path, "trajectory-records", environment, "--limit", "2")
+    )
+    snapshot = json.loads(invoke(monkeypatch, capsys, store_path, "snapshot", environment))
+    dataset = json.loads(
+        invoke(
+            monkeypatch,
+            capsys,
+            store_path,
+            "dataset-create",
+            "cli-training",
+            environment,
+        )
+    )
+    dataset_id = dataset["metadata"]["id"]
+
+    assert any(item["id"] == environment for item in listed)
+    assert shown["kind"] == "Trajectory"
+    assert page["records"] and page["cursor"] == 2
+    assert snapshot["kind"] == "TrajectorySnapshot"
+    assert invoke(monkeypatch, capsys, store_path, "snapshot-export", snapshot["metadata"]["id"]).startswith(
+        '{"snapshot"'
+    )
+    assert json.loads(invoke(monkeypatch, capsys, store_path, "dataset-show", dataset_id)) == dataset
+    assert invoke(monkeypatch, capsys, store_path, "dataset-export", dataset_id).startswith('{"dataset"')
+
+    class Integration:
+        identity = "com.example.cli-trainer"
+        version = "1"
+
+        def validate(self, selected):
+            assert selected.metadata.id == dataset_id
+
+        def train(self, _selected, config):
+            assert config == {"epochs": 1}
+            return {
+                "policy": {
+                    "apiVersion": "environmentharness.dev/v1alpha1",
+                    "kind": "Policy",
+                    "metadata": {"id": "policy-cli", "createdAt": "now", "labels": {}},
+                    "features": {"required": [], "optional": []},
+                    "spec": {"implementation": "cli", "version": "1"},
+                    "status": {"digest": "a" * 64},
+                    "extensions": {},
+                },
+                "metrics": {"loss": 0},
+            }
+
+    monkeypatch.setattr(plugins, "training_integration", lambda name: Integration())
+    trained = json.loads(
+        invoke(
+            monkeypatch,
+            capsys,
+            store_path,
+            "train",
+            dataset_id,
+            "cli-trainer",
+            "--config",
+            '{"epochs":1}',
+        )
+    )
+    assert trained["kind"] == "TrainingRun"
+
+
+def test_cli_registers_ingests_and_updates_a_trajectory_source(tmp_path, monkeypatch, capsys):
+    store_path = tmp_path / "source-management"
+    registration = SourceRegistration(
+        namespace="com.example.cli",
+        run_id="cli-source",
+        schema_version="cli.v1",
+        environment={"id": "cli"},
+        participants=("alice",),
+        purpose="evaluation",
+    )
+    registration_file = tmp_path / "registration.json"
+    registration_file.write_text(registration.model_dump_json())
+    receipt = json.loads(invoke(monkeypatch, capsys, store_path, "source-register", str(registration_file)))
+    record = SourceRecord.create(
+        id="cli-record",
+        position="1",
+        previous_hash="0" * 64,
+        type="com.example.cli.observation",
+        segment="segment-1",
+        participant="alice",
+        revision=0,
+        time={"wallTime": "2026-09-22T15:00:00Z", "native": []},
+        data={},
+        audience=("alice",),
+    )
+    records_file = tmp_path / "records.jsonl"
+    records_file.write_text("\n" + record.model_dump_json() + "\n")
+    acknowledged = json.loads(
+        invoke(
+            monkeypatch,
+            capsys,
+            store_path,
+            "source-ingest",
+            receipt["id"],
+            str(records_file),
+        )
+    )
+    assert acknowledged["accepted"] == 1
+    update = SourceStatusUpdate(
+        collection_state="complete",
+        execution_state="completed",
+        termination={"terminated": True, "truncated": False, "reason": "complete"},
+        verified_outcome={"state": "success", "evidence": (record.id,)},
+        terminal_position=record.position,
+        terminal_hash=record.source_hash,
+        backlog=0,
+    )
+    update_file = tmp_path / "status.json"
+    update_file.write_text(update.model_dump_json())
+    status = json.loads(
+        invoke(
+            monkeypatch,
+            capsys,
+            store_path,
+            "source-status",
+            receipt["id"],
+            str(update_file),
+        )
+    )
+    assert status["collection_state"] == "complete"
 
 
 def test_cli_serve_uses_loopback_local_access_without_writing_a_credential(tmp_path, monkeypatch, capsys):

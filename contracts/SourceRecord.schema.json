@@ -1,0 +1,132 @@
+{
+  "$defs": {
+    "NativeTimeCoordinate": {
+      "additionalProperties": true,
+      "properties": {
+        "clock": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Clock",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value"
+        }
+      },
+      "required": [
+        "clock",
+        "value"
+      ],
+      "title": "NativeTimeCoordinate",
+      "type": "object"
+    },
+    "RecordTime": {
+      "additionalProperties": true,
+      "properties": {
+        "native": {
+          "items": {
+            "$ref": "#/$defs/NativeTimeCoordinate"
+          },
+          "title": "Native",
+          "type": "array"
+        },
+        "wallTime": {
+          "minLength": 1,
+          "title": "Walltime",
+          "type": "string"
+        }
+      },
+      "required": [
+        "wallTime",
+        "native"
+      ],
+      "title": "RecordTime",
+      "type": "object"
+    }
+  },
+  "$id": "urn:environment-harness:v1:SourceRecord",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "audience": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Audience",
+      "type": "array"
+    },
+    "data": {
+      "additionalProperties": true,
+      "title": "Data",
+      "type": "object"
+    },
+    "id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Id",
+      "type": "string"
+    },
+    "participant": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Participant"
+    },
+    "position": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Position",
+      "type": "string"
+    },
+    "previous_hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Previous Hash",
+      "type": "string"
+    },
+    "revision": {
+      "minimum": 0,
+      "title": "Revision",
+      "type": "integer"
+    },
+    "segment": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Segment",
+      "type": "string"
+    },
+    "source_hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Source Hash",
+      "type": "string"
+    },
+    "time": {
+      "$ref": "#/$defs/RecordTime"
+    },
+    "type": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Type",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "position",
+    "previous_hash",
+    "source_hash",
+    "type",
+    "segment",
+    "participant",
+    "revision",
+    "time",
+    "data",
+    "audience"
+  ],
+  "title": "SourceRecord",
+  "type": "object"
+}

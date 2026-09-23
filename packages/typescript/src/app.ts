@@ -5,7 +5,7 @@ import {
   MISSING, SLOTS, buildTimeline, buildTurnSeries, cellText, describe, filterEvents, formatCompactCount, formatCost, formatTime, hasActivity,
   inheritedSentence, shortId, summarizeReports, title, turnLabel, scalars, type Slot, type Turn,
 } from './timeline.js';
-import type {ActivityEvent, ActivityExperiment, ActivityScenario, ActivitySession, ActivitySnapshot, EvidenceEvent, Json, Environment, Comparison, ReportEnvelope, TurnSeriesResponse} from './types.js';
+import type {ActivityEvent, ActivityExperiment, ActivityScenario, ActivitySession, ActivitySnapshot, EvidenceEvent, Json, Environment, Comparison, ReportEnvelope, TrainingRun, Trajectory, TrajectoryDataset, TrajectorySnapshot, TrajectorySummary, TurnSeriesResponse} from './types.js';
 
 // State
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -19,6 +19,7 @@ let cursor = 0;
 let generation = 0;
 let sessionSync = 0;
 let activitySnapshot: ActivitySnapshot | null = null;
+let trajectoryIndex: TrajectorySummary[] = [];
 let activityCursor = 0;
 let activityTimer = 0;
 let activityFailures = 0;
@@ -27,14 +28,15 @@ let focusedExperiment: string | null = null;
 let focusedScenario: string | null = null;
 const expandedExperiments = new Set<string>();
 type SessionTab = 'overview' | 'turns' | 'progression' | 'reports';
-type ExperimentTab = 'overview' | 'scenarios' | 'sessions';
+type ExperimentTab = 'overview' | 'scenarios' | 'sessions' | 'training';
 type ComparisonMetricId = 'synthetic-total' | 'cumulative-reward' | 'executed-actions';
 type ComparisonViewState = {metric?: ComparisonMetricId; startTurn?: number; endTurn?: number};
 type ViewerRoute =
   | {kind: 'home'; environments: string[]}
   | {kind: 'experiment'; id: string; tab: ExperimentTab; scenario?: string}
   | {kind: 'compare'; environments: string[]; view: ComparisonViewState}
-  | {kind: 'session'; id: string; tab: SessionTab};
+  | {kind: 'session'; id: string; tab: SessionTab}
+  | {kind: 'trajectory'; id: string};
 let sessionTab: SessionTab = 'overview';
 let selectedTurnIndex = -1;
 let selectedParticipant: string | null = null;
@@ -278,7 +280,7 @@ function routeFromLocation(): ViewerRoute | null {
     try {return {kind: 'experiment', id: decodeURIComponent(experimentScenario[1]), tab: 'scenarios', scenario: decodeURIComponent(experimentScenario[2])};}
     catch {return null;}
   }
-  const experimentSection = path.match(/^\/experiment\/([^/]+)\/(scenarios|sessions)$/);
+  const experimentSection = path.match(/^\/experiment\/([^/]+)\/(scenarios|sessions|training)$/);
   if (experimentSection) {
     try {return {kind: 'experiment', id: decodeURIComponent(experimentSection[1]), tab: experimentSection[2] as ExperimentTab};}
     catch {return null;}
@@ -286,6 +288,11 @@ function routeFromLocation(): ViewerRoute | null {
   const experiment = path.match(/^\/experiment\/([^/]+)$/);
   if (experiment) {
     try {return {kind: 'experiment', id: decodeURIComponent(experiment[1]), tab: 'overview'};}
+    catch {return null;}
+  }
+  const trajectory = path.match(/^\/trajectory\/([^/]+)$/);
+  if (trajectory) {
+    try {return {kind: 'trajectory', id: decodeURIComponent(trajectory[1])};}
     catch {return null;}
   }
   const match = path.match(/^\/session\/([^/]+)(?:\/(overview|turns|progression|reports))?$/);
@@ -319,10 +326,14 @@ function markListSynced() {
 
 // API
 async function list() {
-  const [listed, snapshot] = await Promise.all([client.list(), client.activitySnapshot()]);
+  const [listed, snapshot, trajectories] = await Promise.all([
+    client.list(), client.activitySnapshot(), client.trajectories().catch(() => []),
+  ]);
   catalog = listed.sort((a, b) => a.lineage.localeCompare(b.lineage) || Number(Boolean(a.parent)) - Number(Boolean(b.parent)) || a.id.localeCompare(b.id));
+  trajectoryIndex = trajectories;
   activitySnapshot = snapshot; activityCursor = Math.max(activityCursor, snapshot.cursor);
   renderList();
+  renderImportedTrajectories();
   renderModeSummary();
   markListSynced();
   return catalog;
@@ -736,6 +747,22 @@ function renderHomeSelection() {
   button.disabled = count < 2;
   button.textContent = count > 1 ? `Compare ${count} Sessions` : 'Select Another Session';
 }
+function renderImportedTrajectories() {
+  const imported = trajectoryIndex.filter(item => item.origin === 'imported');
+  const section = el('imported-trajectories');
+  section.hidden = imported.length === 0 || focusedExperiment !== null;
+  const list = el('imported-trajectory-list'); list.replaceChildren();
+  for (const item of imported) {
+    const button = text('button', '', 'imported-trajectory-row') as HTMLButtonElement;
+    button.type = 'button';
+    const identity = text('span', '', 'imported-trajectory-identity');
+    identity.append(text('strong', item.run_id), text('small', item.namespace));
+    button.append(identity, text('span', sessionStatus(item.collection_state)),
+      text('span', sessionStatus(item.execution_state)), text('span', shortId(item.id)));
+    button.onclick = () => void attempt(() => showTrajectory(item.id));
+    list.append(button);
+  }
+}
 type BreadcrumbItem = {label: string; href?: string; activate?: () => void};
 function renderBreadcrumbs(items: BreadcrumbItem[] = []) {
   const home = el<HTMLAnchorElement>('home');
@@ -940,6 +967,7 @@ function revealHome() {
   el('home-view').hidden = false;
   el('session-shell').hidden = true;
   el('compare-sessions-view').hidden = true;
+  el('trajectory-shell').hidden = true;
   document.body.classList.add('viewer-home');
   document.body.classList.remove('viewer-session', 'viewer-compare');
 }
@@ -951,7 +979,9 @@ function showHome(updateLocation = true) {
   el('experiment-tabs').hidden = true;
   el('experiment-overview').hidden = true;
   el('experiment-scenarios').hidden = true;
+  el('experiment-training').hidden = true;
   el('home-list-content').hidden = false;
+  renderImportedTrajectories();
   renderBreadcrumbs();
   el('home-eyebrow').textContent = 'Home';
   el('home-title').textContent = 'Environment Sessions';
@@ -960,6 +990,59 @@ function showHome(updateLocation = true) {
   document.title = 'Environment Sessions · EnvironmentHarness';
   if (updateLocation) setLocation(selectionPath('/home', [...selected]));
   renderList();
+}
+async function renderExperimentTraining(item: ActivityExperiment, active: boolean) {
+  const sessionTrajectories = new Set(item.sessions.map(session => `trajectory-${session.id}`));
+  const datasets = (await client.trajectoryDatasets({limit: 100})).filter(dataset =>
+    dataset.spec.members.some(member => sessionTrajectories.has(member.trajectoryId)));
+  if (focusedExperiment !== item.id) return;
+  const tab = document.querySelector<HTMLButtonElement>('[data-experiment-tab="training"]');
+  if (tab) tab.hidden = datasets.length === 0 && !active;
+  const holder = el('experiment-training'); holder.replaceChildren();
+  const heading = text('div', '', 'overview-heading');
+  const copy = text('div', '');
+  copy.append(text('h2', 'Training'), text('p', 'Frozen trajectory datasets and recorded local training results.'));
+  heading.append(copy); holder.append(heading);
+  if (!datasets.length) {
+    holder.append(text('p', 'No training dataset has been frozen from this experiment.', 'muted training-zero'));
+    return;
+  }
+  const runs = (await client.trainingRuns({limit: 100})).filter(run =>
+    datasets.some(dataset => dataset.metadata.id === run.spec.datasetId));
+  if (focusedExperiment !== item.id) return;
+  for (const dataset of datasets) {
+    const section = text('section', '', 'training-resource overview-section');
+    const titleRow = text('div', '', 'training-resource-heading');
+    const identity = text('div', '');
+    identity.append(text('h3', dataset.spec.name), text('p', dataset.metadata.id, 'identity'));
+    titleRow.append(identity, text('span', dataset.status.rewardState === 'ready' ? 'Reward ready' : 'Reward unavailable', 'tag'));
+    const summary = text('dl', '', 'frozen-summary');
+    for (const [label, value] of [
+      ['Sessions', String(dataset.spec.members.length)],
+      ['Records', String(dataset.status.recordCount)],
+      ['Digest', shortId(dataset.status.datasetDigest)],
+    ]) {
+      const row = text('div', ''); row.append(text('dt', label), text('dd', value)); summary.append(row);
+    }
+    section.append(titleRow, summary);
+    const matching = runs.filter(run => run.spec.datasetId === dataset.metadata.id);
+    if (!matching.length) section.append(text('p', 'No training result has been recorded for this dataset.', 'muted'));
+    for (const run of matching) section.append(renderTrainingRun(run));
+    holder.append(section);
+  }
+}
+function renderTrainingRun(run: TrainingRun) {
+  const row = text('article', '', 'training-run');
+  const policy = mapping(run.status.policy);
+  const metadata = mapping(policy.metadata);
+  const spec = mapping(policy.spec);
+  const head = text('div', '', 'training-run-heading');
+  head.append(text('strong', String(metadata.id ?? 'Recorded policy')), text('span', sessionStatus(run.status.state), 'tag'));
+  const detail = text('p', [run.spec.integration, run.spec.integrationVersion, spec.implementation, spec.version]
+    .filter(Boolean).map(String).join(' · '), 'muted');
+  row.append(head, detail);
+  if (run.status.limitations.length) row.append(text('p', `Limitations: ${run.status.limitations.join('; ')}`, 'muted'));
+  return row;
 }
 function showExperiment(id: string, tab: ExperimentTab = 'overview', scenario?: string, updateLocation = true) {
   const item = activitySnapshot?.experiments.find(experiment => experiment.id === id);
@@ -981,22 +1064,104 @@ function showExperiment(id: string, tab: ExperimentTab = 'overview', scenario?: 
   el('home-title').textContent = item?.name ?? 'Experiment';
   el('home-description').textContent = item ? experimentDetail(item) : 'Experiment activity is unavailable.';
   el('home-list-title').textContent = 'Experiment Sessions';
+  el('imported-trajectories').hidden = true;
   const scenarios = item ? meaningfulScenarios(item) : [];
   if (tab === 'scenarios' && !scenarios.length) tab = 'overview';
   const tabs = el('experiment-tabs'); tabs.hidden = false;
   for (const button of tabs.querySelectorAll<HTMLButtonElement>('[data-experiment-tab]')) {
     const name = button.dataset.experimentTab as ExperimentTab;
-    button.hidden = name === 'scenarios' && scenarios.length === 0;
+    button.hidden = (name === 'scenarios' && scenarios.length === 0)
+      || (name === 'training' && tab !== 'training');
     button.setAttribute('aria-selected', String(name === tab));
   }
   el('experiment-overview').hidden = tab !== 'overview';
   el('experiment-scenarios').hidden = tab !== 'scenarios';
+  el('experiment-training').hidden = tab !== 'training';
   el('home-list-content').hidden = tab !== 'sessions';
   if (item && tab === 'overview') renderExperimentOverview(item);
   if (item && tab === 'scenarios') renderExperimentScenarios(item, scenario);
+  if (item) void attempt(() => renderExperimentTraining(item, tab === 'training'));
   document.title = `${item?.name ?? 'Experiment'} · EnvironmentHarness`;
   if (updateLocation) setLocation(experimentPath(id, tab, scenario));
   renderList();
+}
+async function showTrajectory(id: string, updateLocation = true) {
+  const ticket = ++generation;
+  sessionSync += 1;
+  const [trajectory, page, snapshots] = await Promise.all([
+    client.trajectory(id), client.trajectoryRecords(id, {limit: 200}),
+    client.trajectorySnapshots(id),
+  ]);
+  if (ticket !== generation) return;
+  focusedExperiment = null; focusedScenario = null;
+  el('home-view').hidden = true;
+  el('session-shell').hidden = true;
+  el('compare-sessions-view').hidden = true;
+  el('trajectory-shell').hidden = false;
+  document.body.classList.remove('viewer-home', 'viewer-compare');
+  document.body.classList.add('viewer-session');
+  const source = mapping(trajectory.spec.manifest.source);
+  const runId = String(source.runId ?? id);
+  el('trajectory-title').textContent = runId;
+  el('trajectory-description').textContent = `${String(source.namespace ?? 'Unknown source')} · ${String(source.schemaVersion ?? 'Schema unavailable')}`;
+  renderBreadcrumbs([{label: `Trajectory ${shortId(id)}`}]);
+  renderTrajectoryHealth(trajectory);
+  const segments = el('trajectory-segments'); segments.replaceChildren();
+  for (const segment of trajectory.status.segments) {
+    const row = text('article', '', 'trajectory-segment');
+    const heading = text('div', '', 'trajectory-segment-heading');
+    heading.append(text('strong', segment.id), text('span', sessionStatus(segment.execution.state), 'tag'));
+    row.append(heading, text('p', `${participantName(segment.kind)} · records ${segment.sequenceStart}–${segment.sequenceEnd} · collection ${segment.collection.state}`, 'muted'));
+    segments.append(row);
+  }
+  if (!trajectory.status.segments.length) segments.append(text('p', 'No execution segments were recorded.', 'muted'));
+  renderTrajectorySnapshots(snapshots);
+  const records = el('trajectory-records'); records.replaceChildren();
+  for (const record of page.records) {
+    const row = text('article', '', 'trajectory-record');
+    const nativeTime = record.time.native.map(clock => `${clock.clock}: ${displayValue(clock.value)}`).join(' · ');
+    row.append(text('span', String(record.sequence), 'trajectory-record-sequence'),
+      text('strong', record.type),
+      text('span', record.participant ? participantName(record.participant) : 'Shared', 'muted'),
+      text('time', record.time.wallTime || 'Time unavailable', 'muted'),
+      text('small', nativeTime || 'Native time unavailable', 'muted'));
+    records.append(row);
+  }
+  if (!page.records.length) records.append(text('p', 'No authorized records are available.', 'muted'));
+  if (page.has_more) records.append(text('p', 'More records are available through the paged API.', 'muted'));
+  document.title = `${runId} · EnvironmentHarness`;
+  if (updateLocation) setLocation(`/trajectory/${encodeURIComponent(id)}`);
+}
+function renderTrajectorySnapshots(snapshots: TrajectorySnapshot[]) {
+  const holder = el('trajectory-snapshots'); holder.replaceChildren();
+  for (const snapshot of snapshots) {
+    const row = text('article', '', 'trajectory-segment');
+    const heading = text('div', '', 'trajectory-segment-heading');
+    heading.append(text('strong', shortId(snapshot.metadata.id)), text('span', snapshot.status.complete ? 'Complete' : 'Partial', 'tag'));
+    row.append(heading, text('p', `Records ${snapshot.spec.sequenceStart}–${snapshot.spec.sequenceEnd} · ${snapshot.status.recordCount} frozen · ${shortId(snapshot.status.snapshotDigest)}`, 'muted'));
+    holder.append(row);
+  }
+  if (!snapshots.length) holder.append(text('p', 'No snapshot boundaries have been frozen.', 'muted'));
+}
+function renderTrajectoryHealth(trajectory: Trajectory) {
+  const holder = el('trajectory-health'); holder.replaceChildren();
+  const collection = trajectory.status.collection as unknown as Record<string, Json>;
+  const gaps = Array.isArray(collection.gaps) ? collection.gaps : [];
+  const failures = Array.isArray(collection.captureFailures) ? collection.captureFailures : [];
+  const facts: [string, string][] = [
+    ['Collection', sessionStatus(trajectory.status.collection.state)],
+    ['Execution', sessionStatus(trajectory.status.execution.state)],
+    ['Verified Outcome', sessionStatus(trajectory.status.verifiedOutcome.state)],
+    ['Termination', trajectory.status.termination.terminated ? 'Terminated' : trajectory.status.termination.truncated ? 'Truncated' : 'Not terminal'],
+    ['Backlog', collection.backlog === null || collection.backlog === undefined ? 'Unavailable' : String(collection.backlog)],
+    ['Gaps', gaps.length ? gaps.map(String).join(', ') : 'None declared'],
+    ['Capture Failures', failures.length ? failures.map(String).join(', ') : 'None declared'],
+    ['Acknowledged Position', displayValue(collection.acknowledgedPosition)],
+    ['Evidence Head', shortId(trajectory.status.evidenceHead)],
+  ];
+  for (const [label, value] of facts) {
+    const row = text('div', ''); row.append(text('dt', label), text('dd', value)); holder.append(row);
+  }
 }
 function showEmptyState() {
   showHome();
@@ -1005,6 +1170,7 @@ function showSession() {
   el('home-view').hidden = true;
   el('session-shell').hidden = false;
   el('compare-sessions-view').hidden = true;
+  el('trajectory-shell').hidden = true;
   document.body.classList.remove('viewer-home', 'viewer-compare');
   document.body.classList.add('viewer-session');
   el('empty-state').hidden = true;
@@ -1020,6 +1186,7 @@ function showCompareSessions(updateLocation = true, showPicker = selected.size <
   el('home-view').hidden = true;
   el('session-shell').hidden = true;
   el('compare-sessions-view').hidden = false;
+  el('trajectory-shell').hidden = true;
   setComparisonPickerVisible(showPicker);
   renderBreadcrumbs([{label: 'Compare Sessions'}]);
   document.body.classList.remove('viewer-home', 'viewer-session');
@@ -2102,6 +2269,9 @@ async function restoreRoute() {
   } else if (route.kind === 'experiment') {
     showExperiment(route.id, route.tab, route.scenario, false);
     setLocation(experimentPath(route.id, route.tab, route.scenario), true);
+  } else if (route.kind === 'trajectory') {
+    await showTrajectory(route.id, false);
+    setLocation(`/trajectory/${encodeURIComponent(route.id)}`, true);
   } else {
     restoreSelected(route.environments);
     showHome(false);

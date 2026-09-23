@@ -1,0 +1,65 @@
+{
+  "$id": "urn:environment-harness:v1:SourceRegistration",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "environment": {
+      "additionalProperties": true,
+      "title": "Environment",
+      "type": "object"
+    },
+    "namespace": {
+      "maxLength": 200,
+      "minLength": 3,
+      "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9][a-z0-9-]*)+$",
+      "title": "Namespace",
+      "type": "string"
+    },
+    "participants": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Participants",
+      "type": "array"
+    },
+    "purpose": {
+      "enum": [
+        "evaluation",
+        "training"
+      ],
+      "title": "Purpose",
+      "type": "string"
+    },
+    "run_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "split": {
+      "default": "heldout",
+      "enum": [
+        "training",
+        "heldout"
+      ],
+      "title": "Split",
+      "type": "string"
+    }
+  },
+  "required": [
+    "namespace",
+    "run_id",
+    "schema_version",
+    "environment",
+    "participants",
+    "purpose"
+  ],
+  "title": "SourceRegistration",
+  "type": "object"
+}

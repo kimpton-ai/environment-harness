@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+EnvironmentHarness now projects native and imported traces into additive `v1alpha1` Policy,
+Trajectory, TrajectorySnapshot, TrajectoryDataset, and TrainingRun resources. Historical sources use
+immutable namespaced registrations, bounded hash-chained ingestion, idempotent retries, explicit
+acknowledgement cursors, and independently inspectable collection, execution, termination, and
+verified-outcome state. Native pause/resume histories become causally linked continuation segments.
+
+Python, TypeScript, HTTP, and CLI surfaces now page trajectory records and stream reproducible
+snapshot/dataset JSONL. Training datasets require complete terminal training evidence, compatible
+schemas, and resolved finite reward supersession chains. `InstrumentedModel` correlates model calls
+to durable agent work and spills oversized detail to participant-scoped artifacts. Trainer plugins
+remain explicit local Python/CLI integrations; the server only reads immutable receipts.
+
+The viewer adds imported trajectory health/segment inspection and conditional experiment Training
+details without exposing raw extension or inference payloads. The Verifiers bridge now matches the
+declared `>=0.3.1,<0.4` extra and derives authorized rows from canonical trajectories. Optional
+integration changes have a path-routed CI job. RLlib, TRL, live OpenEnv training, Parquet, and the
+separately owned decision-selection seam are not claimed by this change.
+
 Typed scenarios now expand into bounded concurrent experiment trials with durable
 status, deterministic seeds and resumable activity feeds. The evidence viewer adds
 experiment grouping, filtering, unequal-length comparison, progression and report

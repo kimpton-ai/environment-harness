@@ -40,6 +40,53 @@ def test_postgres_schema_migrations_are_idempotent():
     not os.environ.get("ENVIRONMENT_HARNESS_POSTGRES_URL"),
     reason="ephemeral PostgreSQL service is not configured",
 )
+def test_postgres_persists_and_lists_trajectory_snapshot_boundaries():
+    import psycopg
+    from psycopg import sql
+
+    from environment_harness import AgentSpec, EnvironmentSession, ExperimentSpec, Principal
+    from environment_harness.fixtures import SyntheticEnvironment
+    from environment_harness.hosted import PostgresEvidenceStore
+    from environment_harness.trajectories import TrajectoryRepository
+
+    class Objects:
+        def put(self, _key, _data):
+            return None
+
+        def get(self, _key):
+            return b""
+
+    dsn = os.environ["ENVIRONMENT_HARNESS_POSTGRES_URL"]
+    schema = "environment_harness_test_" + uuid4().hex
+    store = PostgresEvidenceStore(dsn, Objects(), schema=schema)
+    try:
+        store.initialize()
+        who = Principal(tenant="tenant", subject="researcher", role="researcher")
+        environment = SyntheticEnvironment()
+        session = EnvironmentSession(store, environment)
+        environment_id = session.create(
+            ExperimentSpec(
+                environment=environment.spec,
+                participants=(AgentSpec(id="alice", implementation="synthetic", policy_version="1"),),
+            ),
+            who,
+        )["id"]
+        session.observe(environment_id, who, "alice")
+        repository = TrajectoryRepository(store)
+
+        frozen = repository.freeze(environment_id, who)
+
+        assert repository.list_snapshots(environment_id, who) == [frozen]
+        assert list(repository.export_snapshot(frozen.metadata.id, who))
+    finally:
+        with psycopg.connect(dsn, autocommit=True) as connection:
+            connection.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(schema)))
+
+
+@pytest.mark.skipif(
+    not os.environ.get("ENVIRONMENT_HARNESS_POSTGRES_URL"),
+    reason="ephemeral PostgreSQL service is not configured",
+)
 def test_explicit_tenant_erasure_preserves_other_tenants_and_refuses_active_writer():
     import psycopg
     from psycopg import sql
@@ -49,6 +96,7 @@ def test_explicit_tenant_erasure_preserves_other_tenants_and_refuses_active_writ
     from environment_harness.fixtures import SyntheticEnvironment
     from environment_harness.hosted import PostgresEvidenceStore
     from environment_harness.runtime import EnvironmentSession
+    from environment_harness.trajectories import SourceRegistration, TrajectoryRepository
 
     class Objects:
         def __init__(self):
@@ -78,6 +126,19 @@ def test_explicit_tenant_erasure_preserves_other_tenants_and_refuses_active_writ
         first = Principal(tenant="first", subject="owner", role="researcher")
         other = Principal(tenant="other", subject="owner", role="researcher")
         a, b = session.create(experiment, first)["id"], session.create(experiment, other)["id"]
+        trajectories = TrajectoryRepository(store)
+        trajectories.freeze(a, first)
+        trajectories.register_source(
+            SourceRegistration(
+                namespace="com.example.retention",
+                run_id="first-source",
+                schema_version="retention.v1",
+                environment={"id": "synthetic"},
+                participants=("a",),
+                purpose="evaluation",
+            ),
+            first,
+        )
         with store.transaction() as db:
             db.execute(
                 "INSERT INTO experiments VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
