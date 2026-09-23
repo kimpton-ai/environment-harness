@@ -27,6 +27,14 @@ GATEWAY_PROTOCOL_VERSION = "evalrouter.decision.v1"
 GATEWAY_PROVIDER = "evalrouter"
 
 
+def _validate_endpoint(endpoint: str) -> None:
+    parsed = urlsplit(endpoint)
+    if parsed.scheme not in {"https", "http"} or not parsed.netloc or parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ValueError("gateway endpoint must be HTTPS or loopback HTTP without credentials, query, or fragment")
+    if parsed.scheme == "http" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+        raise ValueError("HTTP gateway endpoints are restricted to loopback")
+
+
 class GatewayTransport(Protocol):
     def __call__(self, endpoint: str, headers: Mapping[str, str], body: bytes, timeout: float) -> Any: ...
 
@@ -159,9 +167,7 @@ class EvalRouterGenerationClient:
                  transport: GatewayTransport | None = None, lookup_transport: GatewayLookupTransport | None = None,
                  workspace_id: str, unit_id: str, generation: int,
                  gateway_token: str | None = None, max_output_tokens: int = 4096):
-        parsed = urlsplit(endpoint)
-        if parsed.scheme != "https" or not parsed.netloc or parsed.query or parsed.fragment:
-            raise ValueError("gateway endpoint must be HTTPS without query or fragment")
+        _validate_endpoint(endpoint)
         self.endpoint, self.run_id, self.episode_id, self.model = endpoint, run_id, episode_id, model
         self.workspace_id, self.unit_id, self.generation = workspace_id, unit_id, generation
         self.transport = transport or EvalRouterGatewaySelector._httpx_transport
@@ -299,9 +305,7 @@ class EvalRouterGatewaySelector:
         max_input_bytes: int = 262_144,
         images: tuple[QualifiedImageInput, ...] = (),
     ) -> None:
-        parsed = urlsplit(endpoint)
-        if parsed.scheme != "https" or not parsed.netloc or parsed.query or parsed.fragment:
-            raise ValueError("gateway endpoint must be HTTPS without query or fragment")
+        _validate_endpoint(endpoint)
         if not token_bound_source:
             raise ValueError("token_bound_source is required")
         self.endpoint = endpoint
