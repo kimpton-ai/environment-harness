@@ -2,9 +2,9 @@
 
 from .contracts import (
     AgentSpec,
-    EnvironmentV2,
     EnvironmentSpec,
     EnvironmentSpecV2,
+    EnvironmentV2,
     ExperimentSpec,
     OperationPlan,
     OperationReceipt,

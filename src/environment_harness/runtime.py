@@ -418,8 +418,7 @@ class EnvironmentSession:
                 raise Conflict("transition computation already in progress")
             cached = (
                 intent
-                if intent
-                and intent["status"] in (("computed", "committed") if is_v2 else ("computed",))
+                if intent and intent["status"] in (("computed", "committed") if is_v2 else ("computed",))
                 else None
             )
             if not intent:
@@ -752,7 +751,10 @@ class EnvironmentSession:
                 receipt=provider_receipt,
                 cost_micros=provider_receipt["cost_micros"],
             )
-        if len(encode({key: value.model_dump(mode="json") for key, value in receipts.items()}).encode()) > MAX_OPERATION_RECEIPTS_BYTES:
+        if (
+            len(encode({key: value.model_dump(mode="json") for key, value in receipts.items()}).encode())
+            > MAX_OPERATION_RECEIPTS_BYTES
+        ):
             raise Conflict("settled operation receipts exceed the 8 MiB transition limit")
 
         rng.setstate(tuples(rng_after_plan))

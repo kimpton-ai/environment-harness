@@ -36,8 +36,7 @@ def dispatch(env, method, args):
         rng.setstate(tuples(args["rng"]))
         plan = OperationPlan.model_validate(args["plan"])
         receipts = {
-            key: OperationReceipt.model_validate(receipt)
-            for key, receipt in args["receipts"].items()
+            key: OperationReceipt.model_validate(receipt) for key, receipt in args["receipts"].items()
         }
         planned = {request.key: request for request in plan.operations}
         if set(receipts) != set(planned) or any(
@@ -48,9 +47,7 @@ def dispatch(env, method, args):
         ):
             raise ValueError("operation receipts do not match the persisted plan")
         transition = Transition.model_validate(
-            env.resolve_transition(
-                args["state"], args["actions"], rng, args["events"], plan, receipts
-            )
+            env.resolve_transition(args["state"], args["actions"], rng, args["events"], plan, receipts)
         )
         return {"transition": transition.model_dump(mode="json"), "rng": rng.getstate()}
     raise ValueError("unknown worker method")

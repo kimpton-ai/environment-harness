@@ -177,7 +177,9 @@ class Operations:
             ):
                 raise Conflict("transition plan is not durably prepared")
             persisted = json.loads(transition["request"])
-            if persisted.get("input_hash") != transition_hash or persisted.get("plan") != plan.model_dump(mode="json"):
+            if persisted.get("input_hash") != transition_hash or persisted.get("plan") != plan.model_dump(
+                mode="json"
+            ):
                 raise Conflict("operation plan differs from its durable transition intent")
             current = {key: row[key] for key in ("state", "rng", "scheduler", "participants")}
             if any(persisted.get("input", {}).get(key) != value for key, value in current.items()):
@@ -210,8 +212,7 @@ class Operations:
                 if declaration.get("access") not in ("read", "write"):
                     raise Forbidden("v2 operation access class is missing")
                 if write and (
-                    not experiment.policy.external_writes
-                    or not environment_spec.capabilities.external_writes
+                    not experiment.policy.external_writes or not environment_spec.capabilities.external_writes
                 ):
                     raise Forbidden("frozen policy denies environment operation writes")
                 dependency_ids = {key: operation_ids[key] for key in item.depends_on}
@@ -327,7 +328,11 @@ class Operations:
                 raise Forbidden("environment operation differs from the frozen experiment")
             if host_operation:
                 declaration = next(
-                    (item for item in manifest.get("operations", ()) if item.get("name") == request["operation"]),
+                    (
+                        item
+                        for item in manifest.get("operations", ())
+                        if item.get("name") == request["operation"]
+                    ),
                     None,
                 )
                 if declaration is None or request.get("write") != (declaration.get("access") == "write"):
@@ -379,9 +384,7 @@ class Operations:
                             actor_valid = True
                         else:
                             actor_valid = bool(
-                                actor
-                                and actor["active"]
-                                and actor["generation"] == op["generation"]
+                                actor and actor["active"] and actor["generation"] == op["generation"]
                             )
                         if (
                             current["status"] != "running"

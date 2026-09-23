@@ -89,7 +89,8 @@ class RemoteEnvironment:
         self.operations = dict(operations or {})
         expected_protocol = (
             PROTOCOL_V2
-            if expected_spec is not None and getattr(expected_spec, "protocol", None) == "environment-session.v2"
+            if expected_spec is not None
+            and getattr(expected_spec, "protocol", None) == "environment-session.v2"
             else getattr(transport, "protocol", PROTOCOL)
         )
         self.protocol = expected_protocol
@@ -149,9 +150,7 @@ class RemoteEnvironment:
         if not isinstance(self.spec, EnvironmentSpecV2):
             raise Unavailable("v1 workers do not support transition resolution")
         typed_plan = OperationPlan.model_validate(plan)
-        typed_receipts = {
-            key: OperationReceipt.model_validate(value) for key, value in receipts.items()
-        }
+        typed_receipts = {key: OperationReceipt.model_validate(value) for key, value in receipts.items()}
         planned = {request.key: request for request in typed_plan.operations}
         if set(typed_receipts) != set(planned) or any(
             receipt.key != key
@@ -168,9 +167,7 @@ class RemoteEnvironment:
                 "rng": random.getstate(),
                 "events": events,
                 "plan": typed_plan.model_dump(mode="json"),
-                "receipts": {
-                    key: value.model_dump(mode="json") for key, value in typed_receipts.items()
-                },
+                "receipts": {key: value.model_dump(mode="json") for key, value in typed_receipts.items()},
             },
         )
         transition = Transition.model_validate(result["transition"])

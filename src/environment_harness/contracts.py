@@ -157,7 +157,9 @@ class OperationPlan(Record):
             raise ValueError("operation plan keys must be unique")
         by_key = {operation.key: operation for operation in self.operations}
         for operation in self.operations:
-            if operation.key in operation.depends_on or any(key not in by_key for key in operation.depends_on):
+            if operation.key in operation.depends_on or any(
+                key not in by_key for key in operation.depends_on
+            ):
                 raise ValueError("operation plan dependency is missing or self-referential")
         visiting: set[str] = set()
         visited: set[str] = set()
@@ -257,7 +259,10 @@ class ExperimentSpec(Record):
             raise ValueError("environment entitlement denies purpose")
         if self.purpose == "training" and self.split != "training":
             raise ValueError("heldout environments cannot be used for training")
-        if self.environment.protocol == "environment-session.v2" and self.policy.max_cost_micros > MAX_COST_MICROS:
+        if (
+            self.environment.protocol == "environment-session.v2"
+            and self.policy.max_cost_micros > MAX_COST_MICROS
+        ):
             raise ValueError("v2 operation budget exceeds the signed 64-bit journal limit")
         if self.policy.external_writes and not self.environment.capabilities.external_writes:
             raise ValueError("external writes unsupported")
@@ -271,8 +276,7 @@ class ExperimentSpec(Record):
         ):
             raise ValueError("operation is not supplied by the environment")
         if isinstance(self.environment, EnvironmentSpecV2) and any(
-            not isinstance(operation, OperationSpecV2)
-            or available[operation.name] != operation
+            not isinstance(operation, OperationSpecV2) or available[operation.name] != operation
             for operation in self.operations
         ):
             raise ValueError("v2 selected operation must exactly match its frozen environment declaration")
