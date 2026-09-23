@@ -202,6 +202,7 @@ class EvalRouterGenerationClient:
         if response.charged_micros is None or response.charged_micros > maximum_charge_micros:
             raise ProviderFailure("gateway generation charge exceeded bound", submitted=True, uncharged=False)
         self._local.last_charge_micros = response.charged_micros
+        self._local.last_response = response.model_dump(mode="json")
         if response.status != "completed" or not response.result:
             error = response.error
             raise JevProviderFailure(error.message if error else "gateway generation failed",
@@ -218,6 +219,10 @@ class EvalRouterGenerationClient:
     @property
     def last_charge_micros(self):
         return getattr(self._local, "last_charge_micros", None)
+
+    @property
+    def last_response(self):
+        return getattr(self._local, "last_response", None)
 
     def lookup(self, operation_id: str) -> GenerationGatewayResponse | None:
         if self.lookup_transport is None:
@@ -396,6 +401,7 @@ class EvalRouterGatewaySelector:
         if response.protocol_version != GATEWAY_PROTOCOL_VERSION or response.operation_id != self._local.operation_id:
             raise ProviderFailure("gateway response identity mismatch", submitted=True, uncharged=False)
         self._local.charged_micros = response.charged_micros
+        self._local.last_response = response.model_dump(mode="json")
         if response.charged_micros is not None and response.charged_micros > self._local.maximum_charge_micros:
             raise ProviderFailure("gateway charge exceeded reserved bound", submitted=True, uncharged=False)
         if response.status != "completed" or response.result is None:
