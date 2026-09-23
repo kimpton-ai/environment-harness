@@ -311,6 +311,7 @@ class EvalRouterGatewaySelector:
         self.transport = transport or self._httpx_transport
         self.lookup_transport = lookup_transport or self._httpx_lookup_transport
         self.images = tuple(images)
+        self.max_input_bytes = max_input_bytes
         self.evidence = GatewayEvidence(endpoint=endpoint)
         self._jev = _GatewayJev(
             owner=self,
@@ -331,6 +332,18 @@ class EvalRouterGatewaySelector:
         # This is a conservative local reservation.  The gateway remains the
         # sole authority for actual provider charge and billing.
         return self._jev.maximum_charge_micros(objective, observation, decisions)
+
+    def request_encoded(self, body: bytes, *, maximum_charge_micros: int,
+                        cancel: threading.Event, deadline: float, operation_id: str | None = None):
+        """Compatibility boundary for the Minecraft Jev command interpreter."""
+        self._local.operation_id = operation_id or f"jev:{__import__('uuid').uuid4().hex}"
+        self._local.maximum_charge_micros = maximum_charge_micros
+        response, _estimated, evidence = self._jev.request_encoded(
+            body, maximum_charge_micros=maximum_charge_micros, cancel=cancel, deadline=deadline
+        )
+        if self._local.charged_micros is None:
+            raise ProviderFailure("gateway response omitted authoritative charge", submitted=True, uncharged=False)
+        return response, self._local.charged_micros, {**evidence, **self.evidence.as_dict()}
 
     def select(self, selection_id, objective, observation, decisions, *, cancel, deadline):
         self._local.operation_id = selection_id
