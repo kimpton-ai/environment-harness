@@ -25,6 +25,13 @@ from .contracts import (
 )
 from .runtime import DecisionOperation
 from .selectors import FakeSelector, RecordedSelector
+from .gateway import (
+    DecisionGatewayRequest,
+    DecisionGatewayResponse,
+    EvalRouterGatewaySelector,
+    GatewayError,
+    QualifiedImageInput,
+)
 
 __version__ = "0.1.0"
 __all__ = [
@@ -35,6 +42,8 @@ __all__ = [
     "ChoiceOption",
     "CompiledCommand",
     "DecisionOperation",
+    "DecisionGatewayRequest",
+    "DecisionGatewayResponse",
     "DecisionPolicy",
     "DecisionQuestion",
     "DecisionReceipt",
@@ -42,6 +51,8 @@ __all__ = [
     "DecisionSet",
     "EnvironmentControl",
     "FakeSelector",
+    "EvalRouterGatewaySelector",
+    "GatewayError",
     "InvocationLimits",
     "NativeReceipt",
     "Objective",
@@ -49,6 +60,7 @@ __all__ = [
     "OutcomeUncertain",
     "PreparedSuccessor",
     "ProviderFailure",
+    "QualifiedImageInput",
     "RecordedSelector",
     "Selection",
     "Verification",
