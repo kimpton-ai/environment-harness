@@ -105,6 +105,7 @@ def test_endpoint_cannot_embed_credentials_or_unfrozen_components(endpoint):
 def test_default_transport_property_is_callable():
     selector = JevSelector(
         api_key="test",  # pragma: allowlist secret (synthetic fixture)
-        verified_token_bound=lambda body: 100, verified_token_bound_source="fixture"
+        verified_token_bound=lambda body: 100,
+        verified_token_bound_source="fixture",
     )
     assert callable(selector.transport)
