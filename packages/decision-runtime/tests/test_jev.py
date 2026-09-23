@@ -71,7 +71,7 @@ def test_selector_composes_all_supported_questions_and_retains_evidence():
         return _response()
 
     selector = JevDecisionSelector(
-        api_key="runtime-only",
+        api_key="runtime-only",  # pragma: allowlist secret (synthetic fixture)
         transport=transport,
         token_bound=lambda body: 100,
         token_bound_source="fixture-tokenizer.v1",

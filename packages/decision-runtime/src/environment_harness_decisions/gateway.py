@@ -397,7 +397,7 @@ class EvalRouterGatewaySelector:
             owner=self,
             endpoint="https://gateway-owned.invalid/jev",
             transport=self._call_gateway,
-            api_key="gateway-owned",
+            api_key="gateway-owned",  # pragma: allowlist secret (internal sentinel, not a credential)
             token_bound=token_bound,
             token_bound_source=token_bound_source,
             max_input_bytes=max_input_bytes,

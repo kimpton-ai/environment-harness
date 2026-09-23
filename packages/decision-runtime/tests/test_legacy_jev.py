@@ -31,7 +31,7 @@ def response():
 def test_legacy_surface_uses_mutable_transport_and_retains_evidence():
     calls = []
     selector = JevSelector(
-        api_key="test",
+        api_key="test",  # pragma: allowlist secret (synthetic fixture)
         verified_token_bound=lambda body: 100,
         verified_token_bound_source="fixture",
         transport=lambda *args: calls.append(args) or response(),
@@ -76,7 +76,7 @@ def test_provider_parse_failure_preserves_known_evidence():
     bad = response()
     bad["answers"]["motor"]["choice"] = "invented"
     selector = JevSelector(
-        api_key="test",
+        api_key="test",  # pragma: allowlist secret (synthetic fixture)
         verified_token_bound=lambda body: 100,
         verified_token_bound_source="fixture",
         transport=lambda *args: bad,
@@ -92,18 +92,19 @@ def test_provider_parse_failure_preserves_known_evidence():
 @pytest.mark.parametrize(
     "endpoint",
     [
-        "https://user:secret@api.typesafe.ai/v1/systemone",
+        "https://user:secret@api.typesafe.ai/v1/systemone",  # pragma: allowlist secret (synthetic rejection fixture)
         "https://api.typesafe.ai/v1/systemone?key=secret",
         "https://api.typesafe.ai/v1/systemone#fragment",
     ],
 )
 def test_endpoint_cannot_embed_credentials_or_unfrozen_components(endpoint):
     with pytest.raises(ValueError):
-        JevSelector(api_key="test", endpoint=endpoint)
+        JevSelector(api_key="test", endpoint=endpoint)  # pragma: allowlist secret (synthetic fixture)
 
 
 def test_default_transport_property_is_callable():
     selector = JevSelector(
-        api_key="test", verified_token_bound=lambda body: 100, verified_token_bound_source="fixture"
+        api_key="test",  # pragma: allowlist secret (synthetic fixture)
+        verified_token_bound=lambda body: 100, verified_token_bound_source="fixture"
     )
     assert callable(selector.transport)
