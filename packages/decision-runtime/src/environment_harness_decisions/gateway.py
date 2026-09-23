@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .contracts import ProviderFailure
+from .contracts import ProviderFailure, Selection
 from .jev import DEFAULT_MODEL, JevDecisionSelector, JevProviderFailure
 
 GATEWAY_PROTOCOL_VERSION = "evalrouter.decision.v1"
@@ -28,6 +28,10 @@ GATEWAY_PROVIDER = "evalrouter"
 
 class GatewayTransport(Protocol):
     def __call__(self, endpoint: str, headers: Mapping[str, str], body: bytes, timeout: float) -> Any: ...
+
+
+class GatewayLookupTransport(Protocol):
+    def __call__(self, endpoint: str, headers: Mapping[str, str], operation_id: str, timeout: float) -> Any: ...
 
 
 class QualifiedImageInput(BaseModel):
@@ -136,12 +140,17 @@ class EvalRouterGenerationClient:
     """
 
     def __init__(self, *, endpoint: str, run_id: str, episode_id: str, model: str,
-                 transport: GatewayTransport | None = None, gateway_token: str | None = None):
+                 transport: GatewayTransport | None = None, lookup_transport: GatewayLookupTransport | None = None,
+                 gateway_token: str | None = None, max_output_tokens: int = 4096):
         parsed = urlsplit(endpoint)
         if parsed.scheme != "https" or not parsed.netloc or parsed.query or parsed.fragment:
             raise ValueError("gateway endpoint must be HTTPS without query or fragment")
         self.endpoint, self.run_id, self.episode_id, self.model = endpoint, run_id, episode_id, model
         self.transport = transport or EvalRouterGatewaySelector._httpx_transport
+        self.lookup_transport = lookup_transport
+        if max_output_tokens < 1 or max_output_tokens > 131072:
+            raise ValueError("max_output_tokens must be between 1 and 131072")
+        self.max_output_tokens = max_output_tokens
         self.gateway_token = gateway_token if gateway_token is not None else os.environ.get("EVALROUTER_TOKEN")
 
     def __call__(self, request: Mapping[str, Any], *, operation_id: str,
@@ -152,7 +161,7 @@ class EvalRouterGenerationClient:
         envelope = GenerationGatewayRequest(
             run_id=self.run_id, episode_id=self.episode_id, operation_id=operation_id,
             model=self.model, maximum_charge_micros=maximum_charge_micros,
-            request=dict(request),
+            request={**dict(request), "max_output_tokens": self.max_output_tokens},
         )
         headers = {"Content-Type": "application/json", "X-EvalRouter-Protocol": "evalrouter.generation.v1"}
         if self.gateway_token:
@@ -176,6 +185,22 @@ class EvalRouterGenerationClient:
         if not isinstance(content, str):
             raise ProviderFailure("gateway generation omitted content", submitted=True, uncharged=False)
         return content
+
+    def lookup(self, operation_id: str) -> GenerationGatewayResponse | None:
+        if self.lookup_transport is None:
+            return None
+        headers = {"X-EvalRouter-Protocol": "evalrouter.generation.v1"}
+        if self.gateway_token:
+            headers["Authorization"] = f"Bearer {self.gateway_token}"
+        try:
+            raw = self.lookup_transport(self.endpoint, headers, operation_id, 30.0)
+            response = (GenerationGatewayResponse.model_validate_json(raw)
+                        if isinstance(raw, (bytes, str)) else GenerationGatewayResponse.model_validate(raw))
+        except Exception:
+            return None
+        if response.protocol_version != "evalrouter.generation.v1" or response.operation_id != operation_id:
+            return None
+        return response
 
 
 @dataclass(frozen=True)
@@ -212,6 +237,7 @@ class EvalRouterGatewaySelector:
         episode_id: str,
         gateway_token: str | None = None,
         transport: GatewayTransport | None = None,
+        lookup_transport: GatewayLookupTransport | None = None,
         token_bound,
         token_bound_source: str,
         max_input_bytes: int = 262_144,
@@ -226,6 +252,7 @@ class EvalRouterGatewaySelector:
         self.run_id, self.episode_id = run_id, episode_id
         self.gateway_token = gateway_token if gateway_token is not None else os.environ.get("EVALROUTER_TOKEN")
         self.transport = transport or self._httpx_transport
+        self.lookup_transport = lookup_transport
         self.images = tuple(images)
         self.evidence = GatewayEvidence(endpoint=endpoint)
         self._jev = _GatewayJev(
@@ -263,7 +290,30 @@ class EvalRouterGatewaySelector:
         )
 
     def lookup(self, attempt_id):
-        return None
+        if self.lookup_transport is None:
+            return None
+        headers = {"X-EvalRouter-Protocol": GATEWAY_PROTOCOL_VERSION}
+        if self.gateway_token:
+            headers["Authorization"] = f"Bearer {self.gateway_token}"
+        try:
+            raw = self.lookup_transport(self.endpoint, headers, attempt_id, 30.0)
+            response = (DecisionGatewayResponse.model_validate_json(raw)
+                        if isinstance(raw, (bytes, str)) else DecisionGatewayResponse.model_validate(raw))
+        except Exception:
+            return None
+        if (response.protocol_version != GATEWAY_PROTOCOL_VERSION
+                or response.operation_id != attempt_id
+                or response.status != "completed"
+                or response.result is None
+                or response.charged_micros is None):
+            return None
+        try:
+            selection = Selection.model_validate(response.result)
+        except Exception:
+            return None
+        if selection.cost_micros is not None and selection.cost_micros != response.charged_micros:
+            return None
+        return selection.model_copy(update={"cost_micros": response.charged_micros})
 
     def _call_gateway(self, endpoint, headers, body, timeout):
         request = json.loads(body)
