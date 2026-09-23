@@ -106,8 +106,9 @@ class OperationSpecV2(OperationSpec):
 class EnvironmentSpecV2(EnvironmentSpec):
     """The additive environment-session.v2 contract."""
 
-    protocol: Literal["environment-session.v2"] = "environment-session.v2"
-    operations: tuple[OperationSpecV2, ...] = ()
+    # Pydantic enforces frozen=True for these models; pyright does not model that field immutability.
+    protocol: Literal["environment-session.v2"] = "environment-session.v2"  # pyright: ignore[reportIncompatibleVariableOverride]
+    operations: tuple[OperationSpecV2, ...] = ()  # pyright: ignore[reportIncompatibleVariableOverride]
     max_transition_operations: int = Field(default=64, ge=0, le=64, strict=True)
 
 

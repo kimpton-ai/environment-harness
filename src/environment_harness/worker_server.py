@@ -39,7 +39,6 @@ def create_worker_app(environment, token):
     is_v2 = isinstance(environment.spec, EnvironmentSpecV2)
     protocol = PROTOCOL_V2 if is_v2 else PROTOCOL
     path = "/v2/worker/call" if is_v2 else "/v1/worker/call"
-    request_model = WorkerRequestV2 if is_v2 else WorkerRequest
     app = FastAPI(title="Environment worker", docs_url=None, redoc_url=None, openapi_url=None)
     lock = threading.Lock()
 
@@ -80,13 +79,13 @@ def create_worker_app(environment, token):
     if is_v2:
 
         @app.post(path)
-        def call_v2(request: request_model, authorization: str = Header()):
+        def call_v2(request: WorkerRequestV2, authorization: str = Header()):
             return handle_call(request, authorization)
 
     else:
 
         @app.post(path)
-        def call_v1(request: request_model, authorization: str = Header()):
+        def call_v1(request: WorkerRequest, authorization: str = Header()):
             return handle_call(request, authorization)
 
     return app
