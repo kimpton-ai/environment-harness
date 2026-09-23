@@ -93,6 +93,7 @@ def test_legacy_facade_executes_one_native_step_and_projects_receipt(tmp_path):
     assert receipt["steps"][0]["receipt"]["status"] == "completed"
     assert len(adapter.submissions) == 1
     assert len(adapter.before_dispatches) == 1
+    assert receipt["timings_ms"]["admission"] > 0
     assert operation.lookup("motor:1") == receipt
 
 
@@ -184,6 +185,8 @@ def test_legacy_facade_retains_unknown_native_effect_without_resubmitting(tmp_pa
     )
     recovered = restarted.lookup("motor:1")
     assert recovered is not None and len(adapter.submissions) == 1
+    assert recovered["elapsed_ms"] is None
+    assert recovered["timings_ms"]["admission"] > 0
 
 
 def test_legacy_stop_advances_legacy_epoch(tmp_path):

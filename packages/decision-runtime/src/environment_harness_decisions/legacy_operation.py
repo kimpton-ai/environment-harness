@@ -563,7 +563,8 @@ class LegacyMotorOperation(EnvironmentOperation, LegacySuccessorLedger):
             before=before,
             after=after,
             steps=tuple(steps),
-            elapsed_ms=(time.monotonic() - started) * 1000,
+            elapsed_ms=(time.monotonic() - started) * 1000 if started else None,
+            timings_ms=receipt.get("timings_ms", {}),
         ).model_dump(mode="json")
 
     def lookup(self, operation_id):

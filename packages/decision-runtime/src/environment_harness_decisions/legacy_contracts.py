@@ -208,7 +208,8 @@ class MotorReceipt(MotorRecord):
     after: dict[str, Any] = Field(default_factory=dict)
     selection: MotorSelection | None = None
     steps: tuple[dict[str, Any], ...] = ()
-    elapsed_ms: float = Field(ge=0)
+    elapsed_ms: float | None = Field(ge=0)
+    timings_ms: dict[str, float] = Field(default_factory=dict)
 
 
 class MotorGroup(MotorRecord):
