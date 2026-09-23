@@ -12,6 +12,7 @@ from environment_harness_decisions import (
     QualifiedImageInput,
     Selection,
     EvalRouterGenerationClient,
+    ProviderFailure,
 )
 from environment_harness_decisions.jev import JevProviderFailure
 from test_jev import _decisions, _response
@@ -163,3 +164,40 @@ def test_generation_client_binds_output_bound_and_lookup():
                                         transport=transport, max_output_tokens=128)
     assert client({"messages": []}, operation_id="gen-1", maximum_charge_micros=5) == "{}"
     assert calls[0]["request"]["max_output_tokens"] == 128
+
+
+def test_generation_rejected_before_submission_is_retryable_once_and_unknown_is_not():
+    calls = []
+    def rejected(*_args):
+        calls.append(1)
+        return {"protocol_version": "evalrouter.generation.v1", "operation_id": "gen-2",
+                "status": "rejected", "charged_micros": 0,
+                "error": {"code": "unsubmitted", "message": "not sent", "submitted": False, "charged": False}}
+    client = EvalRouterGenerationClient(endpoint="https://gateway.example.test/v1/generate",
+                                        run_id="run-1", episode_id="episode-1", model="astra-v1",
+                                        workspace_id="workspace-1", unit_id="unit-1", generation=1,
+                                        transport=rejected, max_output_tokens=128)
+    with pytest.raises(JevProviderFailure) as caught:
+        client({"messages": []}, operation_id="gen-2", maximum_charge_micros=5)
+    assert caught.value.retryable and calls == [1]
+
+    def unknown(*_args):
+        return {"protocol_version": "evalrouter.generation.v1", "operation_id": "gen-3",
+                "status": "uncertain", "charged_micros": None}
+    client.transport = unknown
+    with pytest.raises(ProviderFailure) as caught:
+        client({"messages": []}, operation_id="gen-3", maximum_charge_micros=5)
+    assert caught.value.submitted and not caught.value.uncharged
+
+
+def test_generation_cancellation_happens_before_transport():
+    calls = []
+    client = EvalRouterGenerationClient(endpoint="https://gateway.example.test/v1/generate",
+                                         run_id="run-1", episode_id="episode-1", model="astra-v1",
+                                         workspace_id="workspace-1", unit_id="unit-1", generation=1,
+                                         transport=lambda *_: calls.append(1), max_output_tokens=128)
+    cancel = threading.Event()
+    cancel.set()
+    with pytest.raises(ProviderFailure) as caught:
+        client({"messages": []}, operation_id="gen-4", maximum_charge_micros=5, cancel=cancel)
+    assert not caught.value.submitted and caught.value.uncharged and calls == []
