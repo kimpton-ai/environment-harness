@@ -234,6 +234,9 @@ class EvalRouterGenerationClient:
         if self.lookup_transport is None:
             return None
         headers = {"X-EvalRouter-Protocol": "evalrouter.generation.v1"}
+        headers.update({"X-EvalRouter-Workspace": self.workspace_id, "X-EvalRouter-Run": self.run_id,
+                        "X-EvalRouter-Episode": self.episode_id, "X-EvalRouter-Unit": self.unit_id,
+                        "X-EvalRouter-Generation": str(self.generation)})
         if self.gateway_token:
             headers["Authorization"] = f"Bearer {self.gateway_token}"
         try:
@@ -319,7 +322,7 @@ class EvalRouterGatewaySelector:
         self.evidence = GatewayEvidence(endpoint=endpoint)
         self._jev = _GatewayJev(
             owner=self,
-            endpoint=endpoint,
+            endpoint="https://gateway-owned.invalid/jev",
             transport=self._call_gateway,
             api_key="gateway-owned",
             token_bound=token_bound,
@@ -328,6 +331,11 @@ class EvalRouterGatewaySelector:
         )
         self._jev.gateway_images = self.images
         self._local = threading.local()
+        self.price_micros_per_million = self._jev.price_micros_per_million
+        self.verified_token_bound = token_bound
+        self.verified_token_bound_source = token_bound_source
+        self.token_bound = token_bound
+        self.token_bound_source = token_bound_source
 
     def model_input(self, observation, decisions):
         return self._jev.model_input(observation, decisions)
@@ -367,6 +375,9 @@ class EvalRouterGatewaySelector:
         if self.lookup_transport is None:
             return None
         headers = {"X-EvalRouter-Protocol": GATEWAY_PROTOCOL_VERSION}
+        headers.update({"X-EvalRouter-Workspace": self.workspace_id, "X-EvalRouter-Run": self.run_id,
+                        "X-EvalRouter-Episode": self.episode_id, "X-EvalRouter-Unit": self.unit_id,
+                        "X-EvalRouter-Generation": str(self.generation)})
         if self.gateway_token:
             headers["Authorization"] = f"Bearer {self.gateway_token}"
         try:
@@ -392,6 +403,25 @@ class EvalRouterGatewaySelector:
         if selection.cost_micros is not None and selection.cost_micros != response.charged_micros:
             return None
         return selection.model_copy(update={"cost_micros": response.charged_micros})
+
+    def lookup_receipt(self, operation_id: str):
+        if self.lookup_transport is None:
+            return None
+        headers = {"X-EvalRouter-Protocol": GATEWAY_PROTOCOL_VERSION}
+        headers.update({"X-EvalRouter-Workspace": self.workspace_id, "X-EvalRouter-Run": self.run_id,
+                        "X-EvalRouter-Episode": self.episode_id, "X-EvalRouter-Unit": self.unit_id,
+                        "X-EvalRouter-Generation": str(self.generation)})
+        if self.gateway_token:
+            headers["Authorization"] = f"Bearer {self.gateway_token}"
+        scope = {"run_id": self.run_id, "episode_id": self.episode_id,
+                 "workspace_id": self.workspace_id, "unit_id": self.unit_id,
+                 "generation": self.generation}
+        try:
+            raw = self.lookup_transport(self.endpoint, headers, operation_id, scope, 30.0)
+            return (DecisionGatewayResponse.model_validate_json(raw)
+                    if isinstance(raw, (bytes, str)) else DecisionGatewayResponse.model_validate(raw))
+        except Exception:
+            return None
 
     def _call_gateway(self, endpoint, headers, body, timeout):
         request = json.loads(body)
