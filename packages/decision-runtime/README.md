@@ -58,6 +58,31 @@ inference is rejected before submission. A token estimate is not a provider
 spending limit. No currently bundled byte heuristic supplies this verification.
 The transport disables retries and redirects. No paid request is used in tests.
 
+## Trusted inference gateway
+
+`environment_harness_decisions.gateway` provides `EvalRouterGatewaySelector`
+for bounded Jev decisions and `EvalRouterGenerationClient` for generation.
+Their versioned requests bind workspace, run, episode, worker unit, ownership
+generation and operation IDs. The client supplies an explicit maximum charge;
+the trusted gateway verifies pricing, reserves spending and owns provider keys.
+The environment receives a scoped gateway token and authoritative charge receipts.
+Core remains independent of this transport.
+
+Keep each operation ID across dispatch, cancellation, restart and `lookup()`.
+A missing acknowledgement does not authorize another submission. Lookup uses
+the original scope and returns its recorded result. Response identities and
+model names must match; malformed or ambiguous outcomes retain uncertainty.
+The transport sends one attempt and leaves the proven-unsubmitted retry decision
+to `DecisionOperation`. Cancellation can revoke native control while an earlier
+request is still settling.
+
+Generation preserves qualified image content supplied by the environment.
+The request fixes the standard service tier and explicit cache mode and rejects
+tools, cache breakpoints and multiple-output requests. Gateway receipt links
+allow applications to mirror costs without debiting them again. Native admission
+and execution timings survive the legacy receipt projection; an unmeasured
+duration remains unavailable.
+
 ## Migration and compatibility
 
 `MigrationTransaction` supplies consistent SQLite backups, read-only reports,

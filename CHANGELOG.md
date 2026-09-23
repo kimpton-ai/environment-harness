@@ -126,6 +126,9 @@ separately owned decision-selection seam are not claimed by this change.
 - Add the independently versioned `environment-harness-decisions` companion for bounded
   decisions, durable charge and effect recovery, and explicit saved-run migration. Core stays
   provider-neutral.
+- Add scoped gateway decision and generation clients with original-operation lookup, pinned
+  model checks, and authoritative charge receipts. Measured admission and execution timings
+  are preserved through legacy motor receipts.
 
 Typed scenarios now expand into bounded concurrent experiment trials with durable
 status, deterministic seeds and resumable activity feeds. The evidence viewer adds
