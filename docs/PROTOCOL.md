@@ -1,4 +1,10 @@
-# Environment-session v1
+# EnvironmentHarness session and worker protocols
+
+The authenticated session API remains under `/v1`. Its `EnvironmentSpec` selects the
+environment contract version for each session. `environment-session.v1` retains the
+single-call `resolve` behavior below. `environment-session.v2` adds a plan, host-journaled
+operation receipts, and receipt-bound resolution while retaining the same session lifecycle,
+evidence, and storage model.
 
 ## Authority and transport
 
@@ -82,6 +88,39 @@ Checkpoints include the environment, RNG, participants and agent checkpoint data
 The latest committed environment state is the recovery authority. Resume does not roll the outside environment back to an old checkpoint. Pending ambiguous external dispatches must be reconciled before resume or checkpoint. The operations journal persists intent and reservation before dispatch. An environment advertises operation names and versions, supplies their runtime classes, and freezes each selected class's JSON configuration in `ExperimentSpec.operations`. Session creation requires the selected specification to match the runtime class. Runtime classes receive a stable environment/operation key, a maximum cost and a live fenced-authority callback. Receipt settlement is idempotent; unknown outcomes stay blocked if lookup cannot prove what happened.
 
 Budget limits cover operations routed through the journal. A backend must enforce the maximum passed to it. Arbitrary externally managed programs cannot acquire spending authority through this SDK. Reservations for known-unsent operations can be released on cancellation; ambiguous dispatches retain their reservation until settlement.
+
+## Environment-session v2 transition operations
+
+An `EnvironmentSpecV2` identifies the `environment-session.v2` contract. Each selected
+`OperationSpecV2` freezes its name, version, JSON configuration, and access class (`read` or
+`write`). A write operation requires both the frozen run policy and environment capability to
+allow external writes. These declarations are admitted with the package. A transition plan cannot
+choose an endpoint, participant, role, access class, or broader authority.
+
+The environment implements `plan_transition(state, actions, random, events)` and
+`resolve_transition(state, actions, random, events, plan, receipts)`. Planning is pure and returns
+an `OperationPlan` with a stable plan ID, at most 64 typed requests, an opaque JSON continuation,
+and a dependency DAG. The canonical serialized plan is limited to 1 MiB. Each typed provider
+receipt is limited to 128 KiB, and the complete receipt map is limited to 8 MiB. The host validates
+selected operation versions and total reservation against the frozen remaining budget, derives
+stable operation IDs from the session, revision, input hash, plan and request, and persists the
+pre-state/action/event input plus the complete plan before dispatch.
+
+The host resolves each request through the existing `operations` journal. It derives the provider
+endpoint and access class from the admitted operation, uses a fixed `@environment` journal actor, and checks
+the transition revision, input snapshot and current writer lease before dispatch and during a live
+authority callback. Requests execute in dependency order, and settled dependency receipts are
+available to downstream operation providers. Each successful receipt is stored before the
+environment receives an `OperationReceipt` in `resolve_transition`.
+
+A prepared request is safe to dispatch because it is known unsent. An operation left in
+`dispatching` or `unknown` is reconciled by its stable provider ID. If lookup cannot prove a
+receipt, the transition stays blocked with its reservation held. The host never dispatches an
+uncertain operation again. Recovery reuses the persisted plan and receipts, then commits the
+result under the same state snapshot and writer fence. Checkpointing and branching reject
+unresolved operation effects. Session resume accepts only a persisted v2 plan that can be
+reconciled by stable-ID lookup; if lookup cannot prove settlement, the transition stays blocked.
+Legacy ambiguous operations remain blocked until separately reconciled.
 
 Branches copy checkpoint state into a new environment and retain lineage. Parent credentials and artifact references do not grant child access. Branching with pending actions or operations, or inheriting a live-write policy, is rejected. Private suppliers can provide different counterfactual capabilities only under a contract that implements them.
 

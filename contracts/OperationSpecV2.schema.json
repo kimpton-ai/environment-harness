@@ -1,0 +1,39 @@
+{
+  "$id": "urn:environment-harness:v2:OperationSpecV2",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A frozen v2 operation declaration, including its maximum effect class.",
+  "properties": {
+    "access": {
+      "enum": [
+        "read",
+        "write"
+      ],
+      "title": "Access",
+      "type": "string"
+    },
+    "config": {
+      "additionalProperties": true,
+      "title": "Config",
+      "type": "object"
+    },
+    "name": {
+      "pattern": "^[a-zA-Z0-9_.-]{1,160}$",
+      "title": "Name",
+      "type": "string"
+    },
+    "version": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "version",
+    "access"
+  ],
+  "title": "OperationSpecV2",
+  "type": "object"
+}

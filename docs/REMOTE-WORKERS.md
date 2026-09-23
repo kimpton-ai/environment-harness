@@ -1,9 +1,13 @@
 # Remote workers and external agents
 
 `python -m environment_harness.worker_server PLUGIN` runs the serializable native
-environment contract on port 8080. Supply a distinct `ENVIRONMENT_WORKER_TOKEN`
-of at least 32 characters and put the service behind authenticated HTTPS. The
-entrypoint removes this bootstrap variable before loading supplier code.
+environment contract on port 8080. A v1 environment uses
+`environment-worker.v1` at `/v1/worker/call`. An `EnvironmentSpecV2` uses
+`environment-worker.v2` at `/v2/worker/call` and exposes the v2 plan and resolve
+methods. The worker reports its protocol at `/health`. Supply a distinct
+`ENVIRONMENT_WORKER_TOKEN` of at least 32 characters and put the service behind
+authenticated HTTPS. The entrypoint removes this bootstrap variable before
+loading supplier code.
 
 The trusted supervisor constructs `RemoteEnvironment(HTTPWorkerTransport(...),
 expected_spec=admitted_spec)` and passes it to `EnvironmentSession`. Only that
@@ -20,6 +24,15 @@ and from a deadline scanner. It resolves at most one ready phase under the
 normal renewable, fenced writer lease. An incomplete phase stays open unless
 its declared deadline and missing-action policy permit advancement. This loop
 does not execute models or update model weights.
+
+For v2, the worker returns a typed operation plan and later receives the host's
+settled receipts. It has no evidence-store access. The supervisor owns the
+operation implementations, provider endpoints, policy checks, budgets and
+durable journal. Configure `RemoteEnvironment(..., operations=...)` with the
+host-admitted operation implementations when a v2 environment requests them.
+The worker's plan cannot select an endpoint, participant, role, write permission,
+or a different operation version. Existing v1 workers retain their single
+`resolve` method and strict request model.
 
 `adapters.legacy.LegacyEnvironment` wraps a serializable `world-session.v1`
 implementation under a distinct native version. Old manifests, evidence and

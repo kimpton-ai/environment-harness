@@ -1,0 +1,51 @@
+{
+  "$id": "urn:environment-harness:v2:OperationReceipt",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A settled provider receipt bound to its plan request and journal ID.",
+  "properties": {
+    "cost_micros": {
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "title": "Cost Micros",
+      "type": "integer"
+    },
+    "key": {
+      "pattern": "^[A-Za-z0-9_-]{1,128}$",
+      "title": "Key",
+      "type": "string"
+    },
+    "operation": {
+      "pattern": "^[a-zA-Z0-9_.-]{1,160}$",
+      "title": "Operation",
+      "type": "string"
+    },
+    "operation_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Operation Id",
+      "type": "string"
+    },
+    "receipt": {
+      "additionalProperties": true,
+      "title": "Receipt",
+      "type": "object"
+    },
+    "version": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "key",
+    "operation_id",
+    "operation",
+    "version",
+    "receipt",
+    "cost_micros"
+  ],
+  "title": "OperationReceipt",
+  "type": "object"
+}
