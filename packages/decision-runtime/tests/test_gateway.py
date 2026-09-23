@@ -30,12 +30,14 @@ def test_gateway_envelope_uses_durable_id_and_gateway_charge_without_provider_cr
             "protocol_version": "evalrouter.decision.v1",
             "operation_id": "selection-7",
             "status": "completed",
-            "charged_micros": 7,
+            "charged_micros": 4,
             "result": _response(),
         }
 
     selector = EvalRouterGatewaySelector(
         endpoint="https://gateway.example.test/v1/decisions",
+        run_id="run-1",
+        episode_id="episode-1",
         gateway_token="gateway-secret",
         transport=transport,
         token_bound=lambda body: 100,
@@ -51,7 +53,7 @@ def test_gateway_envelope_uses_durable_id_and_gateway_charge_without_provider_cr
         deadline=time.monotonic() + 2,
     )
 
-    assert result.cost_micros == 7
+    assert result.cost_micros == 4
     assert result.versions["provider"] == "evalrouter"
     assert calls[0][1]["Authorization"] == "Bearer gateway-secret"
     envelope = DecisionGatewayRequest.model_validate(calls[0][2])
@@ -94,6 +96,8 @@ def test_gateway_does_not_retry_and_preserves_explicit_pre_submit_classification
 
     selector = EvalRouterGatewaySelector(
         endpoint="https://gateway.example.test/v1/decisions",
+        run_id="run-1",
+        episode_id="episode-1",
         transport=transport,
         token_bound=lambda body: 100,
         token_bound_source="fixture-tokenizer.v1",

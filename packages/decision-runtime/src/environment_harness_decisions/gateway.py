@@ -7,17 +7,19 @@ interpretation to :mod:`jev`; it never retries a gateway request.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import os
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Mapping, Protocol
+from typing import Any, Literal, Mapping, Protocol
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .contracts import ProviderFailure, Selection
+from .contracts import ProviderFailure
 from .jev import DEFAULT_MODEL, JevDecisionSelector, JevProviderFailure
 
 GATEWAY_PROTOCOL_VERSION = "evalrouter.decision.v1"
@@ -32,7 +34,7 @@ class QualifiedImageInput(BaseModel):
     """A bounded, content-addressed image reference accepted by the gateway."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
-    uri: str = Field(min_length=1, max_length=2048)
+    uri: str = Field(min_length=1, max_length=22_400_000)
     media_type: str = Field(pattern=r"^image/[a-z0-9.+-]+$")
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     byte_size: int = Field(ge=1, le=16 * 1024 * 1024, strict=True)
@@ -45,15 +47,43 @@ class QualifiedImageInput(BaseModel):
             raise ValueError("image uri must use https or data")
         if parsed.scheme == "https" and not parsed.netloc:
             raise ValueError("https image uri requires a host")
+        if parsed.scheme == "https" and (parsed.username or parsed.password):
+            raise ValueError("image uri cannot contain credentials")
+        if parsed.scheme == "data":
+            try:
+                header, encoded = value.split(",", 1)
+                if ";base64" not in header:
+                    raise ValueError
+                decoded = base64.b64decode(encoded, validate=True)
+            except Exception as exc:
+                raise ValueError("data image uri must contain valid base64") from exc
+            if len(decoded) > 16 * 1024 * 1024:
+                raise ValueError("image exceeds maximum size")
         return value
+
+    @field_validator("sha256")
+    @classmethod
+    def lowercase_hash(cls, value: str) -> str:
+        return value.lower()
+
+    @model_validator(mode="after")
+    def qualify_content(self):
+        if self.uri.startswith("data:"):
+            content = base64.b64decode(self.uri.split(",", 1)[1], validate=True)
+            if len(content) != self.byte_size or hashlib.sha256(content).hexdigest() != self.sha256:
+                raise ValueError("data image uri does not match byte_size or sha256")
+        return self
 
 
 class DecisionGatewayRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    protocol_version: str = GATEWAY_PROTOCOL_VERSION
+    protocol_version: Literal["evalrouter.decision.v1"] = GATEWAY_PROTOCOL_VERSION
+    run_id: str = Field(min_length=1, max_length=256)
+    episode_id: str = Field(min_length=1, max_length=256)
     operation_id: str = Field(min_length=1, max_length=256)
     model: str = DEFAULT_MODEL
     maximum_charge_micros: int = Field(ge=0, strict=True)
+    pricing: Literal["gateway_authoritative"] = "gateway_authoritative"
     request: dict[str, Any]
     images: tuple[QualifiedImageInput, ...] = ()
 
@@ -68,12 +98,84 @@ class GatewayError(BaseModel):
 
 class DecisionGatewayResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    protocol_version: str = GATEWAY_PROTOCOL_VERSION
+    protocol_version: Literal["evalrouter.decision.v1"] = GATEWAY_PROTOCOL_VERSION
     operation_id: str = Field(min_length=1)
     status: str
     result: dict[str, Any] | None = None
     charged_micros: int | None = Field(default=None, ge=0, strict=True)
     error: GatewayError | None = None
+
+
+class GenerationGatewayRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    protocol_version: Literal["evalrouter.generation.v1"] = "evalrouter.generation.v1"
+    run_id: str = Field(min_length=1, max_length=256)
+    episode_id: str = Field(min_length=1, max_length=256)
+    operation_id: str = Field(min_length=1, max_length=256)
+    model: str = Field(min_length=1, max_length=128)
+    maximum_charge_micros: int = Field(ge=0, strict=True)
+    pricing: Literal["gateway_authoritative"] = "gateway_authoritative"
+    request: dict[str, Any]
+
+
+class GenerationGatewayResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    protocol_version: Literal["evalrouter.generation.v1"] = "evalrouter.generation.v1"
+    operation_id: str = Field(min_length=1)
+    status: Literal["completed", "rejected", "uncertain"]
+    result: dict[str, Any] | None = None
+    charged_micros: int | None = Field(default=None, ge=0, strict=True)
+    error: GatewayError | None = None
+
+
+class EvalRouterGenerationClient:
+    """Stateless generation callable for planners using chat messages.
+
+    The request is submitted once.  Provider keys and billing stay at
+    EvalRouter; an ambiguous response is deliberately surfaced as a failure.
+    """
+
+    def __init__(self, *, endpoint: str, run_id: str, episode_id: str, model: str,
+                 transport: GatewayTransport | None = None, gateway_token: str | None = None):
+        parsed = urlsplit(endpoint)
+        if parsed.scheme != "https" or not parsed.netloc or parsed.query or parsed.fragment:
+            raise ValueError("gateway endpoint must be HTTPS without query or fragment")
+        self.endpoint, self.run_id, self.episode_id, self.model = endpoint, run_id, episode_id, model
+        self.transport = transport or EvalRouterGatewaySelector._httpx_transport
+        self.gateway_token = gateway_token if gateway_token is not None else os.environ.get("EVALROUTER_TOKEN")
+
+    def __call__(self, request: Mapping[str, Any], *, operation_id: str,
+                 maximum_charge_micros: int, cancel: threading.Event | None = None,
+                 deadline: float | None = None) -> str:
+        if cancel is not None and cancel.is_set():
+            raise ProviderFailure("cancelled before gateway submission", submitted=False, uncharged=True)
+        envelope = GenerationGatewayRequest(
+            run_id=self.run_id, episode_id=self.episode_id, operation_id=operation_id,
+            model=self.model, maximum_charge_micros=maximum_charge_micros,
+            request=dict(request),
+        )
+        headers = {"Content-Type": "application/json", "X-EvalRouter-Protocol": "evalrouter.generation.v1"}
+        if self.gateway_token:
+            headers["Authorization"] = f"Bearer {self.gateway_token}"
+        raw = self.transport(self.endpoint, headers, envelope.model_dump_json().encode(),
+                             max(0.001, (deadline - time.monotonic()) if deadline else 30.0))
+        try:
+            response = GenerationGatewayResponse.model_validate_json(raw) if isinstance(raw, (bytes, str)) else GenerationGatewayResponse.model_validate(raw)
+        except Exception as exc:
+            raise ProviderFailure("gateway generation response was not valid", submitted=True, uncharged=False) from exc
+        if response.protocol_version != "evalrouter.generation.v1" or response.operation_id != operation_id:
+            raise ProviderFailure("gateway generation response identity mismatch", submitted=True, uncharged=False)
+        if response.charged_micros is None or response.charged_micros > maximum_charge_micros:
+            raise ProviderFailure("gateway generation charge exceeded bound", submitted=True, uncharged=False)
+        if response.status != "completed" or not response.result:
+            error = response.error
+            raise JevProviderFailure(error.message if error else "gateway generation failed",
+                                     submitted=True if error is None else error.submitted,
+                                     uncharged=False if error is None else not error.charged)
+        content = response.result.get("content")
+        if not isinstance(content, str):
+            raise ProviderFailure("gateway generation omitted content", submitted=True, uncharged=False)
+        return content
 
 
 @dataclass(frozen=True)
@@ -106,6 +208,8 @@ class EvalRouterGatewaySelector:
         self,
         *,
         endpoint: str,
+        run_id: str,
+        episode_id: str,
         gateway_token: str | None = None,
         transport: GatewayTransport | None = None,
         token_bound,
@@ -119,6 +223,7 @@ class EvalRouterGatewaySelector:
         if not token_bound_source:
             raise ValueError("token_bound_source is required")
         self.endpoint = endpoint
+        self.run_id, self.episode_id = run_id, episode_id
         self.gateway_token = gateway_token if gateway_token is not None else os.environ.get("EVALROUTER_TOKEN")
         self.transport = transport or self._httpx_transport
         self.images = tuple(images)
@@ -133,6 +238,7 @@ class EvalRouterGatewaySelector:
             max_input_bytes=max_input_bytes,
         )
         self._jev.gateway_images = self.images
+        self._local = threading.local()
 
     def model_input(self, observation, decisions):
         return self._jev.model_input(observation, decisions)
@@ -143,17 +249,17 @@ class EvalRouterGatewaySelector:
         return self._jev.maximum_charge_micros(objective, observation, decisions)
 
     def select(self, selection_id, objective, observation, decisions, *, cancel, deadline):
-        self._operation_id = selection_id
-        self._charged_micros = None
+        self._local.operation_id = selection_id
+        self._local.charged_micros = None
         result = self._jev.select(
             selection_id, objective, observation, decisions, cancel=cancel, deadline=deadline
         )
         if result.abstention:
             return result.model_copy(update={"versions": {**result.versions, **self.evidence.as_dict()}})
-        if self._charged_micros is None:
+        if self._local.charged_micros is None:
             raise ProviderFailure("gateway response omitted authoritative charge", submitted=True, uncharged=False)
         return result.model_copy(
-            update={"cost_micros": self._charged_micros, "versions": {**result.versions, **self.evidence.as_dict()}}
+            update={"cost_micros": self._local.charged_micros, "versions": {**result.versions, **self.evidence.as_dict()}}
         )
 
     def lookup(self, attempt_id):
@@ -162,9 +268,11 @@ class EvalRouterGatewaySelector:
     def _call_gateway(self, endpoint, headers, body, timeout):
         request = json.loads(body)
         envelope = DecisionGatewayRequest(
-            operation_id=self._operation_id,
+            operation_id=self._local.operation_id,
+            run_id=self.run_id,
+            episode_id=self.episode_id,
             model=self.model,
-            maximum_charge_micros=self._maximum_charge_micros,
+            maximum_charge_micros=self._local.maximum_charge_micros,
             request=request,
             images=self.images,
         )
@@ -176,9 +284,11 @@ class EvalRouterGatewaySelector:
             response = DecisionGatewayResponse.model_validate_json(raw) if isinstance(raw, (bytes, str)) else DecisionGatewayResponse.model_validate(raw)
         except Exception as exc:
             raise ProviderFailure("gateway response was not valid", submitted=True, uncharged=False) from exc
-        if response.protocol_version != GATEWAY_PROTOCOL_VERSION or response.operation_id != self._operation_id:
+        if response.protocol_version != GATEWAY_PROTOCOL_VERSION or response.operation_id != self._local.operation_id:
             raise ProviderFailure("gateway response identity mismatch", submitted=True, uncharged=False)
-        self._charged_micros = response.charged_micros
+        self._local.charged_micros = response.charged_micros
+        if response.charged_micros is not None and response.charged_micros > self._local.maximum_charge_micros:
+            raise ProviderFailure("gateway charge exceeded reserved bound", submitted=True, uncharged=False)
         if response.status != "completed" or response.result is None:
             error = response.error
             submitted = True if error is None else error.submitted
@@ -213,5 +323,5 @@ class _GatewayJev(JevDecisionSelector):
         return getattr(self, "gateway_images", ())
 
     def select(self, selection_id, objective, observation, decisions, *, cancel, deadline):
-        self.owner._maximum_charge_micros = self.maximum_charge_micros(objective, observation, decisions)
+        self.owner._local.maximum_charge_micros = self.maximum_charge_micros(objective, observation, decisions)
         return super().select(selection_id, objective, observation, decisions, cancel=cancel, deadline=deadline)
