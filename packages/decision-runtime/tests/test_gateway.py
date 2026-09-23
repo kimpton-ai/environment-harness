@@ -40,6 +40,9 @@ def test_gateway_envelope_uses_durable_id_and_gateway_charge_without_provider_cr
         endpoint="https://gateway.example.test/v1/decisions",
         run_id="run-1",
         episode_id="episode-1",
+        workspace_id="workspace-1",
+        unit_id="unit-1",
+        generation=1,
         gateway_token="gateway-secret",
         transport=transport,
         token_bound=lambda body: 100,
@@ -107,6 +110,9 @@ def test_gateway_does_not_retry_and_preserves_explicit_pre_submit_classification
         endpoint="https://gateway.example.test/v1/decisions",
         run_id="run-1",
         episode_id="episode-1",
+        workspace_id="workspace-1",
+        unit_id="unit-1",
+        generation=1,
         transport=transport,
         token_bound=lambda body: 100,
         token_bound_source="fixture-tokenizer.v1",
@@ -127,17 +133,18 @@ def test_gateway_does_not_retry_and_preserves_explicit_pre_submit_classification
 def test_lookup_returns_only_completed_identity_bound_selection():
     selection = Selection(model="jev-1.13.0", cost_micros=4)
 
-    def lookup(endpoint, headers, operation_id, timeout):
+    def lookup(endpoint, headers, operation_id, scope, timeout):
         return {"protocol_version": "evalrouter.decision.v1", "operation_id": operation_id,
                 "status": "completed", "charged_micros": 4, "result": selection.model_dump(mode="json")}
 
     selector = EvalRouterGatewaySelector(endpoint="https://gateway.example.test/v1/decisions",
                                          run_id="run-1", episode_id="episode-1",
+                                         workspace_id="workspace-1", unit_id="unit-1", generation=1,
                                          transport=lambda *_: {}, lookup_transport=lookup,
                                          token_bound=lambda body: 100, token_bound_source="fixture")
     assert selector.lookup("selection-9").cost_micros == 4
 
-    def uncertain(endpoint, headers, operation_id, timeout):
+    def uncertain(endpoint, headers, operation_id, scope, timeout):
         return {"protocol_version": "evalrouter.decision.v1", "operation_id": operation_id,
                 "status": "uncertain", "charged_micros": None}
     selector.lookup_transport = uncertain
@@ -152,6 +159,7 @@ def test_generation_client_binds_output_bound_and_lookup():
                 "status": "completed", "charged_micros": 3, "result": {"content": "{}"}}
     client = EvalRouterGenerationClient(endpoint="https://gateway.example.test/v1/generate",
                                         run_id="run-1", episode_id="episode-1", model="astra-v1",
+                                        workspace_id="workspace-1", unit_id="unit-1", generation=1,
                                         transport=transport, max_output_tokens=128)
     assert client({"messages": []}, operation_id="gen-1", maximum_charge_micros=5) == "{}"
     assert calls[0]["request"]["max_output_tokens"] == 128
