@@ -16,6 +16,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Literal, Mapping, Protocol
 from urllib.parse import urlsplit
+from urllib.parse import quote
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -164,7 +165,7 @@ class EvalRouterGenerationClient:
         self.endpoint, self.run_id, self.episode_id, self.model = endpoint, run_id, episode_id, model
         self.workspace_id, self.unit_id, self.generation = workspace_id, unit_id, generation
         self.transport = transport or EvalRouterGatewaySelector._httpx_transport
-        self.lookup_transport = lookup_transport
+        self.lookup_transport = lookup_transport or self._httpx_lookup_transport
         if max_output_tokens < 1 or max_output_tokens > 131072:
             raise ValueError("max_output_tokens must be between 1 and 131072")
         self.max_output_tokens = max_output_tokens
@@ -238,6 +239,17 @@ class EvalRouterGenerationClient:
             return None
         return response
 
+    @staticmethod
+    def _httpx_lookup_transport(endpoint, headers, operation_id, scope, timeout):
+        import httpx
+
+        url = endpoint.rstrip("/") + "/" + quote(operation_id, safe="")
+        response = httpx.get(url, headers=headers, params=scope, timeout=timeout)
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return response.content
+
 
 @dataclass(frozen=True)
 class GatewayEvidence:
@@ -292,7 +304,7 @@ class EvalRouterGatewaySelector:
         self.workspace_id, self.unit_id, self.generation = workspace_id, unit_id, generation
         self.gateway_token = gateway_token if gateway_token is not None else os.environ.get("EVALROUTER_TOKEN")
         self.transport = transport or self._httpx_transport
-        self.lookup_transport = lookup_transport
+        self.lookup_transport = lookup_transport or self._httpx_lookup_transport
         self.images = tuple(images)
         self.evidence = GatewayEvidence(endpoint=endpoint)
         self._jev = _GatewayJev(
@@ -400,6 +412,17 @@ class EvalRouterGatewaySelector:
         import httpx
 
         response = httpx.post(endpoint, headers=headers, content=body, timeout=timeout)
+        response.raise_for_status()
+        return response.content
+
+    @staticmethod
+    def _httpx_lookup_transport(endpoint, headers, operation_id, scope, timeout):
+        import httpx
+
+        url = endpoint.rstrip("/") + "/" + quote(operation_id, safe="")
+        response = httpx.get(url, headers=headers, params=scope, timeout=timeout)
+        if response.status_code == 404:
+            return None
         response.raise_for_status()
         return response.content
 
