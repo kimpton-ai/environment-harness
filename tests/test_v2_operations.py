@@ -116,11 +116,11 @@ class V2Environment:
 
 def test_operation_plan_rejects_bad_dependencies_and_extra_authority_fields():
     first = OperationRequest(key="first", operation="world.sample", version="1")
-    second = OperationRequest(
-        key="second", operation="world.sample", version="1", depends_on=("first",)
-    )
+    second = OperationRequest(key="second", operation="world.sample", version="1", depends_on=("first",))
     with pytest.raises(ValidationError, match="acyclic"):
-        OperationPlan(plan_id="loop", operations=(first.model_copy(update={"depends_on": ("second",)}), second))
+        OperationPlan(
+            plan_id="loop", operations=(first.model_copy(update={"depends_on": ("second",)}), second)
+        )
     with pytest.raises(ValidationError, match="dependency"):
         OperationPlan(plan_id="missing", operations=(second,))
     with pytest.raises(ValidationError):
@@ -198,14 +198,16 @@ def test_v2_operation_access_is_frozen_and_unselected_plan_cannot_dispatch(tmp_p
         session.resolve(environment, researcher, lease)
     assert provider.calls == []
     with store.transaction() as db:
-        assert db.execute(
-            "SELECT count(*) FROM operations WHERE environment=?", (environment,)
-        ).fetchone()[0] == 0
+        assert (
+            db.execute("SELECT count(*) FROM operations WHERE environment=?", (environment,)).fetchone()[0]
+            == 0
+        )
 
 
 def test_v2_runtime_journals_plan_and_reconciles_unknown_without_redispatch(tmp_path):
     provider = SampleOperation(lose_first_response=True)
     implementation = V2Environment(provider)
+    implementation.spec = implementation.spec.model_copy(update={"phase_deadline": "coordinator"})
     store = EvidenceStore(tmp_path)
     session = EnvironmentSession(store, implementation)
     researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
@@ -238,11 +240,26 @@ def test_v2_runtime_journals_plan_and_reconciles_unknown_without_redispatch(tmp_
         ),
     )
     lease = session.lease(environment, researcher, "v2-worker")
+    session.close_phase(environment, researcher, lease, revision=0)
 
     with pytest.raises(TimeoutError, match="lost"):
         session.resolve(environment, researcher, lease)
     with pytest.raises(Conflict, match="pending reconciliation"):
         session.memory(environment, agent, {"changed": True})
+    with pytest.raises(Conflict, match="pending reconciliation"):
+        session.close_phase(environment, researcher, lease, revision=0)
+    with pytest.raises(Conflict, match="pending reconciliation"):
+        session.external_event(
+            environment,
+            researcher,
+            lease,
+            source="synthetic-feed",
+            cursor=1,
+            event_time=1.0,
+            payload={"value": 1},
+        )
+    with pytest.raises(Conflict, match="pending reconciliation"):
+        session.transfer(environment, researcher, lease, "alice", "replacement-controller")
     assert session.control(environment, researcher, lease, "pause")["status"] == "paused"
     assert session.resume(environment, researcher, lease)["status"] == "running"
 
@@ -276,6 +293,21 @@ def test_v2_runtime_journals_plan_and_reconciles_unknown_without_redispatch(tmp_
         assert {row["participant"] for row in operation_rows} == {"@environment"}
         assert {row["generation"] for row in operation_rows} == {0}
         stable_ids = persisted["operation_ids"].copy()
+        action_record = persisted["input"]["action_records"][0]
+        action_row = db.execute(
+            "SELECT request FROM actions WHERE environment=? AND id=?",
+            (environment, action_record["id"]),
+        ).fetchone()
+        db.execute(
+            "UPDATE actions SET request=? WHERE environment=? AND id=?",
+            (json.dumps({"payload": {"tampered": True}}), environment, action_record["id"]),
+        )
+        with pytest.raises(Conflict, match="actions changed after planning"):
+            session._assert_v2_action_records(db, environment, 0, persisted["input"]["action_records"])
+        db.execute(
+            "UPDATE actions SET request=? WHERE environment=? AND id=?",
+            (action_row["request"], environment, action_record["id"]),
+        )
 
     resolved = session.resolve(environment, researcher, lease)
     assert resolved["revision"] == 1
@@ -296,6 +328,9 @@ def test_v2_runtime_journals_plan_and_reconciles_unknown_without_redispatch(tmp_
             "cost_micros": 3,
         }
     )
+    first_close = session.close_phase(environment, researcher, lease, revision=1)
+    second_close = session.close_phase(environment, researcher, lease, revision=1)
+    assert first_close == second_close == {"revision": 1, "closed": True}
 
 
 def test_v2_plan_reserves_all_requests_atomically_within_the_frozen_budget(tmp_path):
@@ -337,19 +372,27 @@ def test_v2_plan_reserves_all_requests_atomically_within_the_frozen_budget(tmp_p
     assert provider.calls == []
     assert session.get(environment, researcher)["reserved_micros"] == 0
     with store.transaction() as db:
-        assert db.execute("SELECT count(*) FROM operations WHERE environment=?", (environment,)).fetchone()[0] == 0
+        assert (
+            db.execute("SELECT count(*) FROM operations WHERE environment=?", (environment,)).fetchone()[0]
+            == 0
+        )
 
 
 def test_v2_remote_worker_path_round_trips_typed_plans_and_receipts():
     implementation = V2Environment(SampleOperation())
     app = create_worker_app(implementation, TOKEN)
     client = TestClient(app)
-    assert client.get("/health", headers={"Authorization": "Bearer " + TOKEN}).json()["protocol"] == PROTOCOL_V2
-    assert client.post(
-        "/v1/worker/call",
-        json={"protocol": "environment-worker.v1", "id": "a" * 32, "method": "spec", "arguments": {}},
-        headers={"Authorization": "Bearer " + TOKEN},
-    ).status_code == 404
+    assert (
+        client.get("/health", headers={"Authorization": "Bearer " + TOKEN}).json()["protocol"] == PROTOCOL_V2
+    )
+    assert (
+        client.post(
+            "/v1/worker/call",
+            json={"protocol": "environment-worker.v1", "id": "a" * 32, "method": "spec", "arguments": {}},
+            headers={"Authorization": "Bearer " + TOKEN},
+        ).status_code
+        == 404
+    )
 
     def send(body):
         response = client.post(
@@ -411,9 +454,7 @@ def test_v2_session_uses_existing_authenticated_api_routes(tmp_path):
         tenant="tenant", subject="alice", role="agent", environment=environment, participant="alice"
     )
     agent_headers = {"Authorization": "Bearer " + store.issue(agent)}
-    observation = client.get(
-        f"/v1/environments/{environment}/observation", headers=agent_headers
-    ).json()
+    observation = client.get(f"/v1/environments/{environment}/observation", headers=agent_headers).json()
     action = client.post(
         f"/v1/environments/{environment}/actions",
         json={
