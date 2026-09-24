@@ -649,7 +649,16 @@ class Operations:
                 raise Conflict("provider start checkpoint differs from the prepared interval")
             start_reference = existing["start_checkpoint"]
         else:
-            start_reference = self._publish_checkpoint(session, environment, who, start_checkpoint)
+            start_reference = session.committed_control_checkpoint_for_start(
+                environment,
+                who,
+                runtime_identity=intent.runtime_identity,
+                checkpoint=start_checkpoint,
+            )
+            if start_reference is None:
+                start_reference = self._publish_checkpoint(
+                    session, environment, who, start_checkpoint
+                )
         interval = session.prepare_control_interval(
             environment,
             who,

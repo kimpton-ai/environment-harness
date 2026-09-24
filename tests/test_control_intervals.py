@@ -36,14 +36,16 @@ class IntervalStepOperation(StepOperation):
         self.effect_calls = 0
         self.saved_receipt = None
         self.corrupt_control_log_digest = corrupt_control_log_digest
+        self.start_checkpoint = b"start checkpoint v1"
+        self.runtime_identity = {"engine": "fixture", "version": "1", "profile": "cpu"}
 
     def control_interval_intent(self, operation_id, request, *, context):
         assert operation_id == context.operation_id
         assert context.journal_operation_id == self.saved["operation_id"]
         assert context.participant == "robot"
         return ControlIntervalIntent(
-            runtime_identity={"engine": "fixture", "version": "1", "profile": "cpu"},
-            start_checkpoint=b"start checkpoint v1",
+            runtime_identity=self.runtime_identity,
+            start_checkpoint=self.start_checkpoint,
             simulated_seconds=0.25,
             controller="controller-1",
         )
@@ -218,6 +220,156 @@ def finish(saved, receipt_holder, *, lose_response=False, replace_worker=False):
         session, environment, researcher, lease, saved["operation_id"], provider=saved["provider"]
     )
     return receipt
+
+
+def commit_timed_out_interval(saved, provider):
+    journal = Operations(saved["store"])
+    with pytest.raises(TimeoutError, match="response was lost"):
+        journal.dispatch(
+            saved["session"],
+            saved["environment"],
+            saved["researcher"],
+            saved["lease"],
+            saved["operation_id"],
+            provider=provider,
+        )
+    receipt = journal.reconcile(
+        saved["environment"],
+        saved["researcher"],
+        saved["operation_id"],
+        provider,
+        session=saved["session"],
+        lease=saved["lease"],
+    )
+    interval = saved["session"].control_interval_for_operation(
+        saved["environment"], saved["researcher"], saved["operation_id"]
+    )
+    return receipt, interval
+
+
+def prepare_next_interval(saved, provider, operation_id):
+    saved["operation_id"] = operation_id
+    Operations(saved["store"]).prepare(
+        saved["environment"],
+        saved["controller"],
+        operation_id,
+        endpoint=provider.endpoint,
+        operation=provider.spec.name,
+        payload={"command": operation_id},
+    )
+
+
+def test_sequential_intervals_reuse_committed_checkpoint_after_pause_resume(tmp_path):
+    saved = setup(tmp_path, operation_run=lambda *_: None)
+    provider = IntervalStepOperation(saved)
+    saved["session"].environment.operations[provider.spec.name] = provider
+    _, first = commit_timed_out_interval(saved, provider)
+    assert first["status"] == "committed"
+
+    assert saved["session"].control(
+        saved["environment"], saved["researcher"], saved["lease"], "pause"
+    )["status"] == "paused"
+    assert saved["session"].resume(
+        saved["environment"], saved["researcher"], saved["lease"]
+    )["status"] == "running"
+
+    with saved["store"].transaction() as db:
+        artifact_count = db.execute(
+            "SELECT count(*) FROM artifacts WHERE environment=?", (saved["environment"],)
+        ).fetchone()[0]
+    provider.start_checkpoint = b"end checkpoint v1"
+    prepare_next_interval(saved, provider, "step-operation-2")
+    journal = Operations(saved["store"])
+    with pytest.raises(TimeoutError, match="response was lost"):
+        journal.dispatch(
+            saved["session"],
+            saved["environment"],
+            saved["researcher"],
+            saved["lease"],
+            saved["operation_id"],
+            provider=provider,
+        )
+    second = saved["session"].control_interval_for_operation(
+        saved["environment"], saved["researcher"], saved["operation_id"]
+    )
+    assert second["start_checkpoint"] == first["end_checkpoint"]
+    with saved["store"].transaction() as db:
+        assert db.execute(
+            "SELECT count(*) FROM artifacts WHERE environment=?", (saved["environment"],)
+        ).fetchone()[0] == artifact_count
+
+    journal.reconcile(
+        saved["environment"],
+        saved["researcher"],
+        saved["operation_id"],
+        provider,
+        session=saved["session"],
+        lease=saved["lease"],
+    )
+    second = saved["session"].control_interval_for_operation(
+        saved["environment"], saved["researcher"], saved["operation_id"]
+    )
+    assert second["status"] == "committed"
+    assert second["start_checkpoint"] == first["end_checkpoint"]
+    assert provider.effect_calls == 2
+
+
+@pytest.mark.parametrize(
+    ("start_checkpoint", "runtime_identity", "message"),
+    [
+        (
+            b"end checkpoint v1",
+            {"engine": "fixture", "version": "2", "profile": "cpu"},
+            "runtime identity differs",
+        ),
+        (
+            b"different committed checkpoint",
+            {"engine": "fixture", "version": "1", "profile": "cpu"},
+            "differs from the last committed checkpoint",
+        ),
+    ],
+)
+def test_next_interval_rejects_checkpoint_or_runtime_mismatch(
+    tmp_path, start_checkpoint, runtime_identity, message
+):
+    saved = setup(tmp_path, operation_run=lambda *_: None)
+    provider = IntervalStepOperation(saved)
+    saved["session"].environment.operations[provider.spec.name] = provider
+    _, first = commit_timed_out_interval(saved, provider)
+    assert first["status"] == "committed"
+
+    provider.start_checkpoint = start_checkpoint
+    provider.runtime_identity = runtime_identity
+    prepare_next_interval(saved, provider, "step-operation-2")
+    with saved["store"].transaction() as db:
+        artifact_count = db.execute(
+            "SELECT count(*) FROM artifacts WHERE environment=?", (saved["environment"],)
+        ).fetchone()[0]
+    with pytest.raises(Conflict, match=message):
+        Operations(saved["store"]).dispatch(
+            saved["session"],
+            saved["environment"],
+            saved["researcher"],
+            saved["lease"],
+            saved["operation_id"],
+            provider=provider,
+        )
+    assert provider.effect_calls == 1
+    with saved["store"].transaction() as db:
+        status = db.execute(
+            "SELECT status FROM operations WHERE environment=? AND id=?",
+            (saved["environment"], saved["operation_id"]),
+        ).fetchone()[0]
+        intervals = db.execute(
+            "SELECT count(*) FROM control_intervals WHERE environment=?",
+            (saved["environment"],),
+        ).fetchone()[0]
+    assert status == "prepared"
+    assert intervals == 1
+    with saved["store"].transaction() as db:
+        assert db.execute(
+            "SELECT count(*) FROM artifacts WHERE environment=?", (saved["environment"],)
+        ).fetchone()[0] == artifact_count
 
 
 def test_interval_inputs_are_fenced_durable_and_receipt_recovery_does_not_reexecute(tmp_path):

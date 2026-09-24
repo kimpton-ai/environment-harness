@@ -150,6 +150,43 @@ class ControlIntervals:
             ).fetchone()
             return self._interval_receipt(saved)
 
+    def committed_control_checkpoint_for_start(
+        self, environment, who, *, runtime_identity, checkpoint
+    ):
+        """Resolve provider checkpoint bytes to the last committed artifact reference.
+
+        Providers return checkpoint bytes for each interval. Artifact IDs are
+        intentionally opaque and change when bytes are re-published, so the
+        next interval must reuse the committed reference after validating its
+        runtime profile, environment scope, audience, size, and content.
+        """
+        if not isinstance(checkpoint, bytes):
+            return None
+        runtime, runtime_hash = self._runtime_identity(runtime_identity)
+        checkpoint_hash = hashlib.sha256(checkpoint).hexdigest()
+        with self.store.transaction() as db:
+            self.store.environment(db, environment, who, ("researcher", "worker"))
+            previous = db.execute(
+                "SELECT status,end_checkpoint,runtime_identity,runtime_identity_hash "
+                "FROM control_intervals WHERE environment=? ORDER BY sequence DESC LIMIT 1",
+                (environment,),
+            ).fetchone()
+            if previous is None:
+                return None
+            if previous["status"] != "committed":
+                raise Conflict("previous control interval requires reconciliation")
+            saved_runtime = json.loads(previous["runtime_identity"])
+            if previous["runtime_identity_hash"] != runtime_hash or saved_runtime != runtime:
+                raise Conflict("control interval runtime identity differs from the last committed checkpoint")
+            reference = json.loads(previous["end_checkpoint"])
+            if checkpoint_hash != reference.get("sha256"):
+                raise Conflict("provider start checkpoint differs from the last committed checkpoint")
+            self._checkpoint_reference_in(db, environment, who, reference)
+            content = self.store._read_artifact(environment, reference["artifact_id"])
+            if content != checkpoint:
+                raise Conflict("provider start checkpoint content differs from the committed artifact")
+            return {"artifact_id": reference["artifact_id"], "sha256": reference["sha256"]}
+
     def grant_control(
         self,
         environment,
