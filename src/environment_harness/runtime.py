@@ -741,7 +741,9 @@ class EnvironmentSession(ControlIntervals):
                     self, environment, who, lease, operation_id, provider=provider
                 )
             elif record["status"] in ("dispatching", "unknown"):
-                provider_receipt = journal.reconcile(environment, who, operation_id, provider)
+                provider_receipt = journal.reconcile(
+                    environment, who, operation_id, provider, session=self, lease=lease
+                )
             else:
                 raise Conflict("environment operation is not safely dispatchable")
             self.commit_control_interval_for_operation(

@@ -157,6 +157,30 @@ or create a physics-specific branch; the environment runtime must restore that a
 separately identified branch. A prepared operation remains known-unsent and can continue only
 through the existing operation journal.
 
+An `EnvironmentOperation` can opt in by returning a `ControlIntervalIntent` from
+`control_interval_intent`. The provider supplies its runtime identity, starting checkpoint, bounded
+duration and controller name. Harness publishes checkpoint bytes as private artifacts, derives the
+participant from the persisted operation authority, journals the complete operation envelope
+(`operation`, frozen provider `version`, and `payload`) as one accepted batch, then passes a
+`ControlIntervalExecutionContext` to `execute_control_interval`. The context
+contains the original acknowledgement, verified starting checkpoint bytes, frozen
+`max_checkpoint_bytes`, and Harness-computed `control_log_digest`; the provider must use that digest
+in its receipt. Harness rejects a missing or mismatched receipt digest before sealing.
+`RunPolicy.max_checkpoint_bytes` defaults to 64 MiB and is distinct from the smaller
+ordinary artifact limit. Providers can also enforce a smaller scene-specific export limit. Every
+checkpoint payload must be a complete data-only bundle, including every referenced dependency.
+`control_interval_result` extracts the ending checkpoint bundle and factual measurements from that
+receipt. Harness seals the interval before settling the exact receipt, then commits it before
+returning. Providers without this opt-in keep the existing operation path.
+
+If dispatch becomes uncertain, reconciliation uses the provider's stable-ID lookup and the same
+result extractor. A missing lookup receipt blocks advancement. Harness never repeats provider
+execution. `read_committed_control_intervals` returns committed intervals in sequence order to
+researcher or scorer authority, rechecks private checkpoint content hashes, verifies the event chain,
+and links each interval commit event to its transition input and committed state hash when available.
+An interval can be committed while its enclosing transition is still pending; in that case the
+transition pointer is marked `pending`.
+
 Branches copy checkpoint state into a new environment and retain lineage. Parent credentials and artifact references do not grant child access. Branching with pending actions or operations, or inheriting a live-write policy, is rejected. Private suppliers can provide different counterfactual capabilities only under a contract that implements them.
 
 ## Evidence and limitations

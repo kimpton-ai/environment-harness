@@ -538,6 +538,199 @@ class ControlIntervals:
             environment, who, lease, interval_id=interval["id"], operation_receipt=receipt
         )
 
+    def control_interval_for_operation(self, environment, who, operation_id):
+        """Return the private interval already bound to an operation, if one exists."""
+        self._validate_identifier(operation_id, "operation")
+        with self.store.transaction() as db:
+            self.store.environment(db, environment, who, ("researcher", "worker"))
+            interval = db.execute(
+                "SELECT * FROM control_intervals WHERE environment=? AND operation_id=?",
+                (environment, operation_id),
+            ).fetchone()
+            if interval is None:
+                return None
+            self._checkpoint_reference_in(db, environment, who, json.loads(interval["start_checkpoint"]))
+            if interval["end_checkpoint"]:
+                self._checkpoint_reference_in(db, environment, who, json.loads(interval["end_checkpoint"]))
+            return self._interval_receipt(interval)
+
+    def control_input_digest(self, environment, who, interval_id):
+        """Return the canonical digest of accepted input batches for one interval."""
+        self._validate_identifier(interval_id, "interval")
+        with self.store.transaction() as db:
+            self.store.environment(db, environment, who, ("researcher", "worker"))
+            interval = db.execute(
+                "SELECT id FROM control_intervals WHERE environment=? AND id=?",
+                (environment, interval_id),
+            ).fetchone()
+            if interval is None:
+                raise Forbidden("control interval unavailable")
+            inputs = db.execute(
+                "SELECT sequence,batch_id,request_hash FROM control_inputs "
+                "WHERE environment=? AND interval_id=? ORDER BY sequence",
+                (environment, interval_id),
+            ).fetchall()
+            return digest(
+                [
+                    {
+                        "sequence": item["sequence"],
+                        "batch_id": item["batch_id"],
+                        "input_hash": item["request_hash"],
+                    }
+                    for item in inputs
+                ]
+            )
+
+    def validate_control_grant(
+        self,
+        environment,
+        who,
+        lease,
+        *,
+        interval_id,
+        grant_id,
+        controller,
+        participant,
+        generation,
+        acknowledgement,
+    ):
+        """Fence provider work to the live grant and the exact persisted input ack."""
+        with self.store.transaction() as db:
+            row = self.store.environment(db, environment, who, ("researcher", "worker"))
+            self._fence(row, lease)
+            grant = db.execute(
+                "SELECT * FROM control_grants WHERE environment=? AND id=? AND interval_id=?",
+                (environment, grant_id, interval_id),
+            ).fetchone()
+            interval = db.execute(
+                "SELECT status,lease_owner,lease_epoch,revision FROM control_intervals "
+                "WHERE environment=? AND id=?",
+                (environment, interval_id),
+            ).fetchone()
+            if (
+                not grant
+                or not interval
+                or interval["status"] != "open"
+                or grant["controller"] != controller
+                or grant["participant"] != participant
+                or grant["generation"] != generation
+                or grant["expires"] <= time.time()
+                or grant["lease_epoch"] != lease["epoch"]
+                or interval["lease_owner"] != lease["owner"]
+                or interval["lease_epoch"] != lease["epoch"]
+                or interval["revision"] != row["revision"]
+            ):
+                raise Forbidden("control grant is expired or fenced")
+            if participant is not None:
+                participants = json.loads(row["participants"])
+                actor = participants.get(participant)
+                if not actor or not actor["active"] or actor["generation"] != generation:
+                    raise Forbidden("control participant authority expired")
+            saved = db.execute(
+                "SELECT acknowledgement FROM control_inputs WHERE environment=? AND batch_id=? "
+                "AND interval_id=? AND grant_id=?",
+                (environment, acknowledgement.get("batch_id"), interval_id, grant_id),
+            ).fetchone()
+            if not saved or json.loads(saved["acknowledgement"]) != dict(acknowledgement):
+                raise Forbidden("control input acknowledgement is unavailable")
+            return True
+
+    def read_committed_control_intervals(self, environment, who, *, after_sequence=0, limit=100):
+        """Read verified committed intervals and their transition event ancestry."""
+        if who.role not in ("researcher", "scorer"):
+            raise Forbidden("committed interval evidence requires grader authority")
+        if (
+            type(after_sequence) is not int
+            or after_sequence < 0
+            or type(limit) is not int
+            or not 1 <= limit <= 1000
+        ):
+            raise ValueError("invalid committed interval page")
+        self.store.verify(environment, who)
+        with self.store.transaction() as db:
+            self.store.environment(db, environment, who, ("researcher", "scorer"))
+            intervals = db.execute(
+                "SELECT * FROM control_intervals WHERE environment=? AND status='committed' "
+                "AND sequence>? ORDER BY sequence LIMIT ?",
+                (environment, after_sequence, limit),
+            ).fetchall()
+            result = []
+            for interval in intervals:
+                start = json.loads(interval["start_checkpoint"])
+                end = json.loads(interval["end_checkpoint"])
+                self._checkpoint_reference_in(db, environment, who, start)
+                self._checkpoint_reference_in(db, environment, who, end)
+                for reference in (start, end):
+                    data = self.store._read_artifact(environment, reference["artifact_id"])
+                    if hashlib.sha256(data).hexdigest() != reference["sha256"]:
+                        raise Conflict("committed checkpoint artifact integrity failure")
+                commit_event = next(
+                    (
+                        event
+                        for event in db.execute(
+                            "SELECT seq,revision,previous,hash,body FROM events WHERE environment=? "
+                            "AND kind='control.interval_committed' ORDER BY seq",
+                            (environment,),
+                        ).fetchall()
+                        if json.loads(event["body"]).get("interval_id") == interval["id"]
+                    ),
+                    None,
+                )
+                if commit_event is None:
+                    raise Conflict("committed interval event ancestry is missing")
+                event_body = json.loads(commit_event["body"])
+                if event_body.get("operation_receipt_hash") != digest(json.loads(interval["receipt"])):
+                    raise Conflict("committed interval event does not match its receipt")
+                operation = db.execute(
+                    "SELECT request FROM operations WHERE environment=? AND id=?",
+                    (environment, interval["operation_id"]),
+                ).fetchone()
+                operation_request = json.loads(operation["request"]) if operation else {}
+                transition_hash = operation_request.get("transition_hash")
+                transition_revision = operation_request.get("transition_revision")
+                ancestry = None
+                if isinstance(transition_hash, str) and type(transition_revision) is int:
+                    transition = db.execute(
+                        "SELECT status,result FROM transitions WHERE environment=? AND revision=? AND input_hash=?",
+                        (environment, transition_revision, transition_hash),
+                    ).fetchone()
+                    transition_event = db.execute(
+                        "SELECT seq,revision,previous,hash,body FROM events WHERE environment=? "
+                        "AND revision=? AND kind='transition.committed' ORDER BY seq DESC LIMIT 1",
+                        (environment, transition_revision + 1),
+                    ).fetchone()
+                    if transition and transition["status"] == "committed" and transition_event:
+                        result_body = json.loads(transition["result"])
+                        state_hash = digest(result_body["state"])
+                        event_body = json.loads(transition_event["body"])
+                        if event_body.get("state_hash") != state_hash:
+                            raise Conflict("transition state hash does not match its committed event")
+                        ancestry = {
+                            "status": "committed",
+                            "input_hash": transition_hash,
+                            "revision": transition_revision + 1,
+                            "state_hash": state_hash,
+                            "event": {
+                                "sequence": transition_event["seq"],
+                                "previous": transition_event["previous"],
+                                "hash": transition_event["hash"],
+                            },
+                        }
+                result.append(
+                    {
+                        "sequence": interval["sequence"],
+                        "interval": self._interval_receipt(interval),
+                        "event": {
+                            "sequence": commit_event["seq"],
+                            "revision": commit_event["revision"],
+                            "previous": commit_event["previous"],
+                            "hash": commit_event["hash"],
+                        },
+                        "transition": ancestry or {"status": "pending"},
+                    }
+                )
+            return result
+
     def recover_control_interval(self, environment, who, interval_id, *, lease=None):
         """Return a settled receipt once, or identify a safe checkpoint for a new branch."""
         self._validate_identifier(interval_id, "interval")
@@ -624,8 +817,13 @@ class ControlIntervals:
             raise Conflict("checkpoint artifact integrity failure")
         return {"artifact_id": artifact_id, "sha256": sha}
 
+    def _checkpoint_limit(self, environment, who):
+        with self.store.transaction() as db:
+            row = self.store.environment(db, environment, who, ("researcher", "worker"))
+            return json.loads(row["manifest"])["policy"].get("max_checkpoint_bytes", 67108864)
+
     def _checkpoint_reference_in(self, db, environment, who, reference):
-        self.store.environment(db, environment, who, ("researcher", "worker"))
+        row = self.store.environment(db, environment, who, ("researcher", "worker"))
         artifact = db.execute(
             "SELECT * FROM artifacts WHERE environment=? AND id=?",
             (environment, reference["artifact_id"]),
@@ -636,6 +834,9 @@ class ControlIntervals:
             or json.loads(artifact["audience"]) != []
         ):
             raise Conflict("checkpoint artifact is unavailable or not content addressed")
+        limit = json.loads(row["manifest"])["policy"].get("max_checkpoint_bytes", 67108864)
+        if artifact["size"] > limit:
+            raise Conflict("checkpoint artifact exceeds the frozen checkpoint limit")
         data = self.store._read_artifact(environment, reference["artifact_id"])
         if hashlib.sha256(data).hexdigest() != reference["sha256"]:
             raise Conflict("checkpoint artifact integrity failure")

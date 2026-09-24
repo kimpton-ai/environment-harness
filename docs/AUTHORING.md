@@ -64,6 +64,17 @@ class UnrealEnvironment:
 
 The operation name is the portable capability identity; `config` is a JSON snapshot, not a live client or credential. Keep engine handles, Java bridges, sockets and secrets on the class instance. `Operations.prepare` records intent and reserves cost before dispatch. `Operations.dispatch` finds the class through the environment mapping and supplies a fenced authority callback. Implement `lookup` when the external system can prove an ambiguous result; otherwise the operation remains blocked for explicit recovery.
 
+For bounded external simulation, optionally implement `control_interval_intent`,
+`execute_control_interval`, and `control_interval_result` on the operation. The intent returns a
+`ControlIntervalIntent` with runtime identity, a complete starting checkpoint bundle, duration, and
+controller identity. Harness durably acknowledges the complete operation envelope (`operation`,
+frozen provider `version`, and `payload`) as one batch before calling the interval executor. It
+provides the verified checkpoint bytes, active grant, and accepted-input digest. The provider receipt
+must echo that exact digest. The result hook
+extracts the ending bundle and measurements from the stable provider receipt. Reconciliation calls
+`lookup` and the result hook without repeating execution. See [the interval protocol](PROTOCOL.md#durable-control-intervals)
+and the exported value types under `environment_harness` for field details.
+
 For a standalone session, call `Operations.prepare` and `dispatch` while the session is running. For a grouped experiment, implement the public `SessionRunner` protocol and pass the callable as `session_runner` to `EnvironmentHarness`. The runner receives the runtime session, environment-session ID, researcher principal, agent instances and turn budget, so it can interleave the standard `environment_harness.runner.run` function with environment operations without replacing experiment scheduling or persistence. It must return the current record from `session.get(environment, researcher)`; the harness rejects stale, partial or unrelated results. The default runner remains unchanged when this argument is omitted.
 
 Scoring stays separate from execution. Freeze scorer IDs through `scoring_versions`, replay the authorized evidence after a session, create a `ScoreReport`, and save it with `EvidenceStore.report`. Metrics appear in Progression and Reports. A `Finding` must link to its supporting observation, action and outcome evidence; operation receipts can contribute metrics and provenance, but they do not bypass the finding evidence contract. The complete example applies the same scorer to every session in the experiment so compatible metrics can be aggregated.

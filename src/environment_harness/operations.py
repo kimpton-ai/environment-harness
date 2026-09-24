@@ -1,8 +1,11 @@
 """External-operation intents, conservative reservations and receipt reconciliation."""
 
+import hashlib
 import json
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from typing import Any
 
 from .contracts import (
     MAX_OPERATION_RECEIPT_BYTES,
@@ -10,11 +13,61 @@ from .contracts import (
     ExperimentSpec,
     OperationPlan,
     OperationSpec,
+    Principal,
 )
 from .errors import BudgetExceeded, Conflict, Forbidden, Unsupported
 from .store import digest, encode
 
 HOST_ACTOR = "@environment"
+
+
+@dataclass(frozen=True)
+class ControlIntervalOperationContext:
+    """Trusted transition identity supplied to an interval-aware provider."""
+
+    operation_id: str
+    journal_operation_id: str
+    revision: int
+    transition_input_hash: str | None
+    participant: str | None
+    participants: tuple[str, ...] = ()
+    max_checkpoint_bytes: int = 67108864
+
+
+@dataclass(frozen=True)
+class ControlIntervalIntent:
+    """Provider description of a bounded execution interval, before it is dispatched."""
+
+    runtime_identity: Mapping[str, Any]
+    start_checkpoint: bytes | Mapping[str, str]
+    simulated_seconds: float
+    controller: str
+
+
+@dataclass(frozen=True)
+class ControlIntervalExecutionContext:
+    """Harness-issued grant and durable input acknowledgement passed to execution."""
+
+    interval_id: str
+    grant_id: str
+    controller: str
+    participant: str | None
+    generation: int
+    start_checkpoint: Mapping[str, str]
+    start_checkpoint_bytes: bytes
+    runtime_identity: Mapping[str, Any]
+    simulated_seconds: float
+    accepted_input: Mapping[str, Any]
+    acknowledgement: Mapping[str, Any]
+    control_log_digest: str
+
+
+@dataclass(frozen=True)
+class ControlIntervalResult:
+    """Checkpoint and factual measurements extracted from a provider receipt."""
+
+    end_checkpoint: bytes | Mapping[str, str]
+    measurements: Mapping[str, Any]
 
 
 class EnvironmentOperation(ABC):
@@ -39,6 +92,34 @@ class EnvironmentOperation(ABC):
     def lookup(self, operation_id):
         """Return a durable receipt during reconciliation, or ``None`` if unknown."""
         return None
+
+    def control_interval_intent(
+        self,
+        operation_id: str,
+        request: Mapping[str, Any],
+        *,
+        context: ControlIntervalOperationContext,
+    ) -> ControlIntervalIntent | None:
+        """Opt in to Harness checkpoint and controller interval journaling."""
+        return None
+
+    def execute_control_interval(
+        self,
+        operation_id: str,
+        request: Mapping[str, Any],
+        maximum_cost_micros: int,
+        *,
+        authority: Callable[[Any], None],
+        control_interval: ControlIntervalExecutionContext,
+    ) -> Mapping[str, Any]:
+        """Execute an acknowledged control batch. Called only after interval opt-in."""
+        raise NotImplementedError("interval-aware operations must implement execute_control_interval")
+
+    def control_interval_result(
+        self, receipt: Mapping[str, Any], *, context: ControlIntervalOperationContext
+    ) -> ControlIntervalResult:
+        """Extract the completed checkpoint and measurements from a durable receipt."""
+        raise NotImplementedError("interval-aware operations must implement control_interval_result")
 
 
 def environment_operations(environment):
@@ -356,45 +437,118 @@ class Operations:
             goal_revision = getattr(validated, "goal_revision", None)
             if goal_revision is not None and goal_revision != str(row["revision"]):
                 raise Conflict("operation goal revision is stale")
-            db.execute(
-                "UPDATE operations SET status='dispatching' WHERE environment=? AND id=?",
-                (environment, operation_id),
+            participants_for_interval = (op["participant"],) if not host_operation else ()
+            if host_operation:
+                transition = db.execute(
+                    "SELECT request FROM transitions WHERE environment=? AND revision=? AND input_hash=?",
+                    (environment, request.get("transition_revision"), request.get("transition_hash")),
+                ).fetchone()
+                if transition:
+                    transition_request = json.loads(transition["request"])
+                    participants_for_interval = tuple(
+                        sorted(
+                            {
+                                record["participant"]
+                                for record in transition_request.get("input", {}).get("action_records", [])
+                            }
+                        )
+                    )
+            operation_context = ControlIntervalOperationContext(
+                operation_id=f"{environment}:{operation_id}",
+                journal_operation_id=operation_id,
+                revision=request.get("transition_revision", row["revision"]),
+                transition_input_hash=request.get("transition_hash"),
+                participant=participants_for_interval[0] if len(participants_for_interval) == 1 else None,
+                participants=participants_for_interval,
+                max_checkpoint_bytes=manifest["policy"].get("max_checkpoint_bytes", 67108864),
             )
-            self.store.append(
-                db,
+        interval_intent = None
+        execution_context = None
+        interval_capable = uses_environment_contract and callable(
+            getattr(provider, "control_interval_intent", None)
+        )
+        if interval_capable:
+            interval_intent = provider.control_interval_intent(
+                f"{environment}:{operation_id}", provider_request, context=operation_context
+            )
+        if interval_intent is not None:
+            if not isinstance(interval_intent, ControlIntervalIntent):
+                raise Conflict("provider control interval intent has an invalid type")
+            if not callable(getattr(provider, "execute_control_interval", None)) or not callable(
+                getattr(provider, "control_interval_result", None)
+            ):
+                raise Conflict("interval-aware operation is missing execution or receipt extraction")
+            if len(operation_context.participants) > 1:
+                raise Conflict("control interval requires one unambiguous participant")
+            execution_context = self._prepare_control_execution(
+                session,
                 environment,
-                row["revision"],
-                "operation.dispatched",
-                {"id": operation_id, "epoch": lease["epoch"]},
-                () if host_operation else (op["participant"],),
+                who,
+                lease,
+                operation_id,
+                request,
+                interval_intent,
+                operation_context,
+                provider.spec.version,
             )
+        self._mark_dispatching(
+            session,
+            environment,
+            who,
+            lease,
+            operation_id,
+            request,
+            op,
+            host_operation,
+            operation_context,
+        )
+
         # No transaction during IO. Never auto-repeat a dispatch with an uncertain outcome.
         try:
-            if uses_environment_contract:
+            if interval_intent is not None:
+                operation_authority = self._operation_authority(
+                    session, environment, who, lease, operation_id, request, op, validated
+                )
 
-                def authority(validated):
-                    with self.store.transaction() as db:
-                        current = self.store.environment(db, environment, who, ("worker", "researcher"))
-                        session._fence(current, lease)
-                        current_participants = json.loads(current["participants"])
-                        actor = current_participants.get(op["participant"])
-                        revision = getattr(validated, "goal_revision", None)
-                        if op["participant"] == HOST_ACTOR:
-                            self._check_host_transition(db, environment, current, request, op)
-                            actor_valid = True
-                        else:
-                            actor_valid = bool(
-                                actor and actor["active"] and actor["generation"] == op["generation"]
-                            )
-                        if (
-                            current["status"] != "running"
-                            or not actor_valid
-                            or (revision is not None and str(current["revision"]) != revision)
-                        ):
-                            raise Forbidden("operation dispatch authority expired")
+                def interval_authority(_validated=None):
+                    operation_authority(_validated)
+                    session.validate_control_grant(
+                        environment,
+                        who,
+                        lease,
+                        interval_id=execution_context.interval_id,
+                        grant_id=execution_context.grant_id,
+                        controller=execution_context.controller,
+                        participant=execution_context.participant,
+                        generation=execution_context.generation,
+                        acknowledgement=execution_context.acknowledgement,
+                    )
 
+                receipt = provider.execute_control_interval(
+                    f"{environment}:{operation_id}",
+                    provider_request,
+                    op["reservation"],
+                    authority=interval_authority,
+                    control_interval=execution_context,
+                )
+                self._seal_control_result(
+                    session,
+                    environment,
+                    who,
+                    lease,
+                    provider,
+                    receipt,
+                    operation_context,
+                    execution_context.interval_id,
+                )
+            elif uses_environment_contract:
                 receipt = provider.execute(
-                    f"{environment}:{operation_id}", provider_request, op["reservation"], authority=authority
+                    f"{environment}:{operation_id}",
+                    provider_request,
+                    op["reservation"],
+                    authority=self._operation_authority(
+                        session, environment, who, lease, operation_id, request, op, validated
+                    ),
                 )
             else:
                 receipt = provider.execute(
@@ -412,6 +566,210 @@ class Operations:
         if callable(commit_interval):
             commit_interval(environment, who, lease, operation_id, settled)
         return settled
+
+    def _mark_dispatching(
+        self, session, environment, who, lease, operation_id, request, original, host_operation, context
+    ):
+        with self.store.transaction() as db:
+            row = self.store.environment(db, environment, who, ("worker", "researcher"))
+            session._fence(row, lease)
+            current = db.execute(
+                "SELECT status,request,participant,generation FROM operations WHERE environment=? AND id=?",
+                (environment, operation_id),
+            ).fetchone()
+            if not current or current["status"] != "prepared" or current["request"] != encode(request):
+                raise Conflict("operation is no longer an unsent prepared intent")
+            if host_operation:
+                self._check_host_transition(db, environment, row, request, original)
+            else:
+                actor = json.loads(row["participants"]).get(current["participant"])
+                if not actor or not actor["active"] or actor["generation"] != current["generation"]:
+                    raise Forbidden("dispatch authority expired")
+            if row["status"] != "running" or context.revision != request.get(
+                "transition_revision", row["revision"]
+            ):
+                raise Forbidden("operation dispatch authority expired")
+            db.execute(
+                "UPDATE operations SET status='dispatching' WHERE environment=? AND id=?",
+                (environment, operation_id),
+            )
+            self.store.append(
+                db,
+                environment,
+                row["revision"],
+                "operation.dispatched",
+                {"id": operation_id, "epoch": lease["epoch"]},
+                () if host_operation else (current["participant"],),
+            )
+
+    def _operation_authority(
+        self, session, environment, who, lease, operation_id, request, operation, validated
+    ):
+        def authority(_validated=None):
+            with self.store.transaction() as db:
+                current = self.store.environment(db, environment, who, ("worker", "researcher"))
+                session._fence(current, lease)
+                current_participants = json.loads(current["participants"])
+                actor = current_participants.get(operation["participant"])
+                revision = getattr(validated, "goal_revision", None)
+                if operation["participant"] == HOST_ACTOR:
+                    self._check_host_transition(db, environment, current, request, operation)
+                    actor_valid = True
+                else:
+                    actor_valid = bool(
+                        actor and actor["active"] and actor["generation"] == operation["generation"]
+                    )
+                if (
+                    current["status"] != "running"
+                    or not actor_valid
+                    or (revision is not None and str(current["revision"]) != revision)
+                ):
+                    raise Forbidden("operation dispatch authority expired")
+
+        return authority
+
+    def _prepare_control_execution(
+        self, session, environment, who, lease, operation_id, request, intent, context, provider_version
+    ):
+        if not isinstance(intent.runtime_identity, Mapping) or not isinstance(intent.controller, str):
+            raise Conflict("provider control interval intent is malformed")
+        if not isinstance(request.get("payload"), Mapping):
+            raise Conflict("control interval operation payload must be an object")
+        interval_id = "ci_" + digest({"environment": environment, "operation_id": operation_id})
+        batch_id = "cb_" + digest({"environment": environment, "operation_id": operation_id})
+        existing = session.control_interval_for_operation(environment, who, operation_id)
+        start_checkpoint = intent.start_checkpoint
+        if existing:
+            if existing["interval_id"] != interval_id:
+                raise Conflict("control interval operation identity differs from its journal")
+            if isinstance(start_checkpoint, bytes):
+                if hashlib.sha256(start_checkpoint).hexdigest() != existing["start_checkpoint"]["sha256"]:
+                    raise Conflict("provider start checkpoint differs from the prepared interval")
+            elif dict(start_checkpoint) != existing["start_checkpoint"]:
+                raise Conflict("provider start checkpoint differs from the prepared interval")
+            start_reference = existing["start_checkpoint"]
+        else:
+            start_reference = self._publish_checkpoint(session, environment, who, start_checkpoint)
+        interval = session.prepare_control_interval(
+            environment,
+            who,
+            lease,
+            interval_id=interval_id,
+            operation_id=operation_id,
+            runtime_identity=intent.runtime_identity,
+            start_checkpoint=start_reference,
+            simulated_seconds=intent.simulated_seconds,
+        )
+        grant = session.grant_control(
+            environment,
+            who,
+            lease,
+            interval_id=interval_id,
+            grant_id=interval["grant_id"],
+            controller=intent.controller,
+            participant=context.participant,
+            ttl=30,
+        )
+        if context.participant:
+            controller = Principal(
+                tenant=who.tenant,
+                subject=intent.controller,
+                role="agent",
+                environment=environment,
+                participant=context.participant,
+                generation=grant["generation"],
+            )
+        else:
+            controller = Principal(
+                tenant=who.tenant,
+                subject=intent.controller,
+                role="worker",
+                environment=environment,
+            )
+        accepted_input = {
+            "operation": request["operation"],
+            "version": provider_version,
+            "payload": request["payload"],
+        }
+        acknowledgement = session.accept_control_inputs(
+            environment,
+            controller,
+            interval_id=interval_id,
+            grant_id=grant["grant_id"],
+            batch_id=batch_id,
+            sequence=1,
+            inputs=accepted_input,
+        )
+        return ControlIntervalExecutionContext(
+            interval_id=interval_id,
+            grant_id=grant["grant_id"],
+            controller=intent.controller,
+            participant=context.participant,
+            generation=grant["generation"],
+            start_checkpoint=interval["start_checkpoint"],
+            start_checkpoint_bytes=self._read_checkpoint_bytes(
+                session, environment, who, interval["start_checkpoint"]
+            ),
+            runtime_identity=interval["runtime_identity"],
+            simulated_seconds=interval["simulated_seconds"],
+            accepted_input=accepted_input,
+            acknowledgement=acknowledgement,
+            control_log_digest=session.control_input_digest(environment, who, interval_id),
+        )
+
+    @staticmethod
+    def _publish_checkpoint(session, environment, who, checkpoint):
+        if isinstance(checkpoint, bytes):
+            artifact = session.store.checkpoint_artifact(
+                environment,
+                who,
+                checkpoint,
+                audience=(),
+                media_type="application/vnd.environment-harness.checkpoint",
+            )
+            return {"artifact_id": artifact["id"], "sha256": artifact["sha256"]}
+        if isinstance(checkpoint, Mapping):
+            return {"artifact_id": checkpoint.get("artifact_id"), "sha256": checkpoint.get("sha256")}
+        raise Conflict("provider checkpoint must be bytes or a Harness artifact reference")
+
+    @staticmethod
+    def _read_checkpoint_bytes(session, environment, who, reference):
+        content, _media_type = session.store.read_artifact(environment, who, reference["artifact_id"])
+        if len(content) > session._checkpoint_limit(environment, who):
+            raise Conflict("checkpoint artifact exceeds the frozen checkpoint limit")
+        if hashlib.sha256(content).hexdigest() != reference["sha256"]:
+            raise Conflict("checkpoint artifact integrity failure")
+        return content
+
+    def _seal_control_result(self, session, environment, who, lease, provider, receipt, context, interval_id):
+        control_log_digest = session.control_input_digest(environment, who, interval_id)
+        if receipt.get("control_log_digest") != control_log_digest:
+            raise Conflict("provider receipt control log digest differs from the accepted input journal")
+        result = provider.control_interval_result(receipt, context=context)
+        if not isinstance(result, ControlIntervalResult) or not isinstance(result.measurements, Mapping):
+            raise Conflict("provider control interval receipt extraction is malformed")
+        existing = session.control_interval_for_operation(environment, who, context.journal_operation_id)
+        if existing and existing["status"] in ("sealed", "committed"):
+            checkpoint = result.end_checkpoint
+            if isinstance(checkpoint, bytes):
+                if hashlib.sha256(checkpoint).hexdigest() != existing["end_checkpoint"]["sha256"]:
+                    raise Conflict("provider end checkpoint differs from its sealed interval")
+            elif dict(checkpoint) != existing["end_checkpoint"]:
+                raise Conflict("provider end checkpoint differs from its sealed interval")
+            end_reference = existing["end_checkpoint"]
+            if existing["measurements"] != dict(result.measurements):
+                raise Conflict("provider measurements differ from its sealed interval")
+        else:
+            end_reference = self._publish_checkpoint(session, environment, who, result.end_checkpoint)
+        session.seal_control_interval(
+            environment,
+            who,
+            lease,
+            interval_id=interval_id,
+            end_checkpoint=end_reference,
+            measurements=dict(result.measurements),
+            control_log_digest=control_log_digest,
+        )
 
     def settle(self, environment, who, operation_id, receipt):
         if (
@@ -461,7 +819,7 @@ class Operations:
             self.store.append(db, environment, row["revision"], "operation.receipt", event_payload, audience)
             return receipt
 
-    def reconcile(self, environment, who, operation_id, provider):
+    def reconcile(self, environment, who, operation_id, provider, *, session=None, lease=None):
         with self.store.transaction() as db:
             row = self.store.environment(db, environment, who, ("worker", "researcher"))
             op = db.execute(
@@ -493,10 +851,56 @@ class Operations:
                 return json.loads(op["receipt"])
             if op["status"] not in ("unknown", "dispatching"):
                 raise Conflict("only dispatched operations require reconciliation")
+            interval = db.execute(
+                "SELECT id FROM control_intervals WHERE environment=? AND operation_id=?",
+                (environment, operation_id),
+            ).fetchone()
+            context = None
+            if interval:
+                if session is None or lease is None:
+                    raise Conflict("control interval recovery requires the active Harness session lease")
+                if op["participant"] == HOST_ACTOR:
+                    transition = db.execute(
+                        "SELECT request FROM transitions WHERE environment=? AND revision=? AND input_hash=?",
+                        (environment, request.get("transition_revision"), request.get("transition_hash")),
+                    ).fetchone()
+                    records = (
+                        json.loads(transition["request"]).get("input", {}).get("action_records", [])
+                        if transition
+                        else []
+                    )
+                    participants = tuple(sorted({item["participant"] for item in records}))
+                else:
+                    participants = (op["participant"],)
+                context = ControlIntervalOperationContext(
+                    operation_id=f"{environment}:{operation_id}",
+                    journal_operation_id=operation_id,
+                    revision=request.get("transition_revision", row["revision"]),
+                    transition_input_hash=request.get("transition_hash"),
+                    participant=participants[0] if len(participants) == 1 else None,
+                    participants=participants,
+                    max_checkpoint_bytes=json.loads(row["manifest"])["policy"].get(
+                        "max_checkpoint_bytes", 67108864
+                    ),
+                )
         receipt = provider.lookup(f"{environment}:{operation_id}")
         if receipt is None:
             raise Unsupported("provider cannot prove outcome; dispatch stays blocked")
-        return self.settle(environment, who, operation_id, receipt)
+        if interval:
+            self._seal_control_result(
+                session,
+                environment,
+                who,
+                lease,
+                provider,
+                receipt,
+                context,
+                session.control_interval_for_operation(environment, who, operation_id)["interval_id"],
+            )
+        settled = self.settle(environment, who, operation_id, receipt)
+        if interval:
+            session.commit_control_interval_for_operation(environment, who, lease, operation_id, settled)
+        return settled
 
     @staticmethod
     def _check_host_transition(db, environment, row, request, operation):

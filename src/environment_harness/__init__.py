@@ -15,7 +15,13 @@ from .contracts import (
     Scenario,
 )
 from .harness import EnvironmentHarness, EnvironmentSession, Experiment, ExperimentResult, SessionRunner
-from .operations import EnvironmentOperation
+from .operations import (
+    ControlIntervalExecutionContext,
+    ControlIntervalIntent,
+    ControlIntervalOperationContext,
+    ControlIntervalResult,
+    EnvironmentOperation,
+)
 from .store import EvidenceStore
 
 __all__ = [
@@ -30,6 +36,10 @@ __all__ = [
     "OperationPlan",
     "OperationReceipt",
     "EnvironmentOperation",
+    "ControlIntervalOperationContext",
+    "ControlIntervalIntent",
+    "ControlIntervalExecutionContext",
+    "ControlIntervalResult",
     "Principal",
     "Scenario",
     "EnvironmentSession",

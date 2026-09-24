@@ -500,9 +500,33 @@ class EvidenceStore:
             return Principal.model_validate_json(row["principal"])
 
     def artifact(self, environment, who, data: bytes, audience=(), media_type="application/octet-stream"):
+        return self._publish_artifact(
+            environment, who, data, audience, media_type, limit_field="max_artifact_bytes"
+        )
+
+    def checkpoint_artifact(
+        self,
+        environment,
+        who,
+        data: bytes,
+        audience=(),
+        media_type="application/vnd.environment-harness.checkpoint",
+    ):
+        """Persist a complete data-only checkpoint under its separately frozen size cap."""
+        return self._publish_artifact(
+            environment, who, data, audience, media_type, limit_field="max_checkpoint_bytes"
+        )
+
+    def _publish_artifact(self, environment, who, data, audience, media_type, *, limit_field):
+        if not isinstance(data, bytes):
+            raise ValueError("artifact content must be bytes")
         with self.transaction() as db:
             row = self.environment(db, environment, who)
-            if len(data) > json.loads(row["manifest"])["policy"]["max_artifact_bytes"]:
+            policy = json.loads(row["manifest"])["policy"]
+            default_limit = 67108864 if limit_field == "max_checkpoint_bytes" else 16777216
+            if len(data) > policy.get(limit_field, default_limit):
+                if limit_field == "max_checkpoint_bytes":
+                    raise Conflict("checkpoint artifact exceeds the frozen checkpoint limit")
                 raise Conflict("artifact size limit exceeded")
             participants = json.loads(row["participants"])
             if who.role == "agent":

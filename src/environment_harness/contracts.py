@@ -229,6 +229,7 @@ class RunPolicy(Record):
     max_cost_micros: int = Field(default=0, ge=0)
     max_event_bytes: int = Field(default=1048576, ge=1024, le=16777216)
     max_artifact_bytes: int = Field(default=16777216, ge=1)
+    max_checkpoint_bytes: int = Field(default=67108864, ge=1, le=1073741824)
     max_state_bytes: int = Field(default=4194304, ge=1024)
     allowed_endpoints: tuple[str, ...] = ()
     allowed_operations: tuple[str, ...] = ()

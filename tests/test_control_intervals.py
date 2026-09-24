@@ -4,7 +4,12 @@ from environment_harness import AgentSpec, EnvironmentSession, EvidenceStore, Ex
 from environment_harness.contracts import Principal, RunPolicy, Transition
 from environment_harness.errors import Conflict, Forbidden
 from environment_harness.fixtures import SyntheticEnvironment
-from environment_harness.operations import EnvironmentOperation, Operations
+from environment_harness.operations import (
+    ControlIntervalIntent,
+    ControlIntervalResult,
+    EnvironmentOperation,
+    Operations,
+)
 from environment_harness.store import digest
 
 
@@ -24,6 +29,64 @@ class StepOperation(EnvironmentOperation):
         return self.run(operation_id, request)
 
 
+class IntervalStepOperation(StepOperation):
+    def __init__(self, saved, *, corrupt_control_log_digest=False):
+        super().__init__(lambda *_: None)
+        self.saved = saved
+        self.effect_calls = 0
+        self.saved_receipt = None
+        self.corrupt_control_log_digest = corrupt_control_log_digest
+
+    def control_interval_intent(self, operation_id, request, *, context):
+        assert operation_id == context.operation_id
+        assert context.journal_operation_id == self.saved["operation_id"]
+        assert context.participant == "robot"
+        return ControlIntervalIntent(
+            runtime_identity={"engine": "fixture", "version": "1", "profile": "cpu"},
+            start_checkpoint=b"start checkpoint v1",
+            simulated_seconds=0.25,
+            controller="controller-1",
+        )
+
+    def execute_control_interval(
+        self, operation_id, request, maximum_cost_micros, *, authority, control_interval
+    ):
+        assert control_interval.accepted_input == {
+            "operation": request["operation"],
+            "version": self.spec.version,
+            "payload": request["payload"],
+        }
+        with self.saved["store"].transaction() as db:
+            count = db.execute(
+                "SELECT count(*) FROM control_inputs WHERE environment=? AND interval_id=?",
+                (self.saved["environment"], control_interval.interval_id),
+            ).fetchone()[0]
+        assert count == 1
+        authority(request["payload"])
+        self.effect_calls += 1
+        self.saved_receipt = {
+            "operation_id": operation_id,
+            "cost_micros": 0,
+            "result": "advanced",
+            "control_log_digest": (
+                "0" * 64 if self.corrupt_control_log_digest else control_interval.control_log_digest
+            ),
+        }
+        if self.corrupt_control_log_digest:
+            return self.saved_receipt
+        raise TimeoutError("provider committed but response was lost")
+
+    def lookup(self, operation_id):
+        return self.saved_receipt
+
+    def control_interval_result(self, receipt, *, context):
+        assert context.operation_id == receipt["operation_id"]
+        return ControlIntervalResult(
+            end_checkpoint=b"end checkpoint v1",
+            measurements={"simulated_seconds": 0.25},
+        )
+
+
 class StepEnvironment(SyntheticEnvironment):
     def __init__(self, operation):
         super().__init__("sequential")
@@ -34,7 +97,7 @@ class StepEnvironment(SyntheticEnvironment):
         return Transition(state=state)
 
 
-def setup(tmp_path, *, operation_run):
+def setup(tmp_path, *, operation_run, policy=None):
     store = EvidenceStore(tmp_path)
     researcher = Principal(tenant="local", subject="researcher", role="researcher")
     saved = {}
@@ -49,7 +112,8 @@ def setup(tmp_path, *, operation_run):
         environment=environment_impl.spec,
         participants=(AgentSpec(id="robot", implementation="robot@1", policy_version="1"),),
         operations=(provider.spec,),
-        policy=RunPolicy(allowed_endpoints=(provider.endpoint,), allowed_operations=(provider.spec.name,)),
+        policy=policy
+        or RunPolicy(allowed_endpoints=(provider.endpoint,), allowed_operations=(provider.spec.name,)),
     )
     environment = session.create(spec, researcher)["id"]
     lease = session.lease(environment, researcher, "worker", ttl=60)
@@ -331,3 +395,102 @@ def test_replacement_worker_commits_only_the_settled_receipt(tmp_path):
     assert recovered["status"] == "committed"
     assert recovered["receipt"]["operation_receipt"]["result"] == "advanced"
     assert saved["provider"].calls == 1
+
+
+def test_opt_in_dispatch_persists_before_apply_and_reconciles_without_reexecution(tmp_path):
+    saved = setup(tmp_path, operation_run=lambda *_: None)
+    provider = IntervalStepOperation(saved)
+    saved["session"].environment.operations[provider.spec.name] = provider
+    journal = Operations(saved["store"])
+
+    with pytest.raises(TimeoutError, match="response was lost"):
+        journal.dispatch(
+            saved["session"],
+            saved["environment"],
+            saved["researcher"],
+            saved["lease"],
+            saved["operation_id"],
+            provider=provider,
+        )
+
+    assert provider.effect_calls == 1
+    receipt = journal.reconcile(
+        saved["environment"],
+        saved["researcher"],
+        saved["operation_id"],
+        provider,
+        session=saved["session"],
+        lease=saved["lease"],
+    )
+    assert receipt["result"] == "advanced"
+    assert provider.effect_calls == 1
+    records = saved["session"].read_committed_control_intervals(saved["environment"], saved["researcher"])
+    assert len(records) == 1
+    assert records[0]["interval"]["status"] == "committed"
+    assert records[0]["transition"] == {"status": "pending"}
+    assert records[0]["event"]["hash"]
+
+
+def test_interval_receipt_must_bind_the_exact_accepted_input_digest(tmp_path):
+    saved = setup(tmp_path, operation_run=lambda *_: None)
+    provider = IntervalStepOperation(saved, corrupt_control_log_digest=True)
+    saved["session"].environment.operations[provider.spec.name] = provider
+    journal = Operations(saved["store"])
+
+    with pytest.raises(Conflict, match="receipt control log digest"):
+        journal.dispatch(
+            saved["session"],
+            saved["environment"],
+            saved["researcher"],
+            saved["lease"],
+            saved["operation_id"],
+            provider=provider,
+        )
+
+    with pytest.raises(Conflict, match="receipt control log digest"):
+        journal.reconcile(
+            saved["environment"],
+            saved["researcher"],
+            saved["operation_id"],
+            provider,
+            session=saved["session"],
+            lease=saved["lease"],
+        )
+    assert provider.effect_calls == 1
+
+
+def test_frozen_checkpoint_cap_rejects_oversize_before_interval_preparation(tmp_path):
+    saved = setup(
+        tmp_path,
+        operation_run=lambda *_: None,
+        policy=RunPolicy(
+            allowed_endpoints=("simulator",),
+            allowed_operations=("spatial.step",),
+            max_checkpoint_bytes=8,
+        ),
+    )
+    provider = IntervalStepOperation(saved)
+    saved["session"].environment.operations[provider.spec.name] = provider
+
+    with pytest.raises(Conflict, match="frozen checkpoint limit"):
+        Operations(saved["store"]).dispatch(
+            saved["session"],
+            saved["environment"],
+            saved["researcher"],
+            saved["lease"],
+            saved["operation_id"],
+            provider=provider,
+        )
+
+    with saved["store"].transaction() as db:
+        operation = db.execute(
+            "SELECT status FROM operations WHERE environment=? AND id=?",
+            (saved["environment"], saved["operation_id"]),
+        ).fetchone()
+        intervals = db.execute(
+            "SELECT count(*) FROM control_intervals WHERE environment=?",
+            (saved["environment"],),
+        ).fetchone()[0]
+    assert operation["status"] == "prepared"
+    assert intervals == 0
+    assert provider.effect_calls == 0
