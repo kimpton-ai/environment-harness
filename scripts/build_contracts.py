@@ -9,7 +9,12 @@ models = (
     "Capabilities",
     "Scenario",
     "OperationSpec",
+    "OperationSpecV2",
     "EnvironmentSpec",
+    "EnvironmentSpecV2",
+    "OperationRequest",
+    "OperationPlan",
+    "OperationReceipt",
     "AgentSpec",
     "RunPolicy",
     "ExperimentSpec",
@@ -29,7 +34,20 @@ models = (
 for name in models:
     schema = getattr(contracts, name).model_json_schema()
     schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
-    schema["$id"] = "urn:environment-harness:v1:" + name
+    version = (
+        "v2"
+        if name
+        in {
+            "OperationSpecV2",
+            "EnvironmentSpecV2",
+            "OperationRequest",
+            "OperationPlan",
+            "OperationReceipt",
+            "ExperimentSpec",
+        }
+        else "v1"
+    )
+    schema["$id"] = f"urn:environment-harness:{version}:" + name
     text = json.dumps(schema, indent=2, sort_keys=True) + "\n"
     path = root / "contracts" / (name + ".schema.json")
     if "--check" in sys.argv:

@@ -8,10 +8,20 @@ import time
 
 from jsonschema import Draft202012Validator
 
-from .contracts import Action, ExperimentSpec, Principal, Transition
+from .contracts import (
+    MAX_OPERATION_RECEIPTS_BYTES,
+    Action,
+    EnvironmentSpecV2,
+    ExperimentSpec,
+    OperationPlan,
+    OperationReceipt,
+    Principal,
+    Transition,
+)
+from .control_intervals import ControlIntervals
 from .errors import Conflict, Forbidden, Unsupported
 from .history import inherit
-from .operations import environment_operations
+from .operations import HOST_ACTOR, Operations, environment_operations
 from .store import EvidenceStore, digest, encode, uid
 
 
@@ -19,7 +29,7 @@ def tuples(value):
     return tuple(tuples(x) for x in value) if isinstance(value, list) else value
 
 
-class EnvironmentSession:
+class EnvironmentSession(ControlIntervals):
     def __init__(self, store: EvidenceStore, environment):
         self.store = store
         self.environment = environment
@@ -37,6 +47,11 @@ class EnvironmentSession:
             raise Forbidden("unscoped researcher authority required")
         if experiment.environment != self.environment.spec:
             raise Conflict("environment contract mismatch")
+        if isinstance(experiment.environment, EnvironmentSpecV2) and any(
+            not callable(getattr(self.environment, method, None))
+            for method in ("plan_transition", "resolve_transition")
+        ):
+            raise Conflict("environment-session.v2 requires plan_transition and resolve_transition")
         runtime_operations = environment_operations(self.environment)
         for selected in experiment.operations:
             operation = runtime_operations.get(selected.name)
@@ -268,7 +283,7 @@ class EnvironmentSession:
     def submit(self, environment, who, action: Action):
         with self.store.transaction() as db:
             row = self.store.environment(db, environment, who, ("agent",))
-            self._compatible(row)
+            spec = self._compatible(row)
             if who.participant != action.participant:
                 raise Forbidden("cannot act for another participant")
             request = encode(action.model_dump(mode="json"))
@@ -279,6 +294,10 @@ class EnvironmentSession:
                 if previous["request"] != request or previous["participant"] != who.participant:
                     raise Conflict("operation identifier reused")
                 return json.loads(previous["receipt"])
+            if isinstance(spec.environment, EnvironmentSpecV2) and self._pending_v2_plans(
+                db, environment, row["revision"]
+            ):
+                raise Conflict("transition operation plan is pending reconciliation")
             reason = None
             category = "model"
             if row["status"] != "running":
@@ -363,6 +382,7 @@ class EnvironmentSession:
             if missing and (not expired or spec.environment.missing_action == "reject"):
                 raise Conflict("phase awaits required decisions")
             decisions = {p: actions.get(p) for p in sorted(required)}
+            is_v2 = isinstance(spec.environment, EnvironmentSpecV2)
             request = {
                 "state": row["state"],
                 "rng": row["rng"],
@@ -370,57 +390,104 @@ class EnvironmentSession:
                 "participants": row["participants"],
                 "decisions": decisions,
             }
+            if is_v2:
+                request["action_records"] = [
+                    {
+                        "id": action["id"],
+                        "participant": action["participant"],
+                        "revision": action["revision"],
+                        "request_hash": digest(json.loads(action["request"])),
+                    }
+                    for action in submitted
+                ]
             input_hash = digest(request)
             phase = row["revision"]
+            if is_v2:
+                pending_plans = self._pending_v2_plans(db, environment, phase)
+                if any(intent.get("input_hash") != input_hash for intent in pending_plans):
+                    raise Conflict("a persisted v2 plan must be reconciled before transition inputs change")
             intent = db.execute(
                 "SELECT * FROM transitions WHERE environment=? AND revision=? AND input_hash=?",
                 (environment, phase, input_hash),
             ).fetchone()
-            if intent and intent["status"] == "computing" and intent["lease_epoch"] == lease["epoch"]:
+            if (
+                not is_v2
+                and intent
+                and intent["status"] == "computing"
+                and intent["lease_epoch"] == lease["epoch"]
+            ):
                 raise Conflict("transition computation already in progress")
-            cached = intent if intent and intent["status"] == "computed" else None
+            cached = (
+                intent
+                if intent and intent["status"] in (("computed", "committed") if is_v2 else ("computed",))
+                else None
+            )
             if not intent:
+                stored_request = {"input": request, "input_hash": input_hash} if is_v2 else request
                 db.execute(
                     "INSERT INTO transitions VALUES (?,?,?,?,?,?,?,?)",
                     (
                         environment,
                         phase,
                         input_hash,
-                        encode(request),
+                        encode(stored_request),
                         lease["epoch"],
-                        "computing",
+                        "planning" if is_v2 else "computing",
                         None,
                         None,
                     ),
                 )
             elif not cached:
-                db.execute(
-                    "UPDATE transitions SET lease_epoch=?,status='computing' "
-                    "WHERE environment=? AND revision=? AND input_hash=?",
-                    (lease["epoch"], environment, phase, input_hash),
+                prior_request = json.loads(intent["request"])
+                next_status = (
+                    ("planned" if intent["status"] == "failed" else intent["status"])
+                    if is_v2 and "plan" in prior_request
+                    else "planning"
+                    if is_v2
+                    else "computing"
                 )
-        # Pure environment computation never holds a database transaction or environment lock.
+                db.execute(
+                    "UPDATE transitions SET lease_epoch=?,status=? "
+                    "WHERE environment=? AND revision=? AND input_hash=?",
+                    (lease["epoch"], next_status, environment, phase, input_hash),
+                )
+        # Pure environment computation and operation IO never hold a database transaction.
         rng = random.Random()
-        rng.setstate(tuples(json.loads(cached["rng"] if cached else request["rng"])))
         try:
-            result = (
-                Transition.model_validate_json(cached["result"])
-                if cached
-                else Transition.model_validate(
-                    self.environment.resolve(
-                        json.loads(request["state"]), decisions, rng, scheduler["pending_events"]
+            if is_v2:
+                result, rng = self._resolve_v2(
+                    environment,
+                    who,
+                    lease,
+                    spec,
+                    request,
+                    phase,
+                    input_hash,
+                    scheduler,
+                    cached,
+                    rng,
+                )
+            else:
+                rng.setstate(tuples(json.loads(cached["rng"] if cached else request["rng"])))
+                result = (
+                    Transition.model_validate_json(cached["result"])
+                    if cached
+                    else Transition.model_validate(
+                        self.environment.resolve(
+                            json.loads(request["state"]), decisions, rng, scheduler["pending_events"]
+                        )
                     )
                 )
-            )
             if len(encode(result.state)) > spec.policy.max_state_bytes:
                 raise Conflict("state limit exceeded")
         except BaseException:
-            with self.store.transaction() as db:
-                db.execute(
-                    "UPDATE transitions SET status='failed' WHERE environment=? AND revision=? "
-                    "AND input_hash=? AND lease_epoch=? AND status='computing'",
-                    (environment, phase, input_hash, lease["epoch"]),
-                )
+            if not is_v2:
+                with self.store.transaction() as db:
+                    db.execute(
+                        "UPDATE transitions SET status='failed' WHERE environment=? AND revision=? "
+                        "AND input_hash=? AND lease_epoch=? AND status='computing'",
+                        (environment, phase, input_hash, lease["epoch"]),
+                    )
             raise
         with self.store.transaction() as db:
             current = self.store.environment(db, environment, who, ("researcher", "worker"))
@@ -445,6 +512,8 @@ class EnvironmentSession:
                 or any(row[key] != request[key] for key in ("state", "rng", "scheduler", "participants"))
             ):
                 raise Conflict("transition inputs changed before commit")
+            if is_v2:
+                self._assert_v2_action_records(db, environment, phase, request["action_records"])
             revision = row["revision"] + 1
             terminated, truncated = result.terminated, result.truncated or revision >= spec.policy.max_turns
             status = (
@@ -535,11 +604,235 @@ class EnvironmentSession:
             self._fence(db.execute("SELECT * FROM environments WHERE id=?", (environment,)).fetchone(), lease)
             return {"revision": revision, "status": status, "event": outcome["seq"]}
 
+    def _resolve_v2(
+        self,
+        environment,
+        who,
+        lease,
+        experiment,
+        request,
+        phase,
+        input_hash,
+        scheduler,
+        cached,
+        rng,
+    ):
+        if cached:
+            rng.setstate(tuples(json.loads(cached["rng"])))
+            return Transition.model_validate_json(cached["result"]), rng
+
+        with self.store.transaction() as db:
+            row = self.store.environment(db, environment, who, ("researcher", "worker"))
+            self._fence(row, lease)
+            if (
+                row["revision"] != phase
+                or row["status"] != "running"
+                or any(row[key] != request[key] for key in ("state", "rng", "scheduler", "participants"))
+            ):
+                raise Conflict("transition inputs changed before planning")
+            self._assert_v2_action_records(db, environment, phase, request["action_records"])
+            intent = db.execute(
+                "SELECT * FROM transitions WHERE environment=? AND revision=? AND input_hash=?",
+                (environment, phase, input_hash),
+            ).fetchone()
+            if intent is None:
+                raise Conflict("transition intent is unavailable")
+            stored = json.loads(intent["request"])
+            if stored.get("input") != request or stored.get("input_hash") != input_hash:
+                raise Conflict("transition intent does not match its input hash")
+
+        if "plan" in stored:
+            plan = OperationPlan.model_validate(stored["plan"])
+            operation_ids = stored["operation_ids"]
+            rng_after_plan = stored["rng_after_plan"]
+        else:
+            environment_spec = experiment.environment
+            if not isinstance(environment_spec, EnvironmentSpecV2):
+                raise Conflict("v2 transition planner is unavailable")
+            planning_rng = random.Random()
+            planning_rng.setstate(tuples(json.loads(request["rng"])))
+            plan = OperationPlan.model_validate(
+                self.environment.plan_transition(
+                    json.loads(request["state"]),
+                    request["decisions"],
+                    planning_rng,
+                    json.loads(request["scheduler"])["pending_events"],
+                )
+            )
+            if len(plan.operations) > environment_spec.max_transition_operations:
+                raise Conflict("operation plan exceeds the frozen transition limit")
+            operation_ids = {
+                operation.key: "v2_"
+                + digest(
+                    {
+                        "environment": environment,
+                        "revision": phase,
+                        "input_hash": input_hash,
+                        "plan_id": plan.plan_id,
+                        "operation": operation.model_dump(mode="json"),
+                    }
+                )[:60]
+                for operation in plan.operations
+            }
+            rng_after_plan = planning_rng.getstate()
+            durable = {
+                "input": request,
+                "input_hash": input_hash,
+                "plan": plan.model_dump(mode="json"),
+                "operation_ids": operation_ids,
+                "rng_after_plan": rng_after_plan,
+            }
+            with self.store.transaction() as db:
+                row = self.store.environment(db, environment, who, ("researcher", "worker"))
+                self._fence(row, lease)
+                if (
+                    row["revision"] != phase
+                    or row["status"] != "running"
+                    or any(row[key] != request[key] for key in ("state", "rng", "scheduler", "participants"))
+                ):
+                    raise Conflict("transition inputs changed while planning")
+                self._assert_v2_action_records(db, environment, phase, request["action_records"])
+                current = db.execute(
+                    "SELECT request,status,lease_epoch FROM transitions "
+                    "WHERE environment=? AND revision=? AND input_hash=?",
+                    (environment, phase, input_hash),
+                ).fetchone()
+                if current is None or current["lease_epoch"] != lease["epoch"]:
+                    raise Conflict("transition planning authority expired")
+                existing = json.loads(current["request"])
+                if "plan" in existing:
+                    if existing["plan"] != durable["plan"]:
+                        raise Conflict("transition planner returned a different persisted plan")
+                    durable = existing
+                else:
+                    db.execute(
+                        "UPDATE transitions SET request=?,status='planned' "
+                        "WHERE environment=? AND revision=? AND input_hash=? AND lease_epoch=?",
+                        (encode(durable), environment, phase, input_hash, lease["epoch"]),
+                    )
+
+        journal = Operations(self.store)
+        journal.prepare_environment_plan(
+            self,
+            environment,
+            who,
+            lease,
+            plan=plan,
+            operation_ids=operation_ids,
+            transition_revision=phase,
+            transition_hash=input_hash,
+        )
+        receipts = {}
+        for operation in self._operation_order(plan):
+            operation_id = operation_ids[operation.key]
+            provider = self.environment.operations[operation.operation]
+            with self.store.transaction() as db:
+                self.store.environment(db, environment, who, ("researcher", "worker"))
+                record = db.execute(
+                    "SELECT status,receipt FROM operations WHERE environment=? AND id=?",
+                    (environment, operation_id),
+                ).fetchone()
+            if record is None:
+                raise Conflict("operation intent disappeared")
+            if record["status"] == "succeeded":
+                provider_receipt = json.loads(record["receipt"])
+            elif record["status"] == "prepared":
+                provider_receipt = journal.dispatch(
+                    self, environment, who, lease, operation_id, provider=provider
+                )
+            elif record["status"] in ("dispatching", "unknown"):
+                provider_receipt = journal.reconcile(
+                    environment, who, operation_id, provider, session=self, lease=lease
+                )
+            else:
+                raise Conflict("environment operation is not safely dispatchable")
+            self.commit_control_interval_for_operation(
+                environment, who, lease, operation_id, provider_receipt
+            )
+            receipts[operation.key] = OperationReceipt(
+                key=operation.key,
+                operation_id=f"{environment}:{operation_id}",
+                operation=operation.operation,
+                version=operation.version,
+                receipt=provider_receipt,
+                cost_micros=provider_receipt["cost_micros"],
+            )
+        if (
+            len(encode({key: value.model_dump(mode="json") for key, value in receipts.items()}).encode())
+            > MAX_OPERATION_RECEIPTS_BYTES
+        ):
+            raise Conflict("settled operation receipts exceed the 8 MiB transition limit")
+
+        rng.setstate(tuples(rng_after_plan))
+        result = Transition.model_validate(
+            self.environment.resolve_transition(
+                json.loads(request["state"]),
+                request["decisions"],
+                rng,
+                json.loads(request["scheduler"])["pending_events"],
+                plan,
+                receipts,
+            )
+        )
+        return result, rng
+
+    @staticmethod
+    def _operation_order(plan: OperationPlan):
+        by_key = {operation.key: operation for operation in plan.operations}
+        ordered = []
+        visited = set()
+
+        def visit(key):
+            if key in visited:
+                return
+            operation = by_key[key]
+            for dependency in operation.depends_on:
+                visit(dependency)
+            visited.add(key)
+            ordered.append(operation)
+
+        for operation in plan.operations:
+            visit(operation.key)
+        return ordered
+
+    @staticmethod
+    def _pending_v2_plans(db, environment, revision):
+        rows = db.execute(
+            "SELECT request FROM transitions WHERE environment=? AND revision=? "
+            "AND status IN ('planned','computed','failed')",
+            (environment, revision),
+        ).fetchall()
+        return [request for row in rows if "plan" in (request := json.loads(row["request"]))]
+
+    @staticmethod
+    def _assert_v2_action_records(db, environment, revision, expected):
+        accepted = db.execute(
+            "SELECT id,participant,revision,request FROM actions "
+            "WHERE environment=? AND revision=? AND status='accepted' ORDER BY participant",
+            (environment, revision),
+        ).fetchall()
+        action_records = [
+            {
+                "id": action["id"],
+                "participant": action["participant"],
+                "revision": action["revision"],
+                "request_hash": digest(json.loads(action["request"])),
+            }
+            for action in accepted
+        ]
+        if action_records != expected:
+            raise Conflict("transition actions changed after planning")
+
     def close_phase(self, environment, who, lease, *, revision, reason="decisions_complete"):
         with self.store.transaction() as db:
             row = self.store.environment(db, environment, who, ("researcher", "worker"))
             self._fence(row, lease)
-            if self._compatible(row).environment.phase_deadline != "coordinator":
+            spec = self._compatible(row)
+            if isinstance(spec.environment, EnvironmentSpecV2) and self._pending_v2_plans(
+                db, environment, revision
+            ):
+                raise Conflict("transition operation plan is pending reconciliation")
+            if spec.environment.phase_deadline != "coordinator":
                 raise Unsupported("environment uses wall-clock deadlines")
             if row["status"] != "running" or row["revision"] != revision:
                 raise Conflict("phase no longer active")
@@ -554,6 +847,10 @@ class EnvironmentSession:
         with self.store.transaction() as db:
             row = self.store.environment(db, environment, who, ("researcher", "worker"))
             self._fence(row, lease)
+            if isinstance(self._compatible(row).environment, EnvironmentSpecV2) and self._pending_v2_plans(
+                db, environment, row["revision"]
+            ):
+                raise Conflict("transition operation plan is pending reconciliation")
             cursors = json.loads(row["cursors"])
             if source in cursors and cursor <= cursors[source]:
                 raise Conflict("external event cursor must increase")
@@ -574,15 +871,19 @@ class EnvironmentSession:
     def memory(self, environment, who, memory, agent_state=None, expected_revision=None):
         with self.store.transaction() as db:
             row = self.store.environment(db, environment, who, ("agent",))
+            spec = self._compatible(row)
             if row["status"] != "running":
                 raise Conflict("session is not running")
             if expected_revision is not None and row["revision"] != expected_revision:
                 raise Conflict("agent state belongs to another revision")
+            if isinstance(spec.environment, EnvironmentSpecV2) and self._pending_v2_plans(
+                db, environment, row["revision"]
+            ):
+                raise Conflict("transition operation plan is pending reconciliation")
             participants = json.loads(row["participants"])
             participant = participants[who.participant]
             participant["memory"] = memory
             if agent_state is not None:
-                spec = self._compatible(row)
                 if not next(p for p in spec.participants if p.id == who.participant).checkpoint:
                     raise Unsupported("agent has no checkpoint hook")
                 participant["agent_state"] = agent_state
@@ -604,6 +905,10 @@ class EnvironmentSession:
         with self.store.transaction() as db:
             row = self.store.environment(db, environment, who, ("researcher",))
             self._fence(row, lease)
+            if isinstance(self._compatible(row).environment, EnvironmentSpecV2) and self._pending_v2_plans(
+                db, environment, row["revision"]
+            ):
+                raise Conflict("transition operation plan is pending reconciliation")
             participants = json.loads(row["participants"])
             if participant not in participants:
                 raise Unsupported("joining requires an environment-specific versioned participant contract")
@@ -789,11 +1094,30 @@ class EnvironmentSession:
                 p: x["implementation"] for p, x in participants.items()
             }:
                 raise Conflict("agent versions changed; explicit migration required")
-            if db.execute(
-                "SELECT 1 FROM operations WHERE environment=? AND status IN ('dispatching','unknown')",
+            pending_operations = db.execute(
+                "SELECT * FROM operations WHERE environment=? AND status IN ('dispatching','unknown')",
                 (environment,),
-            ).fetchone():
-                raise Conflict("reconcile ambiguous operations before resume")
+            ).fetchall()
+            if pending_operations:
+                v2_recoverable = isinstance(spec.environment, EnvironmentSpecV2)
+                for operation in pending_operations:
+                    request = json.loads(operation["request"])
+                    transition = db.execute(
+                        "SELECT request FROM transitions WHERE environment=? AND revision=? AND input_hash=?",
+                        (
+                            environment,
+                            request.get("transition_revision"),
+                            request.get("transition_hash"),
+                        ),
+                    ).fetchone()
+                    plan_persisted = bool(
+                        operation["participant"] == HOST_ACTOR
+                        and transition
+                        and "plan" in json.loads(transition["request"])
+                    )
+                    v2_recoverable = v2_recoverable and plan_persisted
+                if not v2_recoverable:
+                    raise Conflict("reconcile ambiguous operations before resume")
             db.execute("UPDATE environments SET status='running' WHERE id=?", (environment,))
             # The deadline stays fixed. Real time did not stop while the worker was absent.
             self.store.append(db, environment, row["revision"], "session.resumed", {"epoch": lease["epoch"]})

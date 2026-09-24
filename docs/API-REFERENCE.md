@@ -1,6 +1,6 @@
 # EnvironmentHarness HTTP API reference
 
-The EnvironmentHarness HTTP API exposes environment sessions, evidence, activity, artifacts, and evaluation results. API version 1 uses the `/v1` path prefix and the `environment-session.v1` protocol.
+The EnvironmentHarness HTTP API exposes environment sessions, evidence, activity, artifacts, and evaluation results. Its management routes use the `/v1` path prefix. Each admitted environment contract declares `environment-session.v1` or `environment-session.v2`; both use the same session lifecycle and evidence routes.
 
 The canonical machine-readable contract is [`contracts/openapi.json`](../contracts/openapi.json). A running service exposes the same document at `/openapi.json` and interactive Swagger UI at `/docs`. Standalone JSON Schemas under `contracts/`, including `ActivityPage.schema.json` and `ActivitySnapshot.schema.json`, record the corresponding durable response shapes. [`PROTOCOL.md`](PROTOCOL.md) defines authority, lifecycle, recovery, and evidence guarantees that cannot be expressed completely in OpenAPI.
 
@@ -100,7 +100,7 @@ curl --fail-with-body -H "Authorization: Bearer $EH_TOKEN" \
   "$EH_URL/v1/environment"
 ```
 
-The response is an `EnvironmentSpec`. It declares the environment implementation, observation and action JSON Schemas, scheduling mode, modalities, capabilities, purposes, environment-supplied operation identities, and phase behavior. The versioned schema is [`EnvironmentSpec.schema.json`](../contracts/EnvironmentSpec.schema.json); reusable operation identity and JSON configuration use [`OperationSpec.schema.json`](../contracts/OperationSpec.schema.json).
+The response is an `EnvironmentSpec` or `EnvironmentSpecV2`. Both declare the environment implementation, observation and action JSON Schemas, scheduling mode, modalities, capabilities, purposes, operation identities, and phase behavior. The v1 and v2 schemas are [`EnvironmentSpec.schema.json`](../contracts/EnvironmentSpec.schema.json) and [`EnvironmentSpecV2.schema.json`](../contracts/EnvironmentSpecV2.schema.json). A v2 contract requires each operation's access class from [`OperationSpecV2.schema.json`](../contracts/OperationSpecV2.schema.json) and sets a maximum transition operation count. Its bounded plan and receipt contracts are [`OperationPlan.schema.json`](../contracts/OperationPlan.schema.json), [`OperationRequest.schema.json`](../contracts/OperationRequest.schema.json), and [`OperationReceipt.schema.json`](../contracts/OperationReceipt.schema.json). See [`PROTOCOL.md`](PROTOCOL.md#environment-session-v2-transition-operations) for the journal, budget, authority, and recovery rules.
 
 ## Environment sessions
 

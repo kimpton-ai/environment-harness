@@ -44,7 +44,7 @@ def advance(session, environment, principal, *, owner=None):
             return {"status": "waiting", "revision": revision, "deadline_exceeded": expired}
         if failures:
             raise Conflict("coordinator lost authority")
-        if spec.environment.phase_deadline == "coordinator":
+        if spec.environment.phase_deadline == "coordinator" and not scheduler.get("closed", False):
             session.close_phase(
                 environment,
                 principal,

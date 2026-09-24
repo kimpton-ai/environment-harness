@@ -1,0 +1,232 @@
+{
+  "$defs": {
+    "Capabilities": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_checkpoint": {
+          "default": false,
+          "title": "Agent Checkpoint",
+          "type": "boolean"
+        },
+        "branch": {
+          "default": false,
+          "title": "Branch",
+          "type": "boolean"
+        },
+        "checkpoint": {
+          "default": false,
+          "title": "Checkpoint",
+          "type": "boolean"
+        },
+        "external_writes": {
+          "default": false,
+          "title": "External Writes",
+          "type": "boolean"
+        },
+        "live_reads": {
+          "default": false,
+          "title": "Live Reads",
+          "type": "boolean"
+        },
+        "logprobs": {
+          "default": false,
+          "title": "Logprobs",
+          "type": "boolean"
+        },
+        "rendered_requests": {
+          "default": false,
+          "title": "Rendered Requests",
+          "type": "boolean"
+        },
+        "replay": {
+          "default": true,
+          "title": "Replay",
+          "type": "boolean"
+        },
+        "resume": {
+          "default": false,
+          "title": "Resume",
+          "type": "boolean"
+        },
+        "token_ids": {
+          "default": false,
+          "title": "Token Ids",
+          "type": "boolean"
+        }
+      },
+      "title": "Capabilities",
+      "type": "object"
+    },
+    "OperationSpecV2": {
+      "additionalProperties": false,
+      "description": "A frozen v2 operation declaration, including its maximum effect class.",
+      "properties": {
+        "access": {
+          "enum": [
+            "read",
+            "write"
+          ],
+          "title": "Access",
+          "type": "string"
+        },
+        "config": {
+          "additionalProperties": true,
+          "title": "Config",
+          "type": "object"
+        },
+        "name": {
+          "pattern": "^[a-zA-Z0-9_.-]{1,160}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "access"
+      ],
+      "title": "OperationSpecV2",
+      "type": "object"
+    }
+  },
+  "$id": "urn:environment-harness:v2:EnvironmentSpecV2",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The additive environment-session.v2 contract.",
+  "properties": {
+    "action_schema": {
+      "additionalProperties": true,
+      "title": "Action Schema",
+      "type": "object"
+    },
+    "capabilities": {
+      "$ref": "#/$defs/Capabilities"
+    },
+    "id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Id",
+      "type": "string"
+    },
+    "implementation": {
+      "minLength": 1,
+      "title": "Implementation",
+      "type": "string"
+    },
+    "max_transition_operations": {
+      "default": 64,
+      "maximum": 64,
+      "minimum": 0,
+      "title": "Max Transition Operations",
+      "type": "integer"
+    },
+    "missing_action": {
+      "default": "reject",
+      "enum": [
+        "reject",
+        "noop"
+      ],
+      "title": "Missing Action",
+      "type": "string"
+    },
+    "modalities": {
+      "default": [
+        "text",
+        "json"
+      ],
+      "items": {
+        "type": "string"
+      },
+      "title": "Modalities",
+      "type": "array"
+    },
+    "observation_schema": {
+      "additionalProperties": true,
+      "title": "Observation Schema",
+      "type": "object"
+    },
+    "operations": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/OperationSpecV2"
+      },
+      "title": "Operations",
+      "type": "array"
+    },
+    "phase_deadline": {
+      "default": "wall",
+      "enum": [
+        "wall",
+        "coordinator"
+      ],
+      "title": "Phase Deadline",
+      "type": "string"
+    },
+    "phase_seconds": {
+      "default": 60,
+      "exclusiveMinimum": 0,
+      "maximum": 86400,
+      "title": "Phase Seconds",
+      "type": "number"
+    },
+    "protocol": {
+      "const": "environment-session.v2",
+      "default": "environment-session.v2",
+      "title": "Protocol",
+      "type": "string"
+    },
+    "purposes": {
+      "default": [
+        "evaluation"
+      ],
+      "items": {
+        "enum": [
+          "evaluation",
+          "training"
+        ],
+        "type": "string"
+      },
+      "title": "Purposes",
+      "type": "array"
+    },
+    "scenario_schema": {
+      "additionalProperties": true,
+      "title": "Scenario Schema",
+      "type": "object"
+    },
+    "scheduling": {
+      "enum": [
+        "sequential",
+        "simultaneous",
+        "event"
+      ],
+      "title": "Scheduling",
+      "type": "string"
+    },
+    "stale_action": {
+      "const": "reject",
+      "default": "reject",
+      "title": "Stale Action",
+      "type": "string"
+    },
+    "version": {
+      "minLength": 1,
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "version",
+    "implementation",
+    "scheduling"
+  ],
+  "title": "EnvironmentSpecV2",
+  "type": "object"
+}

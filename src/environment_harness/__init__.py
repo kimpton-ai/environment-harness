@@ -1,16 +1,45 @@
 """EnvironmentHarness. Supplier implementations are independently owned."""
 
-from .contracts import AgentSpec, EnvironmentSpec, ExperimentSpec, OperationSpec, Principal, Scenario
+from .contracts import (
+    AgentSpec,
+    EnvironmentSpec,
+    EnvironmentSpecV2,
+    EnvironmentV2,
+    ExperimentSpec,
+    OperationPlan,
+    OperationReceipt,
+    OperationRequest,
+    OperationSpec,
+    OperationSpecV2,
+    Principal,
+    Scenario,
+)
 from .harness import EnvironmentHarness, EnvironmentSession, Experiment, ExperimentResult, SessionRunner
-from .operations import EnvironmentOperation
+from .operations import (
+    ControlIntervalExecutionContext,
+    ControlIntervalIntent,
+    ControlIntervalOperationContext,
+    ControlIntervalResult,
+    EnvironmentOperation,
+)
 from .store import EvidenceStore
 
 __all__ = [
     "AgentSpec",
+    "EnvironmentV2",
     "EnvironmentSpec",
+    "EnvironmentSpecV2",
     "ExperimentSpec",
     "OperationSpec",
+    "OperationSpecV2",
+    "OperationRequest",
+    "OperationPlan",
+    "OperationReceipt",
     "EnvironmentOperation",
+    "ControlIntervalOperationContext",
+    "ControlIntervalIntent",
+    "ControlIntervalExecutionContext",
+    "ControlIntervalResult",
     "Principal",
     "Scenario",
     "EnvironmentSession",
@@ -20,4 +49,4 @@ __all__ = [
     "SessionRunner",
     "EvidenceStore",
 ]
-__version__ = "0.2.4rc2"
+__version__ = "0.2.4rc3"

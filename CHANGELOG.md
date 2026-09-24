@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+Durable control intervals now bind accepted inputs, grant generations, runtime identity, checkpoint
+artifacts, and the canonical input-log digest through intent, execution, receipt, and recovery.
+Retries look up the original result instead of redispatching, and scoped erasure projects private
+control and checkpoint payloads while preserving the audit receipt.
+
+The SDK adds opt-in `environment-session.v2` transitions with bounded operation plans,
+host-authorized execution through the existing Operations journal, stable receipts, dependency
+ordering, and conservative recovery after unknown outcomes. Remote suppliers use the separate
+`environment-worker.v2` contract. Existing v1 environments and worker routes remain supported.
+
 Typed scenarios now expand into bounded concurrent experiment trials with durable
 status, deterministic seeds and resumable activity feeds. The evidence viewer adds
 experiment grouping, filtering, unequal-length comparison, progression and report

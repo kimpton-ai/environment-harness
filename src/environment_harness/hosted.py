@@ -128,6 +128,13 @@ class PostgresEvidenceStore(EvidenceStore):
             "transitions": ("request", "result", "rng"),
             "agent_work": ("observation", "response", "agent_state"),
             "session_runs": ("scenario", "error", "latest_activity", "scenario_body"),
+            "control_intervals": (
+                "operation_id", "operation_request_hash", "runtime_identity", "runtime_identity_hash",
+                "start_checkpoint", "controller_grant", "control_log_digest", "end_checkpoint",
+                "measurements", "receipt",
+            ),
+            "control_grants": ("id", "controller", "participant"),
+            "control_inputs": ("batch_id", "grant_id", "request", "request_hash", "acknowledgement"),
         }
         for table, columns in fields.items():
             expression = "+".join(f"octet_length(coalesce({column},''))" for column in columns)
@@ -185,6 +192,9 @@ class PostgresEvidenceStore(EvidenceStore):
                 "reports",
                 "artifacts",
                 "operations",
+                "control_inputs",
+                "control_grants",
+                "control_intervals",
                 "checkpoints",
                 "actions",
                 "observations",

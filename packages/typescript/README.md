@@ -2,7 +2,7 @@
 
 Typed HTTP client for an EnvironmentHarness supplier service. This package uses the same versioned contracts as the Python SDK.
 
-Install the `environment-harness-client-0.2.4-rc.2.tgz` asset from the GitHub release with `npm install ./environment-harness-client-0.2.4-rc.2.tgz`. A registry publication is not required.
+Install the `environment-harness-client-0.2.4-rc.3.tgz` asset from the GitHub release with `npm install ./environment-harness-client-0.2.4-rc.3.tgz`. A registry publication is not required.
 
 ```ts
 import { EnvironmentClient } from '@environment-harness/client';

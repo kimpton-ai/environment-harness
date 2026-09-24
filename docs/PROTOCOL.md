@@ -1,4 +1,10 @@
-# Environment-session v1
+# EnvironmentHarness session and worker protocols
+
+The authenticated session API remains under `/v1`. Its `EnvironmentSpec` selects the
+environment contract version for each session. `environment-session.v1` retains the
+single-call `resolve` behavior below. `environment-session.v2` adds a plan, host-journaled
+operation receipts, and receipt-bound resolution while retaining the same session lifecycle,
+evidence, and storage model.
 
 ## Authority and transport
 
@@ -82,6 +88,98 @@ Checkpoints include the environment, RNG, participants and agent checkpoint data
 The latest committed environment state is the recovery authority. Resume does not roll the outside environment back to an old checkpoint. Pending ambiguous external dispatches must be reconciled before resume or checkpoint. The operations journal persists intent and reservation before dispatch. An environment advertises operation names and versions, supplies their runtime classes, and freezes each selected class's JSON configuration in `ExperimentSpec.operations`. Session creation requires the selected specification to match the runtime class. Runtime classes receive a stable environment/operation key, a maximum cost and a live fenced-authority callback. Receipt settlement is idempotent; unknown outcomes stay blocked if lookup cannot prove what happened.
 
 Budget limits cover operations routed through the journal. A backend must enforce the maximum passed to it. Arbitrary externally managed programs cannot acquire spending authority through this SDK. Reservations for known-unsent operations can be released on cancellation; ambiguous dispatches retain their reservation until settlement.
+
+## Environment-session v2 transition operations
+
+An `EnvironmentSpecV2` identifies the `environment-session.v2` contract. Each selected
+`OperationSpecV2` freezes its name, version, JSON configuration, and access class (`read` or
+`write`). A write operation requires both the frozen run policy and environment capability to
+allow external writes. These declarations are admitted with the package. A transition plan cannot
+choose an endpoint, participant, role, access class, or broader authority.
+
+The environment implements `plan_transition(state, actions, random, events)` and
+`resolve_transition(state, actions, random, events, plan, receipts)`. Planning is pure and returns
+an `OperationPlan` with a stable plan ID, at most 64 typed requests, an opaque JSON continuation,
+and a dependency DAG. The canonical serialized plan is limited to 1 MiB. Each typed provider
+receipt is limited to 128 KiB, and the complete receipt map is limited to 8 MiB. The host validates
+selected operation versions and total reservation against the frozen remaining budget, derives
+stable operation IDs from the session, revision, input hash, plan and request, and persists the
+pre-state/action/event input plus the complete plan before dispatch.
+
+The host resolves each request through the existing `operations` journal. It derives the provider
+endpoint and access class from the admitted operation, uses a fixed `@environment` journal actor, and checks
+the transition revision, input snapshot and current writer lease before dispatch and during a live
+authority callback. Requests execute in dependency order, and settled dependency receipts are
+available to downstream operation providers. Each successful receipt is stored before the
+environment receives an `OperationReceipt` in `resolve_transition`.
+
+A prepared request is safe to dispatch because it is known unsent. An operation left in
+`dispatching` or `unknown` is reconciled by its stable provider ID. If lookup cannot prove a
+receipt, the transition stays blocked with its reservation held. The host never dispatches an
+uncertain operation again. Recovery reuses the persisted plan and receipts, then commits the
+result under the same state snapshot and writer fence. Checkpointing and branching reject
+unresolved operation effects. Session resume accepts only a persisted v2 plan that can be
+reconciled by stable-ID lookup; if lookup cannot prove settlement, the transition stays blocked.
+Legacy ambiguous operations remain blocked until separately reconciled.
+
+## Durable control intervals
+
+The low-level `EnvironmentSession` can journal bounded control intervals for an external runtime.
+`prepare_control_interval` binds an interval ID to an existing prepared operation ID, the operation
+request hash, the current Harness revision and writer epoch, a runtime identity object, and a private
+artifact checkpoint reference. The runtime identity is recorded as supplied; Harness does not
+interpret engine-specific fields. Simulated duration must be greater than zero and at most one
+second. A later interval must start from the previous committed interval's ending checkpoint.
+
+`grant_control` issues one controller grant for that interval, tied to the writer epoch and capped
+by both the requested lifetime and writer lease. `accept_control_inputs` stores the complete
+sequence-numbered JSON batch and its digest in one synchronous transaction before returning its
+acknowledgement. An exact retry returns that acknowledgement. Reusing a batch ID with changed
+content, a stale or skipped sequence, an expired grant, or a different controller is rejected.
+Accepted input events are private to non-agent roles. The acknowledgement marks the batch
+provisional and is returned to the authorized controller only.
+
+`seal_control_interval` checks that its control-log digest is the canonical digest of the ordered
+accepted batch IDs and hashes, verifies the ending checkpoint artifact, and records measurements.
+This establishes what Harness durably accepted, not that an external physics worker applied every
+input or that its measurements are scientifically correct. `commit_control_interval` accepts only
+the byte-for-byte canonical receipt already settled as `succeeded` for the original Harness
+operation, and rechecks the stored operation request hash, current writer fence, and checkpoint
+artifact. Operation dispatch commits a bound interval before returning its receipt to transition
+code, so a transition cannot advance past an uncommitted interval. Streamed state and measurements
+remain provisional until that commit event.
+
+`recover_control_interval` commits an already-settled receipt under a current writer lease, including
+after a replacement worker takes over. For `dispatching` or `unknown` operations, it returns the
+last committed checkpoint, marks that a new branch is required, and explicitly disallows provider
+re-execution. Harness does not reconstruct an external simulator from an opaque checkpoint artifact
+or create a physics-specific branch; the environment runtime must restore that artifact into a
+separately identified branch. A prepared operation remains known-unsent and can continue only
+through the existing operation journal.
+
+An `EnvironmentOperation` can opt in by returning a `ControlIntervalIntent` from
+`control_interval_intent`. The provider supplies its runtime identity, starting checkpoint, bounded
+duration and controller name. Harness publishes checkpoint bytes as private artifacts, derives the
+participant from the persisted operation authority, journals the complete operation envelope
+(`operation`, frozen provider `version`, and `payload`) as one accepted batch, then passes a
+`ControlIntervalExecutionContext` to `execute_control_interval`. The context
+contains the original acknowledgement, verified starting checkpoint bytes, frozen
+`max_checkpoint_bytes`, and Harness-computed `control_log_digest`; the provider must use that digest
+in its receipt. Harness rejects a missing or mismatched receipt digest before sealing.
+`RunPolicy.max_checkpoint_bytes` defaults to 64 MiB and is distinct from the smaller
+ordinary artifact limit. Providers can also enforce a smaller scene-specific export limit. Every
+checkpoint payload must be a complete data-only bundle, including every referenced dependency.
+`control_interval_result` extracts the ending checkpoint bundle and factual measurements from that
+receipt. Harness seals the interval before settling the exact receipt, then commits it before
+returning. Providers without this opt-in keep the existing operation path.
+
+If dispatch becomes uncertain, reconciliation uses the provider's stable-ID lookup and the same
+result extractor. A missing lookup receipt blocks advancement. Harness never repeats provider
+execution. `read_committed_control_intervals` returns committed intervals in sequence order to
+researcher or scorer authority, rechecks private checkpoint content hashes, verifies the event chain,
+and links each interval commit event to its transition input and committed state hash when available.
+An interval can be committed while its enclosing transition is still pending; in that case the
+transition pointer is marked `pending`.
 
 Branches copy checkpoint state into a new environment and retain lineage. Parent credentials and artifact references do not grant child access. Branching with pending actions or operations, or inheriting a live-write policy, is rejected. Private suppliers can provide different counterfactual capabilities only under a contract that implements them.
 

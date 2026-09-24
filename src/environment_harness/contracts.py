@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import json
 from threading import Event
-from typing import TYPE_CHECKING, Any, Generic, Literal, Mapping, Protocol, TypeVar
+from typing import TYPE_CHECKING, Annotated, Any, Generic, Literal, Mapping, Protocol, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Json = dict[str, Any]
 Mode = Literal["sequential", "simultaneous", "event"]
 InputT = TypeVar("InputT")
+MAX_OPERATION_PLAN_BYTES = 1_048_576
+MAX_OPERATION_RECEIPT_BYTES = 131_072
+MAX_OPERATION_RECEIPTS_BYTES = 8_388_608
+MAX_COST_MICROS = 9_223_372_036_854_775_807
 
 if TYPE_CHECKING:
     from .operations import EnvironmentOperation
@@ -93,6 +97,125 @@ class EnvironmentSpec(Record):
         return self
 
 
+class OperationSpecV2(OperationSpec):
+    """A frozen v2 operation declaration, including its maximum effect class."""
+
+    access: Literal["read", "write"]
+
+
+class EnvironmentSpecV2(EnvironmentSpec):
+    """The additive environment-session.v2 contract."""
+
+    # Pydantic enforces frozen=True for these models; pyright does not model that field immutability.
+    protocol: Literal["environment-session.v2"] = "environment-session.v2"  # pyright: ignore[reportIncompatibleVariableOverride]
+    operations: tuple[OperationSpecV2, ...] = ()  # pyright: ignore[reportIncompatibleVariableOverride]
+    max_transition_operations: int = Field(default=64, ge=0, le=64, strict=True)
+
+
+EnvironmentSpecUnion = Annotated[EnvironmentSpec | EnvironmentSpecV2, Field(discriminator="protocol")]
+
+
+class OperationRequest(Record):
+    """One host-authorized external operation requested by a v2 transition."""
+
+    key: str = Field(pattern=r"^[A-Za-z0-9_-]{1,128}$")
+    operation: str = Field(pattern=r"^[a-zA-Z0-9_.-]{1,160}$")
+    version: str = Field(min_length=1, max_length=200)
+    payload: Json = Field(default_factory=dict)
+    max_cost_micros: int = Field(default=0, ge=0, le=MAX_COST_MICROS, strict=True)
+    depends_on: tuple[str, ...] = Field(default=(), max_length=64)
+
+    @model_validator(mode="after")
+    def serializable(self):
+        if len(set(self.depends_on)) != len(self.depends_on):
+            raise ValueError("operation dependencies must be unique")
+        try:
+            json.dumps(self.payload, allow_nan=False)
+        except (TypeError, ValueError) as error:
+            raise ValueError("operation payload must be JSON serializable") from error
+        return self
+
+
+class OperationPlan(Record):
+    """A bounded, immutable DAG of effects to journal before dispatch."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "description": "At most 64 requests and at most 1 MiB of canonical JSON. Dependencies must form a DAG."
+        }
+    )
+
+    plan_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,128}$")
+    operations: tuple[OperationRequest, ...] = Field(
+        default=(), max_length=64, description="At most 64 typed requests in the operation DAG."
+    )
+    continuation: Json = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def bounded_acyclic_plan(self):
+        keys = [operation.key for operation in self.operations]
+        if len(set(keys)) != len(keys):
+            raise ValueError("operation plan keys must be unique")
+        by_key = {operation.key: operation for operation in self.operations}
+        for operation in self.operations:
+            if operation.key in operation.depends_on or any(
+                key not in by_key for key in operation.depends_on
+            ):
+                raise ValueError("operation plan dependency is missing or self-referential")
+        visiting: set[str] = set()
+        visited: set[str] = set()
+
+        def visit(key):
+            if key in visiting:
+                raise ValueError("operation plan dependencies must be acyclic")
+            if key in visited:
+                return
+            visiting.add(key)
+            for dependency in by_key[key].depends_on:
+                visit(dependency)
+            visiting.remove(key)
+            visited.add(key)
+
+        for key in keys:
+            visit(key)
+        if sum(operation.max_cost_micros for operation in self.operations) > MAX_COST_MICROS:
+            raise ValueError("operation plan reservation exceeds the signed 64-bit budget limit")
+        try:
+            encoded = json.dumps(self.model_dump(mode="json"), allow_nan=False, separators=(",", ":"))
+        except (TypeError, ValueError) as error:
+            raise ValueError("operation plan must be JSON serializable") from error
+        if len(encoded.encode("utf-8")) > MAX_OPERATION_PLAN_BYTES:
+            raise ValueError("operation plan exceeds 1 MiB")
+        return self
+
+
+class OperationReceipt(Record):
+    """A settled provider receipt bound to its plan request and journal ID."""
+
+    key: str = Field(pattern=r"^[A-Za-z0-9_-]{1,128}$")
+    operation_id: str = Field(min_length=1, max_length=128)
+    operation: str = Field(pattern=r"^[a-zA-Z0-9_.-]{1,160}$")
+    version: str = Field(min_length=1, max_length=200)
+    receipt: Json
+    cost_micros: int = Field(ge=0, le=MAX_COST_MICROS, strict=True)
+
+    @model_validator(mode="after")
+    def serializable(self):
+        if (
+            self.receipt.get("operation_id") != self.operation_id
+            or type(self.receipt.get("cost_micros")) is not int
+            or self.receipt.get("cost_micros") != self.cost_micros
+        ):
+            raise ValueError("operation receipt identity or cost does not match its provider receipt")
+        try:
+            encoded = json.dumps(self.model_dump(mode="json"), allow_nan=False, separators=(",", ":"))
+        except (TypeError, ValueError) as error:
+            raise ValueError("operation receipt must be JSON serializable") from error
+        if len(encoded.encode("utf-8")) > MAX_OPERATION_RECEIPT_BYTES:
+            raise ValueError("operation receipt exceeds 128 KiB")
+        return self
+
+
 class AgentSpec(Record):
     id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,80}$")
     implementation: str = Field(min_length=1)
@@ -106,6 +229,7 @@ class RunPolicy(Record):
     max_cost_micros: int = Field(default=0, ge=0)
     max_event_bytes: int = Field(default=1048576, ge=1024, le=16777216)
     max_artifact_bytes: int = Field(default=16777216, ge=1)
+    max_checkpoint_bytes: int = Field(default=67108864, ge=1, le=1073741824)
     max_state_bytes: int = Field(default=4194304, ge=1024)
     allowed_endpoints: tuple[str, ...] = ()
     allowed_operations: tuple[str, ...] = ()
@@ -113,7 +237,7 @@ class RunPolicy(Record):
 
 
 class ExperimentSpec(Record):
-    environment: EnvironmentSpec
+    environment: EnvironmentSpecUnion
     participants: tuple[AgentSpec, ...] = Field(min_length=1)
     seed: int = 0
     scenario: str = "synthetic"
@@ -126,7 +250,7 @@ class ExperimentSpec(Record):
     interventions: Json = Field(default_factory=dict)
     scoring_versions: tuple[str, ...] = ()
     policy: RunPolicy = Field(default_factory=RunPolicy)
-    operations: tuple[OperationSpec, ...] = ()
+    operations: tuple[OperationSpec | OperationSpecV2, ...] = ()
 
     @model_validator(mode="after")
     def check(self):
@@ -137,6 +261,11 @@ class ExperimentSpec(Record):
             raise ValueError("environment entitlement denies purpose")
         if self.purpose == "training" and self.split != "training":
             raise ValueError("heldout environments cannot be used for training")
+        if (
+            self.environment.protocol == "environment-session.v2"
+            and self.policy.max_cost_micros > MAX_COST_MICROS
+        ):
+            raise ValueError("v2 operation budget exceeds the signed 64-bit journal limit")
         if self.policy.external_writes and not self.environment.capabilities.external_writes:
             raise ValueError("external writes unsupported")
         available = {operation.name: operation for operation in self.environment.operations}
@@ -148,6 +277,11 @@ class ExperimentSpec(Record):
             for operation in self.operations
         ):
             raise ValueError("operation is not supplied by the environment")
+        if isinstance(self.environment, EnvironmentSpecV2) and any(
+            not isinstance(operation, OperationSpecV2) or available[operation.name] != operation
+            for operation in self.operations
+        ):
+            raise ValueError("v2 selected operation must exactly match its frozen environment declaration")
         return self
 
 
@@ -326,6 +460,29 @@ class Environment(Protocol):
         self, state: Json, actions: dict[str, Json | None], random, events: list[Json]
     ) -> Transition: ...
     def intervene(self, state: Json, changes: Json) -> Json: ...
+
+
+class EnvironmentV2(Protocol):
+    """A v2 environment plans bounded effects before committing a transition."""
+
+    spec: EnvironmentSpecV2
+    operations: Mapping[str, EnvironmentOperation]
+
+    def initialize(self, experiment: ExperimentSpec) -> Json: ...
+    def observe(self, state: Json, participant: str) -> Json: ...
+    def intervene(self, state: Json, changes: Json) -> Json: ...
+    def plan_transition(
+        self, state: Json, actions: dict[str, Json | None], random, events: list[Json]
+    ) -> OperationPlan: ...
+    def resolve_transition(
+        self,
+        state: Json,
+        actions: dict[str, Json | None],
+        random,
+        events: list[Json],
+        plan: OperationPlan,
+        receipts: Mapping[str, OperationReceipt],
+    ) -> Transition: ...
 
 
 class AgentProgram(Protocol):
