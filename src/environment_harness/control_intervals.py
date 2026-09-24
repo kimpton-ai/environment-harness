@@ -12,6 +12,7 @@ import math
 import re
 import time
 from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any
 
 from .errors import Conflict, Forbidden
 from .store import digest, encode, uid
@@ -23,6 +24,11 @@ _MAX_RUNTIME_IDENTITY_BYTES = 16_384
 
 class ControlIntervals:
     """Mixin for the native EnvironmentSession durability boundary."""
+
+    if TYPE_CHECKING:
+        store: Any
+
+        def _fence(self, row: Any, lease: Any) -> None: ...
 
     def prepare_control_interval(
         self,
@@ -57,14 +63,24 @@ class ControlIntervals:
                 (environment, interval_id),
             ).fetchone()
             contract = (
-                operation_id, operation_request_hash, runtime, runtime_hash,
-                lease["owner"], lease["epoch"], checkpoint, duration,
+                operation_id,
+                operation_request_hash,
+                runtime,
+                runtime_hash,
+                lease["owner"],
+                lease["epoch"],
+                checkpoint,
+                duration,
             )
             if prior:
                 existing = (
-                    prior["operation_id"], prior["operation_request_hash"],
-                    json.loads(prior["runtime_identity"]), prior["runtime_identity_hash"],
-                    prior["lease_owner"], prior["lease_epoch"], json.loads(prior["start_checkpoint"]),
+                    prior["operation_id"],
+                    prior["operation_request_hash"],
+                    json.loads(prior["runtime_identity"]),
+                    prior["runtime_identity_hash"],
+                    prior["lease_owner"],
+                    prior["lease_epoch"],
+                    json.loads(prior["start_checkpoint"]),
                     prior["simulated_seconds"],
                 )
                 if existing != contract:
@@ -95,13 +111,27 @@ class ControlIntervals:
                 "start_checkpoint,simulated_seconds,controller_grant,status,created) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'prepared',?)",
                 (
-                    environment, interval_id, sequence, row["revision"], operation_id,
-                    operation_request_hash, encode(runtime), runtime_hash, lease["owner"],
-                    lease["epoch"], encode(checkpoint), duration, grant_id, created,
+                    environment,
+                    interval_id,
+                    sequence,
+                    row["revision"],
+                    operation_id,
+                    operation_request_hash,
+                    encode(runtime),
+                    runtime_hash,
+                    lease["owner"],
+                    lease["epoch"],
+                    encode(checkpoint),
+                    duration,
+                    grant_id,
+                    created,
                 ),
             )
             self.store.append(
-                db, environment, row["revision"], "control.interval_prepared",
+                db,
+                environment,
+                row["revision"],
+                "control.interval_prepared",
                 {
                     "interval_id": interval_id,
                     "sequence": sequence,
@@ -155,7 +185,8 @@ class ControlIntervals:
             ).fetchone()
             if existing:
                 if (
-                    existing["id"] != grant_id or existing["controller"] != controller
+                    existing["id"] != grant_id
+                    or existing["controller"] != controller
                     or existing["participant"] != participant
                     or existing["lease_epoch"] != lease["epoch"]
                     or existing["requested_ttl"] != float(ttl)
@@ -177,15 +208,27 @@ class ControlIntervals:
             db.execute(
                 "INSERT INTO control_grants (environment,id,interval_id,controller,participant,"
                 "generation,lease_epoch,expires,requested_ttl,last_sequence) VALUES (?,?,?,?,?,?,?,?,?,0)",
-                (environment, grant_id, interval_id, controller, participant, generation,
-                 lease["epoch"], expires, float(ttl)),
+                (
+                    environment,
+                    grant_id,
+                    interval_id,
+                    controller,
+                    participant,
+                    generation,
+                    lease["epoch"],
+                    expires,
+                    float(ttl),
+                ),
             )
             db.execute(
                 "UPDATE control_intervals SET status='open' WHERE environment=? AND id=? AND status='prepared'",
                 (environment, interval_id),
             )
             self.store.append(
-                db, environment, row["revision"], "control.grant_issued",
+                db,
+                environment,
+                row["revision"],
+                "control.grant_issued",
                 {
                     "interval_id": interval_id,
                     "grant_id": grant_id,
@@ -249,7 +292,8 @@ class ControlIntervals:
             ).fetchone()
             if prior:
                 if (
-                    prior["interval_id"] != interval_id or prior["grant_id"] != grant_id
+                    prior["interval_id"] != interval_id
+                    or prior["grant_id"] != grant_id
                     or prior["request"] != request_json
                 ):
                     raise Conflict("control batch identifier reused")
@@ -261,7 +305,8 @@ class ControlIntervals:
             if not interval or interval["status"] != "open":
                 raise Conflict("control interval is not accepting input")
             if (
-                row["status"] != "running" or row["revision"] != interval["revision"]
+                row["status"] != "running"
+                or row["revision"] != interval["revision"]
                 or row["lease_owner"] != interval["lease_owner"]
                 or row["lease_epoch"] != grant["lease_epoch"]
                 or row["lease_until"] <= now
@@ -285,17 +330,34 @@ class ControlIntervals:
             }
             db.execute(
                 "INSERT INTO control_inputs VALUES (?,?,?,?,?,?,?,?,?)",
-                (environment, interval_id, batch_id, grant_id, sequence, request_json,
-                 request_hash, encode(ack), now),
+                (
+                    environment,
+                    interval_id,
+                    batch_id,
+                    grant_id,
+                    sequence,
+                    request_json,
+                    request_hash,
+                    encode(ack),
+                    now,
+                ),
             )
             db.execute(
                 "UPDATE control_grants SET last_sequence=? WHERE environment=? AND id=?",
                 (sequence, environment, grant_id),
             )
             self.store.append(
-                db, environment, row["revision"], "control.input_accepted",
-                {"interval_id": interval_id, "batch_id": batch_id, "sequence": sequence,
-                 "input_hash": request_hash, "provisional": True},
+                db,
+                environment,
+                row["revision"],
+                "control.input_accepted",
+                {
+                    "interval_id": interval_id,
+                    "batch_id": batch_id,
+                    "sequence": sequence,
+                    "input_hash": request_hash,
+                    "provisional": True,
+                },
             )
             return ack
 
@@ -349,11 +411,15 @@ class ControlIntervals:
                 "SELECT request,status FROM operations WHERE environment=? AND id=?",
                 (environment, interval["operation_id"]),
             ).fetchone()
-            if not operation or digest(json.loads(operation["request"])) != interval["operation_request_hash"]:
+            if (
+                not operation
+                or digest(json.loads(operation["request"])) != interval["operation_request_hash"]
+            ):
                 raise Conflict("control operation intent changed")
             if interval["status"] in ("sealed", "committed"):
                 sealed = (
-                    interval["control_log_digest"], json.loads(interval["end_checkpoint"]),
+                    interval["control_log_digest"],
+                    json.loads(interval["end_checkpoint"]),
                     json.loads(interval["measurements"]),
                 )
                 if sealed != (control_log_digest, checkpoint, dict(measurements)):
@@ -365,13 +431,28 @@ class ControlIntervals:
             db.execute(
                 "UPDATE control_intervals SET status='sealed',control_log_digest=?,end_checkpoint=?,"
                 "measurements=?,sealed=? WHERE environment=? AND id=? AND status='open'",
-                (control_log_digest, encode(checkpoint), measurement_json, time.time(), environment, interval_id),
+                (
+                    control_log_digest,
+                    encode(checkpoint),
+                    measurement_json,
+                    time.time(),
+                    environment,
+                    interval_id,
+                ),
             )
             self.store.append(
-                db, environment, row["revision"], "control.interval_sealed",
-                {"interval_id": interval_id, "operation_id": interval["operation_id"],
-                 "control_log_digest": control_log_digest, "end_checkpoint": checkpoint,
-                 "measurements_hash": digest(dict(measurements)), "status": "provisional"},
+                db,
+                environment,
+                row["revision"],
+                "control.interval_sealed",
+                {
+                    "interval_id": interval_id,
+                    "operation_id": interval["operation_id"],
+                    "control_log_digest": control_log_digest,
+                    "end_checkpoint": checkpoint,
+                    "measurements_hash": digest(dict(measurements)),
+                    "status": "provisional",
+                },
             )
             saved = db.execute(
                 "SELECT * FROM control_intervals WHERE environment=? AND id=?",
@@ -406,7 +487,10 @@ class ControlIntervals:
                 "SELECT request,status,receipt FROM operations WHERE environment=? AND id=?",
                 (environment, interval["operation_id"]),
             ).fetchone()
-            if not operation or digest(json.loads(operation["request"])) != interval["operation_request_hash"]:
+            if (
+                not operation
+                or digest(json.loads(operation["request"])) != interval["operation_request_hash"]
+            ):
                 raise Conflict("control operation intent changed")
             if operation["status"] != "succeeded" or operation["receipt"] != receipt_json:
                 raise Conflict("control interval requires the exact settled operation receipt")
@@ -419,11 +503,20 @@ class ControlIntervals:
                 (receipt_json, committed_at, environment, interval_id),
             )
             self.store.append(
-                db, environment, row["revision"], "control.interval_committed",
-                {"interval_id": interval_id, "sequence": interval["sequence"],
-                 "operation_id": interval["operation_id"], "operation_receipt_hash": digest(dict(operation_receipt)),
-                 "end_checkpoint": saved_checkpoint, "control_log_digest": interval["control_log_digest"],
-                 "status": "committed", "provisional": False},
+                db,
+                environment,
+                row["revision"],
+                "control.interval_committed",
+                {
+                    "interval_id": interval_id,
+                    "sequence": interval["sequence"],
+                    "operation_id": interval["operation_id"],
+                    "operation_receipt_hash": digest(dict(operation_receipt)),
+                    "end_checkpoint": saved_checkpoint,
+                    "control_log_digest": interval["control_log_digest"],
+                    "status": "committed",
+                    "provisional": False,
+                },
             )
             committed = db.execute(
                 "SELECT * FROM control_intervals WHERE environment=? AND id=?",
@@ -468,7 +561,9 @@ class ControlIntervals:
                 "ORDER BY sequence DESC LIMIT 1",
                 (environment,),
             ).fetchone()
-            checkpoint = json.loads(last["end_checkpoint"]) if last else json.loads(interval["start_checkpoint"])
+            checkpoint = (
+                json.loads(last["end_checkpoint"]) if last else json.loads(interval["start_checkpoint"])
+            )
             if interval["status"] == "sealed" and operation and operation["status"] == "succeeded":
                 recovery_lease = lease or {
                     "owner": interval["lease_owner"],
@@ -490,7 +585,11 @@ class ControlIntervals:
             sealed_receipt = interval["status"] == "sealed" and operation_status == "succeeded"
             known_unsent = interval["status"] in ("prepared", "open") and operation_status == "prepared"
             result = {
-                "status": "receipt_available" if sealed_receipt else "known_unsent" if known_unsent else "recovery_required",
+                "status": "receipt_available"
+                if sealed_receipt
+                else "known_unsent"
+                if known_unsent
+                else "recovery_required",
                 "operation_id": interval["operation_id"],
                 "operation_status": operation_status,
                 "last_committed_checkpoint": checkpoint,
@@ -511,7 +610,12 @@ class ControlIntervals:
         if not isinstance(reference, Mapping):
             raise ValueError("checkpoint reference must contain an artifact ID and SHA-256")
         artifact_id, sha = reference.get("artifact_id"), reference.get("sha256")
-        if not isinstance(artifact_id, str) or not artifact_id or not isinstance(sha, str) or not _SHA256.fullmatch(sha):
+        if (
+            not isinstance(artifact_id, str)
+            or not artifact_id
+            or not isinstance(sha, str)
+            or not _SHA256.fullmatch(sha)
+        ):
             raise ValueError("checkpoint reference requires an artifact ID and SHA-256")
         with self.store.transaction() as db:
             self._checkpoint_reference_in(db, environment, who, reference)
@@ -527,7 +631,8 @@ class ControlIntervals:
             (environment, reference["artifact_id"]),
         ).fetchone()
         if (
-            not artifact or artifact["sha256"] != reference["sha256"]
+            not artifact
+            or artifact["sha256"] != reference["sha256"]
             or json.loads(artifact["audience"]) != []
         ):
             raise Conflict("checkpoint artifact is unavailable or not content addressed")

@@ -125,7 +125,13 @@ def finish(saved, receipt_holder, *, lose_response=False, replace_worker=False):
         }
         batch = receipt_holder["ack"]
         log_digest = digest(
-            [{"sequence": batch["sequence"], "batch_id": batch["batch_id"], "input_hash": batch["input_hash"]}]
+            [
+                {
+                    "sequence": batch["sequence"],
+                    "batch_id": batch["batch_id"],
+                    "input_hash": batch["input_hash"],
+                }
+            ]
         )
         session.seal_control_interval(
             environment,
@@ -168,15 +174,18 @@ def test_interval_inputs_are_fenced_durable_and_receipt_recovery_does_not_reexec
         inputs={"joint_targets": [0.25, -0.5]},
     )
     assert ack["status"] == "accepted" and ack["provisional"] is True
-    assert session.accept_control_inputs(
-        environment,
-        saved["controller"],
-        interval_id="interval-1",
-        grant_id=saved["grant"]["grant_id"],
-        batch_id="batch-1",
-        sequence=1,
-        inputs={"joint_targets": [0.25, -0.5]},
-    ) == ack
+    assert (
+        session.accept_control_inputs(
+            environment,
+            saved["controller"],
+            interval_id="interval-1",
+            grant_id=saved["grant"]["grant_id"],
+            batch_id="batch-1",
+            sequence=1,
+            inputs={"joint_targets": [0.25, -0.5]},
+        )
+        == ack
+    )
     assert not any(
         event["kind"] == "control.input_accepted"
         for event in session.store.events(environment, saved["controller"])
@@ -312,9 +321,7 @@ def test_replacement_worker_commits_only_the_settled_receipt(tmp_path):
     )
     with pytest.raises(Conflict, match="fenced"):
         finish(saved, {"ack": ack}, replace_worker=True)
-    replacement = saved["session"].lease(
-        saved["environment"], saved["researcher"], "replacement-worker"
-    )
+    replacement = saved["session"].lease(saved["environment"], saved["researcher"], "replacement-worker")
     recovered = saved["session"].recover_control_interval(
         saved["environment"],
         saved["researcher"],
