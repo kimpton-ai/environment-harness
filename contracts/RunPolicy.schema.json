@@ -30,6 +30,13 @@
       "title": "Max Artifact Bytes",
       "type": "integer"
     },
+    "max_checkpoint_bytes": {
+      "default": 67108864,
+      "maximum": 1073741824,
+      "minimum": 1,
+      "title": "Max Checkpoint Bytes",
+      "type": "integer"
+    },
     "max_cost_micros": {
       "default": 0,
       "minimum": 0,
