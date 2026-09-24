@@ -77,6 +77,28 @@ CREATE TABLE IF NOT EXISTS transitions (
  environment TEXT NOT NULL, revision INTEGER NOT NULL, input_hash TEXT NOT NULL,
  request TEXT NOT NULL, lease_epoch INTEGER NOT NULL, status TEXT NOT NULL,
  result TEXT, rng TEXT, PRIMARY KEY(environment,revision,input_hash));
+CREATE TABLE IF NOT EXISTS control_intervals (
+ environment TEXT NOT NULL, id TEXT NOT NULL, sequence INTEGER NOT NULL,
+ revision INTEGER NOT NULL, operation_id TEXT NOT NULL, operation_request_hash TEXT NOT NULL,
+ runtime_identity TEXT NOT NULL, runtime_identity_hash TEXT NOT NULL,
+ lease_owner TEXT NOT NULL, lease_epoch INTEGER NOT NULL,
+ start_checkpoint TEXT NOT NULL, simulated_seconds REAL NOT NULL,
+ controller_grant TEXT NOT NULL, status TEXT NOT NULL,
+ control_log_digest TEXT, end_checkpoint TEXT, measurements TEXT, receipt TEXT,
+ created REAL NOT NULL, sealed REAL, committed REAL,
+ PRIMARY KEY(environment,id), UNIQUE(environment,sequence), UNIQUE(environment,operation_id));
+CREATE INDEX IF NOT EXISTS control_intervals_status ON control_intervals(environment,status,sequence);
+CREATE TABLE IF NOT EXISTS control_grants (
+ environment TEXT NOT NULL, id TEXT NOT NULL, interval_id TEXT NOT NULL,
+ controller TEXT NOT NULL, participant TEXT, generation INTEGER NOT NULL,
+ lease_epoch INTEGER NOT NULL, expires REAL NOT NULL, requested_ttl REAL NOT NULL,
+ last_sequence INTEGER NOT NULL DEFAULT 0,
+ PRIMARY KEY(environment,id), UNIQUE(environment,interval_id));
+CREATE TABLE IF NOT EXISTS control_inputs (
+ environment TEXT NOT NULL, interval_id TEXT NOT NULL, batch_id TEXT NOT NULL,
+ grant_id TEXT NOT NULL, sequence INTEGER NOT NULL, request TEXT NOT NULL,
+ request_hash TEXT NOT NULL, acknowledgement TEXT NOT NULL, accepted REAL NOT NULL,
+ PRIMARY KEY(environment,batch_id), UNIQUE(environment,interval_id,sequence));
 CREATE TABLE IF NOT EXISTS agent_work (
  environment TEXT NOT NULL, revision INTEGER NOT NULL, participant TEXT NOT NULL,
  generation INTEGER NOT NULL, id TEXT NOT NULL, observation TEXT NOT NULL,
@@ -107,6 +129,8 @@ CREATE TRIGGER IF NOT EXISTS reports_no_update BEFORE UPDATE ON reports BEGIN SE
 CREATE TRIGGER IF NOT EXISTS reports_no_delete BEFORE DELETE ON reports BEGIN SELECT RAISE(ABORT,'immutable'); END;
 CREATE TRIGGER IF NOT EXISTS checkpoints_no_update BEFORE UPDATE ON checkpoints BEGIN SELECT RAISE(ABORT,'immutable'); END;
 CREATE TRIGGER IF NOT EXISTS checkpoints_no_delete BEFORE DELETE ON checkpoints BEGIN SELECT RAISE(ABORT,'immutable'); END;
+CREATE TRIGGER IF NOT EXISTS control_inputs_no_update BEFORE UPDATE ON control_inputs BEGIN SELECT RAISE(ABORT,'immutable'); END;
+CREATE TRIGGER IF NOT EXISTS control_inputs_no_delete BEFORE DELETE ON control_inputs BEGIN SELECT RAISE(ABORT,'immutable'); END;
 """
 
 

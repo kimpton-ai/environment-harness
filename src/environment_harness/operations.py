@@ -407,7 +407,11 @@ class Operations:
                     (environment, operation_id),
                 )
             raise
-        return self.settle(environment, who, operation_id, receipt)
+        settled = self.settle(environment, who, operation_id, receipt)
+        commit_interval = getattr(session, "commit_control_interval_for_operation", None)
+        if callable(commit_interval):
+            commit_interval(environment, who, lease, operation_id, settled)
+        return settled
 
     def settle(self, environment, who, operation_id, receipt):
         if (

@@ -18,6 +18,7 @@ from .contracts import (
     Principal,
     Transition,
 )
+from .control_intervals import ControlIntervals
 from .errors import Conflict, Forbidden, Unsupported
 from .history import inherit
 from .operations import HOST_ACTOR, Operations, environment_operations
@@ -28,7 +29,7 @@ def tuples(value):
     return tuple(tuples(x) for x in value) if isinstance(value, list) else value
 
 
-class EnvironmentSession:
+class EnvironmentSession(ControlIntervals):
     def __init__(self, store: EvidenceStore, environment):
         self.store = store
         self.environment = environment
@@ -743,6 +744,9 @@ class EnvironmentSession:
                 provider_receipt = journal.reconcile(environment, who, operation_id, provider)
             else:
                 raise Conflict("environment operation is not safely dispatchable")
+            self.commit_control_interval_for_operation(
+                environment, who, lease, operation_id, provider_receipt
+            )
             receipts[operation.key] = OperationReceipt(
                 key=operation.key,
                 operation_id=f"{environment}:{operation_id}",

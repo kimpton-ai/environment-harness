@@ -158,7 +158,8 @@ python -m pip install "environment-harness[server,postgres]"
 
 `PostgresEvidenceStore` expects a dedicated schema and an object-store implementation. A schema
 owner must call `PostgresEvidenceStore.initialize()` before application workers start; constructing
-the store does not run migrations. Applied migration checksums are immutable.
+the store does not run migrations. Applied migration checksums are immutable. Migration 004 adds
+durable control interval, controller grant, and accepted input batch journals for existing sessions.
 
 This adapter is not a complete deployment product. Before treating it as production-ready, an
 operator must qualify at least:

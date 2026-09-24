@@ -122,6 +122,41 @@ unresolved operation effects. Session resume accepts only a persisted v2 plan th
 reconciled by stable-ID lookup; if lookup cannot prove settlement, the transition stays blocked.
 Legacy ambiguous operations remain blocked until separately reconciled.
 
+## Durable control intervals
+
+The low-level `EnvironmentSession` can journal bounded control intervals for an external runtime.
+`prepare_control_interval` binds an interval ID to an existing prepared operation ID, the operation
+request hash, the current Harness revision and writer epoch, a runtime identity object, and a private
+artifact checkpoint reference. The runtime identity is recorded as supplied; Harness does not
+interpret engine-specific fields. Simulated duration must be greater than zero and at most one
+second. A later interval must start from the previous committed interval's ending checkpoint.
+
+`grant_control` issues one controller grant for that interval, tied to the writer epoch and capped
+by both the requested lifetime and writer lease. `accept_control_inputs` stores the complete
+sequence-numbered JSON batch and its digest in one synchronous transaction before returning its
+acknowledgement. An exact retry returns that acknowledgement. Reusing a batch ID with changed
+content, a stale or skipped sequence, an expired grant, or a different controller is rejected.
+Accepted input events are private to non-agent roles. The acknowledgement marks the batch
+provisional and is returned to the authorized controller only.
+
+`seal_control_interval` checks that its control-log digest is the canonical digest of the ordered
+accepted batch IDs and hashes, verifies the ending checkpoint artifact, and records measurements.
+This establishes what Harness durably accepted, not that an external physics worker applied every
+input or that its measurements are scientifically correct. `commit_control_interval` accepts only
+the byte-for-byte canonical receipt already settled as `succeeded` for the original Harness
+operation, and rechecks the stored operation request hash, current writer fence, and checkpoint
+artifact. Operation dispatch commits a bound interval before returning its receipt to transition
+code, so a transition cannot advance past an uncommitted interval. Streamed state and measurements
+remain provisional until that commit event.
+
+`recover_control_interval` commits an already-settled receipt under a current writer lease, including
+after a replacement worker takes over. For `dispatching` or `unknown` operations, it returns the
+last committed checkpoint, marks that a new branch is required, and explicitly disallows provider
+re-execution. Harness does not reconstruct an external simulator from an opaque checkpoint artifact
+or create a physics-specific branch; the environment runtime must restore that artifact into a
+separately identified branch. A prepared operation remains known-unsent and can continue only
+through the existing operation journal.
+
 Branches copy checkpoint state into a new environment and retain lineage. Parent credentials and artifact references do not grant child access. Branching with pending actions or operations, or inheriting a live-write policy, is rejected. Private suppliers can provide different counterfactual capabilities only under a contract that implements them.
 
 ## Evidence and limitations
