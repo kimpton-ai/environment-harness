@@ -1424,7 +1424,8 @@ function showCollection(destination, heading, description, panels) {
     setDestination(destination);
     renderBreadcrumbs();
     paintCollection(panels);
-    el('home-eyebrow').textContent = 'Overview';
+    // The eyebrow names the destination the page belongs to, matching the highlighted tab.
+    el('home-eyebrow').textContent = contextLabel(destination);
     el('home-title').textContent = heading;
     el('home-description').textContent = description;
     el('home-list-title').textContent = 'All Sessions';
@@ -3149,7 +3150,7 @@ el('copy-id').onclick = () => void attempt(async () => { if (environment) {
     message('Environment ID copied.');
 } });
 el('reports-progression').onclick = () => void attempt(() => setSessionTab('progression'));
-el('reports-records').onclick = () => void attempt(() => setSessionTab('configuration'));
+el('reports-configuration').onclick = () => void attempt(() => setSessionTab('configuration'));
 el('compare-turn-start').oninput = renderProgression;
 el('compare-turn-end').oninput = renderProgression;
 el('turn-series-select').onchange = renderProgression;

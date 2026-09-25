@@ -252,8 +252,9 @@ try {
       document.querySelectorAll('#global-destinations [aria-current=page]').length,
       document.querySelector('#context-nav')?.hidden,
       document.querySelector('.home-heading h1')?.textContent,
+      document.querySelector('.home-heading .eyebrow')?.textContent,
     ]`),
-    [false, 1, 'page', 1, true, 'Experiments'],
+    [false, 1, 'page', 1, true, 'Experiments', 'Experiments'],
     'Experiments is a full-width collection index without a contextual drawer',
   );
   await evaluate(`document.querySelector('[data-destination=trajectories]').click()`);

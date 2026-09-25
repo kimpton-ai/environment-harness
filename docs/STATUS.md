@@ -57,11 +57,6 @@ Landed since the baseline:
 
 Remaining before the candidate:
 
-- **Refresh the four README screenshots.** `docs/assets/environment-harness-{home,experiment,progression,reports}.png`
-  still show the pre-`0.3.0rc1` viewer: a single Home breadcrumb root, the old per-resource tab
-  strips, and a separate Reports tab. The information architecture replaced all three, and
-  `README.md` renders on PyPI, so these are publicly wrong until recaptured. See the capture
-  procedure in [Viewer maintenance](VIEWER-MAINTENANCE.md).
 - Confirm the [downstream-impact appendix](RELEASING.md#downstream-impact-appendix) rows against the
   actual consumer. The rows are derived from this repository's own breaking changes; someone with
   EvalRouter visibility must verify they are complete and that `0.2.4rc2` is its last compatible pin.
