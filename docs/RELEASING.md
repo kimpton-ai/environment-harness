@@ -37,6 +37,10 @@ Bind every required `main` status check to the GitHub Actions integration as its
 CI workflow changes require security CODEOWNER review, and path-based compatibility routing must
 fail closed when GitHub returns incomplete or malformed changed-file data.
 
+Keep `v*` tags immutable with update and deletion restrictions, but do not restrict creation: the
+built-in Actions app cannot use a `github-actions[bot]` user bypass. Tag pushes never start this
+publisher, and any unexpected version tag is a security incident.
+
 ## Choose the version
 
 Python versions follow PEP 440. The TypeScript artifact uses the corresponding SemVer spelling:
