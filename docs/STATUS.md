@@ -48,12 +48,15 @@ Landed since the baseline:
   [Compatibility](COMPATIBILITY.md), and the source-journal responsibilities in
   [Adapters](ADAPTERS.md).
 
+- **Fresh-environment acceptance.** `scripts/check_release.py` installs the built wheel outside the
+  checkout and runs the documentation walkthrough against it: a multi-segment native trajectory, a
+  historical import resumed from its acknowledged cursor in a second process, the independent
+  status dimensions, a byte-identical snapshot re-export, and evaluation export without a training
+  entitlement. It is a required check, not a manual procedure. See
+  [Release process](RELEASING.md#the-fresh-environment-walkthrough).
+
 Remaining before the candidate:
 
-- the fresh-environment documentation walkthrough that installs the built wheel, records a
-  multi-segment synthetic trajectory, imports a synthetic historical source with a restart-safe
-  cursor, inspects collection/execution/outcome state in the viewer, freezes and re-exports a
-  snapshot, and verifies evaluation export without training entitlement; and
 - the coordinated manifest freeze and the `0.3.0rc1` version bump itself.
 
 Explicitly outside the candidate manifest: Parquet export, RLlib conversion and external-environment

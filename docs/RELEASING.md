@@ -181,6 +181,47 @@ viewer drift, browser UI checks, and TypeScript tests. `make build` creates and 
 source distribution, and TypeScript tarball. `make security` performs the full repository policy,
 dependency, and audit checks.
 
+### The fresh-environment walkthrough
+
+`scripts/check_release.py` is the documentation-acceptance walkthrough, and it is a required check
+rather than a manual procedure. It builds a throwaway virtual environment outside the checkout,
+installs the pinned runtime dependencies and then the built wheel with `--no-deps`, and runs the
+public journey against that installation with a filtered environment. Running it locally requires
+`uv` and exactly one wheel in `dist/`:
+
+```sh
+uv build
+uv run --no-sync python scripts/check_release.py
+```
+
+It records its result to `.local/release-check.json` and asserts, in order:
+
+1. the imported package resolves inside the installed prefix, its metadata, `__version__`, and
+   `environment-harness doctor` agree, and `py.typed` and the SQL migrations ship;
+2. the shipped examples run and produce their documented totals and single-lineage comparison;
+3. `EnvironmentHarness` records a native session through a custom `SessionRunner` that stops inside
+   its budget, leaving the session resumable;
+4. a historical source is registered and ingested, an identical retry is idempotent, and a **second
+   process** resumes from the acknowledged position and hash — the restart-safe cursor is exercised,
+   not asserted;
+5. an immutable snapshot freezes and re-exports byte-identically, while a dataset built from the
+   same evaluation-only evidence is refused for lacking a training entitlement;
+6. the packaged server serves the four global viewer destinations, a session deep link, and a
+   trajectory tab, and returns `404` for the removed `/v1/environments`, `/home`, and
+   `/session/{id}` surfaces;
+7. an unauthenticated read returns `401`, and a participant credential cannot observe another
+   participant or see their private evidence;
+8. a pause and resume over HTTP produce a continuation segment that names its predecessor and
+   interruption, records stay a paged stream rather than appearing in `status`, and the imported
+   trajectory reports collection, execution, termination, and verified outcome independently;
+9. snapshot content negotiation streams exactly the rows the in-process export produced; and
+10. the canonical `POST /v1/experiments` route accepts a strict `ExperimentSpec`, honours the
+    supplied operation ID, and cancellation is idempotent.
+
+When the separately owned decision runtime is selected for the manifest, extend this walkthrough to
+exercise its deterministic selector and to verify the optional distribution **without** installing
+TypeSafe by default.
+
 Changes to optional adapters, `training.py`, plugin discovery, or dependency bounds also run the
 path-routed optional-integration job. Contract paths are separately classified as schema impact;
 malformed or incomplete GitHub change metadata fails closed. Before freezing `0.3.0rc1`, verify the
