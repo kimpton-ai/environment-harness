@@ -434,7 +434,12 @@ class EvalRouterGatewaySelector:
         operation_id: str | None = None,
     ):
         """Compatibility boundary for the version-one Jev command interpreter."""
-        self._local.operation_id = operation_id or f"jev:{__import__('uuid').uuid4().hex}"
+        # A random id would be unrecoverable: the gateway records this value and
+        # `lookup` is the only way to resolve an unknown charge or effect, so a
+        # caller that cannot reproduce it after a crash has no recovery path.
+        if not operation_id:
+            raise ValueError("gateway requests require a durable operation id for charge recovery")
+        self._local.operation_id = operation_id
         self._local.maximum_charge_micros = maximum_charge_micros
         response, _estimated, evidence = self._jev.request_encoded(
             body, maximum_charge_micros=maximum_charge_micros, cancel=cancel, deadline=deadline

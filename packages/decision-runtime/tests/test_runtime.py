@@ -359,3 +359,34 @@ def test_hard_budget_requires_verified_bound(tmp_path):
     op, invocation = setup(tmp_path, selector=selector)
     assert execute(op, invocation)["status"] == "rejected"
     assert not selector.calls and not op.control.submissions
+
+
+def test_unexpected_defect_records_its_cause_instead_of_being_discarded(tmp_path):
+    """An unhandled exception must leave a trace of what actually failed.
+
+    The `except Exception` arm discarded the exception entirely and recorded a
+    bare "execution_or_charge_uncertain". Since `_finalize` rewrites an
+    unresolved `uncertain` row to "reconciled_after_interruption", a defect in a
+    control was indistinguishable from an ordinary interruption and its
+    traceback was gone. The recovery behaviour is unchanged: the outcome is
+    still uncertain and still requires lookup rather than resubmission.
+    """
+
+    class ExplodingVerifier(Browser):
+        def verify(self, objective, before, after, receipt):
+            raise RuntimeError("verifier exploded")
+
+    op, invocation = setup(tmp_path, ExplodingVerifier())
+
+    with pytest.raises(OutcomeUncertain):
+        execute(op, invocation)
+
+    with op.ledger.db() as db:
+        status, reason = db.execute(
+            "SELECT status,reason FROM invocations WHERE id=?", ("session:op-1",)
+        ).fetchone()
+    assert status == "uncertain"
+    assert "RuntimeError" in reason
+    assert "verifier exploded" in reason
+    # The effect still happened exactly once and is never resubmitted.
+    assert len(op.control.submissions) == 1

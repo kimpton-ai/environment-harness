@@ -394,3 +394,27 @@ def test_abstention_records_the_gateway_charge_rather_than_the_local_estimate():
     # The local token-price estimate for this fixture is 1 micro, so a passing
     # assertion here means the authoritative gateway charge was adopted.
     assert result.cost_micros == 4
+
+
+def test_gateway_request_without_a_durable_operation_id_is_refused():
+    """A random id would leave an unknown charge with no recovery path.
+
+    `lookup` resolves an unknown charge or effect by the original operation id,
+    so generating one per call silently voided that guarantee.
+    """
+    selector = EvalRouterGatewaySelector(
+        endpoint="https://gateway.example.test/v1/decisions",
+        run_id="run-1",
+        episode_id="episode-1",
+        workspace_id="workspace-1",
+        unit_id="unit-1",
+        generation=1,
+        transport=lambda *_: pytest.fail("no request may be submitted without a durable id"),
+        token_bound=lambda body: 100,
+        token_bound_source="fixture-tokenizer.v1",
+    )
+
+    with pytest.raises(ValueError, match="durable operation id"):
+        selector.request_encoded(
+            b"{}", maximum_charge_micros=5, cancel=threading.Event(), deadline=time.monotonic() + 2
+        )

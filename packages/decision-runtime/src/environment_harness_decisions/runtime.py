@@ -331,9 +331,17 @@ class DecisionOperation(EnvironmentOperation):
                     self._reason(operation_id, "rejected", str(error))
                 except (ValueError, ProviderFailure) as error:
                     self._reason(operation_id, "rejected", f"{type(error).__name__}:{error}")
-                except Exception:
+                except Exception as error:
                     self.control.stop()
-                    self._reason(operation_id, "uncertain", "execution_or_charge_uncertain")
+                    # `_finalize` rewrites an unresolved `uncertain` row to
+                    # "reconciled_after_interruption", so without the cause here an
+                    # unhandled defect is indistinguishable from an ordinary
+                    # interruption and its traceback is gone.
+                    self._reason(
+                        operation_id,
+                        "uncertain",
+                        f"execution_or_charge_uncertain:{type(error).__name__}:{error}",
+                    )
                     if self._finalize(operation_id) is None:
                         raise OutcomeUncertain("execution or charge requires lookup") from None
                 except BaseException:
