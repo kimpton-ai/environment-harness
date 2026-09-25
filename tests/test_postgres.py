@@ -150,24 +150,12 @@ def test_explicit_tenant_erasure_preserves_other_tenants_and_refuses_active_writ
                 "INSERT INTO scenario_snapshots VALUES (?,?,?,?)",
                 ("experiment-first", "scenario", 0, "{}"),
             )
+            # `create` already registered a durable row for each session, so attach
+            # the first tenant's row to the experiment rather than inserting a second.
             db.execute(
-                "INSERT INTO session_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (
-                    a,
-                    "first",
-                    "experiment-first",
-                    "scenario",
-                    0,
-                    1,
-                    "completed",
-                    None,
-                    1,
-                    1,
-                    "Done",
-                    "{}",
-                    1,
-                    1,
-                ),
+                "UPDATE session_runs SET experiment=?,scenario=?,status=?,latest_activity=? "
+                "WHERE environment=?",
+                ("experiment-first", "scenario", "completed", "Done", a),
             )
             db.execute(
                 "INSERT INTO event_outbox (tenant,topic,experiment,environment,kind,body,created) "
@@ -198,8 +186,20 @@ def test_explicit_tenant_erasure_preserves_other_tenants_and_refuses_active_writ
         assert any(key.startswith(b) for key in objects.values)
         assert store.events(b, other)
         with store.transaction() as db:
-            for table in ("experiments", "scenario_snapshots", "session_runs", "event_outbox"):
-                assert db.execute(f"SELECT count(*) FROM {table}").fetchone()[0] == 0
+            for table in ("experiments", "session_runs", "event_outbox"):
+                assert (
+                    db.execute(f"SELECT count(*) FROM {table} WHERE tenant=?", ("first",)).fetchone()[0] == 0
+                )
+            assert (
+                db.execute(
+                    "SELECT count(*) FROM scenario_snapshots WHERE experiment=?", ("experiment-first",)
+                ).fetchone()[0]
+                == 0
+            )
+            # The other tenant's durable session row is untouched by the erasure.
+            assert (
+                db.execute("SELECT count(*) FROM session_runs WHERE tenant=?", ("other",)).fetchone()[0] == 1
+            )
         assert store.purge_tenant("first", confirm="permanently-delete:first")["environments"] == 0
     finally:
         with psycopg.connect(dsn, autocommit=True) as connection:

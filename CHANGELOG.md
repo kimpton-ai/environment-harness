@@ -91,6 +91,10 @@
 
 ### Fixed
 
+- `403 cross_origin_denied` is a distinct error code again. The taxonomy rewrite had collapsed it
+  into `forbidden`, which contradicts the documented meaning of that code: a cross-origin rejection
+  happens before any credential is consulted, so it is a browser-boundary rejection rather than an
+  authorization decision.
 - A background catalog refresh no longer drops keyboard focus out of an open viewer listbox.
 - Switching viewer destinations while the catalog request is in flight no longer lets the older
   request repaint over the newer destination.

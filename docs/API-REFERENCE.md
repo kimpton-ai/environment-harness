@@ -597,6 +597,7 @@ Every HTTP error uses the same JSON envelope:
 | `402` | `budget_exhausted` | The frozen environment-session budget is exhausted. |
 | `401` | `unauthorized` | The credential is missing, malformed, expired, revoked, or otherwise invalid. No policy was consulted. |
 | `403` | `forbidden` | The credential is valid but its server-owned policy, scope, audience, or authority generation does not authorize the operation. Resource existence is intentionally hidden. |
+| `403` | `cross_origin_denied` | The request carried a browser `Origin` that is not this service's own. Rejected before any credential is consulted. |
 | `404` | `not_found` | An unprotected route or asset does not exist. Protected resources commonly use `403` to avoid disclosure. |
 | `405` | `method_not_allowed` | The route exists but does not support the requested HTTP method. |
 | `409` | `conflict` | Current session state conflicts with the requested operation. |

@@ -329,9 +329,11 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
     async def boundaries(request: Request, call_next):
         request.state.request_id = secrets.token_hex(16)
         if request.headers.get("origin") and request.headers["origin"] != str(request.base_url).rstrip("/"):
+            # A browser-boundary rejection, not an authorization decision: no
+            # credential was consulted, so it does not share the `forbidden` code.
             response = _error_response(
                 request,
-                "forbidden",
+                "cross_origin_denied",
                 "Cross-origin requests are not allowed",
                 403,
             )

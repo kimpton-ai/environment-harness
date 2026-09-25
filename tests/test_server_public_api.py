@@ -279,7 +279,7 @@ def test_http_errors_share_one_traceable_envelope(tmp_path):
         ),
         (client.get("/viewer/private.txt"), 404, "not_found"),
         (client.put("/health"), 405, "method_not_allowed"),
-        (client.get("/health", headers={"Origin": "https://attacker.invalid"}), 403, "forbidden"),
+        (client.get("/health", headers={"Origin": "https://attacker.invalid"}), 403, "cross_origin_denied"),
     )
     for response, status, code in responses:
         assert response.status_code == status
@@ -815,7 +815,7 @@ def test_http_exports_comparison_viewer_and_invalid_requests(tmp_path):
     assert client.get(f"/v1/sessions/{environment}", headers=other_headers).status_code == 403
     assert (
         client.get("/health", headers={"Origin": "https://attacker.invalid"}).json()["error"]["code"]
-        == "forbidden"
+        == "cross_origin_denied"
     )
     assert client.get("/v1/sessions?limit=0", headers=headers).status_code == 422
 

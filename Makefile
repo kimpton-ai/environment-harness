@@ -13,6 +13,7 @@ check:
 	uv run --no-sync python scripts/build_http_migration.py --check
 	uv run --no-sync python scripts/build_viewer.py --check
 	uv run --no-sync python scripts/check_browser_ui.py
+	uv run --no-sync python scripts/check_browser_security.py
 	npm run typecheck --prefix packages/typescript
 	npm test --prefix packages/typescript
 	uv run --no-sync python scripts/check_repository.py
