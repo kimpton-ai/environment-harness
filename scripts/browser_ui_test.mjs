@@ -1303,7 +1303,11 @@ try {
     'contextual training provenance stays inside the Trajectory rather than becoming a destination',
   );
   await command('Page.reload');
-  await waitFor('document.querySelector("#trajectory-shell")?.hidden === false && document.querySelector("#trajectory-provenance-panel")?.hidden === false');
+  // The tab panel is painted before ancestry resolves, so wait for the loaded
+  // contextual navigation rather than for the panel alone.
+  await waitFor(`document.querySelector('#trajectory-shell')?.hidden === false &&
+    document.querySelector('#trajectory-provenance-panel')?.hidden === false &&
+    document.querySelectorAll('#context-nav [data-context-item]').length === 4`);
   assert.equal(
     await evaluate('location.pathname'),
     `/trajectories/${trajectoryId}/provenance`,
