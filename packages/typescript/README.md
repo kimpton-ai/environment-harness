@@ -5,10 +5,10 @@ Python SDK.
 
 ## Install
 
-Download the `environment-harness-client-0.2.4-rc.2.tgz` asset from the GitHub release, then:
+Download the `environment-harness-client-0.3.0-rc.1.tgz` asset from the GitHub release, then:
 
 ```sh
-npm install ./environment-harness-client-0.2.4-rc.2.tgz
+npm install ./environment-harness-client-0.3.0-rc.1.tgz
 ```
 
 There is no registry publication.
