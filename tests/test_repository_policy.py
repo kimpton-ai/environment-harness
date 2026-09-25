@@ -117,8 +117,11 @@ def test_release_commit_must_introduce_a_newer_version(monkeypatch, parent_versi
 
 
 def test_release_commit_accepts_version_introducing_parent(monkeypatch):
-    parent = b'[project]\nversion = "0.1.0"\n'
-    monkeypatch.setattr(check_repository, "_git_file", lambda _reference, _path: parent)
+    def release_metadata(reference, _path):
+        version = "0.1.0" if reference.endswith("^1") else "0.2.0"
+        return f'[project]\nversion = "{version}"\n'.encode()
+
+    monkeypatch.setattr(check_repository, "_git_file", release_metadata)
 
     check_repository.check_release_commit("v0.2.0")
 
@@ -220,7 +223,9 @@ def test_dependabot_routine_update_policy_fails_closed(tmp_path, monkeypatch, co
     ("required", "description"),
     [
         ("release_pr:", "merged release PR input"),
+        ("release_origin:", "version-introducing release origin"),
         ("python scripts/release_version.py resolve", "release PR resolution"),
+        ('--release-origin "$RELEASE_ORIGIN"', "version-origin binding"),
         ("environment: release-tag", "protected tag environment"),
         ('tag_response="$RUNNER_TEMP/tag-ref.json"', "fail-closed tag lookup response"),
         ('\'.status == "404" and .message == "Not Found"\'', "validated missing tag response"),
@@ -512,7 +517,7 @@ def test_detect_release_tag_rejects_a_later_non_version_commit(tmp_path):
         release_version.detect_release_tag(tmp_path)
 
 
-def test_resolve_release_pr_requires_the_exact_merged_main_commit(tmp_path):
+def test_resolve_release_pr_binds_the_version_origin_and_current_main_commit(tmp_path):
     release_version = load_script("release_version")
     configure_release_tree(tmp_path)
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
@@ -537,17 +542,42 @@ def test_resolve_release_pr_requires_the_exact_merged_main_commit(tmp_path):
     assert release_version.resolve_release_pr(pull_request, revision, tmp_path) == {
         "pr": "29",
         "revision": revision,
+        "origin": revision,
+        "tag": "v0.2.3rc1",
+        "version": "0.2.3rc1",
+    }
+
+    (tmp_path / "README.md").write_text((tmp_path / "README.md").read_text() + "\nLater docs.\n")
+    subprocess.run(["git", "add", "README.md"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-m", "docs"], cwd=tmp_path, check=True, capture_output=True)
+    workflow_revision = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=tmp_path, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    assert release_version.resolve_release_pr(pull_request, workflow_revision, tmp_path) == {
+        "pr": "29",
+        "revision": workflow_revision,
+        "origin": revision,
         "tag": "v0.2.3rc1",
         "version": "0.2.3rc1",
     }
 
     pull_request["merge_commit_sha"] = "0" * 40
-    with pytest.raises(release_version.ReleaseError, match="exact merged release PR commit"):
-        release_version.resolve_release_pr(pull_request, revision, tmp_path)
+    with pytest.raises(release_version.ReleaseError, match="first-parent history"):
+        release_version.resolve_release_pr(pull_request, workflow_revision, tmp_path)
+
+    pull_request["merge_commit_sha"] = workflow_revision
+    with pytest.raises(release_version.ReleaseError, match="must introduce a version newer"):
+        release_version.resolve_release_pr(pull_request, workflow_revision, tmp_path)
 
     pull_request["merge_commit_sha"] = revision
     subprocess.run(["git", "tag", "v0.2.3rc1", revision], cwd=tmp_path, check=True)
-    assert release_version.resolve_release_pr(pull_request, revision, tmp_path)["tag"] == ("v0.2.3rc1")
+    with pytest.raises(release_version.ReleaseError, match="tag at a different commit"):
+        release_version.resolve_release_pr(pull_request, workflow_revision, tmp_path)
+    subprocess.run(["git", "tag", "--delete", "v0.2.3rc1"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "tag", "v0.2.3rc1", workflow_revision], cwd=tmp_path, check=True)
+    assert release_version.resolve_release_pr(pull_request, workflow_revision, tmp_path)["tag"] == (
+        "v0.2.3rc1"
+    )
 
 
 def npm_lock(name="example", version="1.0.0"):

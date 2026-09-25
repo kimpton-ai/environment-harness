@@ -361,11 +361,31 @@ def resolve_release_pr(
         or base.get("ref") != "main"
     ):
         raise ReleaseError("release PR must be merged into main")
-    if not FULL_SHA.fullmatch(workflow_sha) or merge_commit != workflow_sha or head != workflow_sha:
-        raise ReleaseError("workflow must run from the exact merged release PR commit")
-    tag = detect_release_tag(root)
-    if tag is None:
-        tag = f"v{current_version(root)}"
+    if not FULL_SHA.fullmatch(workflow_sha) or head != workflow_sha:
+        raise ReleaseError("workflow must run from the exact current main commit")
+    first_parent = subprocess.run(
+        ["git", "rev-list", "--first-parent", workflow_sha],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    if not isinstance(merge_commit, str) or not FULL_SHA.fullmatch(merge_commit):
+        raise ReleaseError("release PR lacks a valid merge commit")
+    if merge_commit not in first_parent:
+        raise ReleaseError("release PR merge commit is not on current main's first-parent history")
+
+    version = current_version(root)
+    tag = f"v{version}"
+    validate_release_commit(tag, merge_commit, root)
+    tags = subprocess.run(
+        ["git", "tag", "--list", "v*"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    if select_release_tag(version, tags, (root / "CHANGELOG.md").read_text()) is None:
         existing = subprocess.run(
             ["git", "rev-parse", f"{tag}^{{commit}}"],
             cwd=root,
@@ -374,12 +394,12 @@ def resolve_release_pr(
         )
         if existing.returncode != 0 or existing.stdout.strip() != workflow_sha:
             raise ReleaseError("release version already has a tag at a different commit")
-        validate_release_commit(tag, root=root)
     return {
         "pr": str(number),
         "revision": workflow_sha,
+        "origin": merge_commit,
         "tag": tag,
-        "version": current_version(root),
+        "version": version,
     }
 
 
