@@ -302,12 +302,24 @@ def check_version_metadata(release_tag: str | None = None) -> None:
         raise PolicyError(f"release tag {release_tag!r} does not match metadata version v{version}")
 
 
-def check_release_commit(release_tag: str) -> None:
-    parent = _git_file(f"{release_tag}^{{commit}}^1", "pyproject.toml")
+def check_release_commit(release_tag: str, release_origin: str | None = None) -> None:
+    release_commit = release_origin or f"{release_tag}^{{commit}}"
+    introduced = _git_file(release_commit, "pyproject.toml")
+    tagged = _git_file(f"{release_tag}^{{commit}}", "pyproject.toml")
+    if introduced is None or tagged is None:
+        raise PolicyError("release origin or tag lacks readable project metadata")
+    introduced_version = tomllib.loads(introduced.decode()).get("project", {}).get("version")
+    tagged_version = tomllib.loads(tagged.decode()).get("project", {}).get("version")
+    current_version = release_tag.removeprefix("v")
+    if introduced_version != current_version or tagged_version != current_version:
+        raise PolicyError(
+            "release origin, tag, and project versions differ: "
+            f"{introduced_version} -> {tagged_version} -> {current_version}"
+        )
+    parent = _git_file(f"{release_commit}^1", "pyproject.toml")
     if parent is None:
         raise PolicyError("release tag lacks a readable first-parent project version")
     parent_version = tomllib.loads(parent.decode()).get("project", {}).get("version")
-    current_version = release_tag.removeprefix("v")
     try:
         previous = _release_key(parent_version)
         current = _release_key(current_version)
@@ -330,11 +342,15 @@ def check_release_workflow_binding() -> None:
     release_required = {
         "workflow_dispatch:": "manual release dispatch",
         "release_pr:": "merged release PR input",
+        "release_origin:": "version-introducing release origin",
         "python scripts/release_version.py resolve": "release PR resolution",
         'test "$GITHUB_SHA" = "$RELEASE_SHA"': "attested workflow commit",
         'git merge-base --is-ancestor "$RELEASE_SHA" origin/main': "main ancestry",
         '--release-tag "$RELEASE_TAG"': "tag-to-package version binding",
+        '--release-origin "$RELEASE_ORIGIN"': "version-origin binding",
         "environment: release-tag": "protected tag environment",
+        'tag_response="$RUNNER_TEMP/tag-ref.json"': "fail-closed tag lookup response",
+        '\'.status == "404" and .message == "Not Found"\'': "validated missing tag response",
         '--field ref="refs/tags/$RELEASE_TAG"': "protected tag creation",
         "uv build --no-build-isolation": "frozen build environment",
         'gh attestation verify "$artifact"': "per-artifact provenance verification",
@@ -348,6 +364,13 @@ def check_release_workflow_binding() -> None:
     missing = [description for snippet, description in release_required.items() if snippet not in release]
     if missing:
         raise PolicyError("release workflow lacks " + ", ".join(missing))
+    tag_lookup = re.search(
+        r'if gh api "repos/\$GITHUB_REPOSITORY/git/ref/tags/\$RELEASE_TAG".*?; then',
+        release,
+        flags=re.DOTALL,
+    )
+    if tag_lookup is None or "|| true" in tag_lookup.group(0):
+        raise PolicyError("release tag lookup must fail closed")
     prepare_required = {
         "workflow_dispatch:": "manual preparation dispatch",
         "bump:": "release bump input",
@@ -693,6 +716,7 @@ def main() -> None:
     )
     parser.add_argument("--base-ref", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--release-tag", default=None, help="require this tag to match package metadata")
+    parser.add_argument("--release-origin", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--now", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--root", type=Path, default=ROOT, help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -711,7 +735,10 @@ def main() -> None:
         ("distributions", check_distributions),
     ]
     if args.release_tag:
-        checks.insert(2, ("release commit", lambda: check_release_commit(args.release_tag)))
+        checks.insert(
+            2,
+            ("release commit", lambda: check_release_commit(args.release_tag, args.release_origin)),
+        )
     if args.full:
         checks.insert(
             4, ("dependency age", lambda: check_dependency_ages(args.base_ref or _default_base(), now))

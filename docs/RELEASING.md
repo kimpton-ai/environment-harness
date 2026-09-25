@@ -262,13 +262,14 @@ shared compatibility fixtures are required rather than advisory.
 The PostgreSQL integration test runs in CI against its configured service. Do not claim a local
 PostgreSQL pass when `ENVIRONMENT_HARNESS_POSTGRES_URL` was absent and the test was skipped.
 
-### 5. Review and merge the release pull request last
+### 5. Review and merge the release pull request after the intended release contents
 
 Use the normal protected-branch process. At least one independent maintainer and every applicable
 CODEOWNER must review the complete commit range. Merge all intended code and documentation before
-the release pull request. The publishing workflow requires the release PR merge commit to remain the
-current `main` commit; if later work lands, prepare a newer candidate instead of tagging that later
-commit.
+the release pull request. If reviewed work lands after that pull request but before publication, the
+publisher requires the version-introducing merge to remain on `main`'s first-parent history and the
+coordinated version metadata to remain unchanged. It builds and tags the exact current `main` commit,
+so a failed, untagged publication can be retried without consuming another prerelease number.
 
 ## Publish the reviewed commit
 
@@ -276,18 +277,22 @@ commit.
 
 Run **Attested GitHub release** from GitHub Actions on `main` and enter only the merged release pull
 request number. Do not type a version or create a tag locally. The workflow reads the coordinated
-version from the reviewed merge commit and derives the tag.
+version from current `main`, confirms that the reviewed merge introduced it, and derives the tag.
 
 The workflow fails before creating a tag unless the pull request:
 
 - is merged into `main`;
-- produced the exact commit running the workflow;
-- introduces a version newer than its first parent; and
+- remains on the current `main` first-parent history;
+- introduces a version newer than its first parent;
+- introduces the version still present in current coordinated metadata; and
 - names a version and tag that do not conflict with a different release commit.
 
-The build checks out the workflow's current `GITHUB_SHA` directly and verifies it against the
-resolved PR merge commit. Operator input and job outputs are never used as executable checkout
-refs in the privileged publisher.
+The workflow itself, artifact build, and tag remain bound to the exact current `main` commit. The
+pull request number identifies the reviewed origin of that version; it is not used as a checkout ref.
+
+The build checks out the workflow's current `GITHUB_SHA` directly and verifies it as the resolved
+release commit. The version-origin commit remains an audit and validation input only. Operator input
+and job outputs are never used as executable checkout refs in the privileged publisher.
 
 ### 2. Approve publication once
 
@@ -348,8 +353,9 @@ needed.
 | Failure | Response |
 | --- | --- |
 | A release check fails before merge | Fix it in the release pull request and rerun all affected checks |
+| The protected tag lookup reports a missing ref | Create the tag only after validating GitHub's `404 Not Found` response; any other lookup failure must stop publication |
 | A manually created tag points at the wrong commit | It cannot start publication; leave it immutable and prepare the next candidate |
-| The release PR is no longer the current `main` commit | Merge no unrelated commit into the release; prepare the next candidate through a new release PR |
+| Reviewed work lands after the release PR | Retry with the version-introducing PR only while its merge remains on `main`'s first-parent history and current coordinated metadata still names that version |
 | GitHub publication fails before creating a release | Fix the workflow or environment and rerun only after confirming the artifact identity contract |
 | A published candidate is incorrect | Leave it immutable and publish the next candidate |
 | The final version is incorrect on PyPI | Do not overwrite it; follow PyPI incident policy and prepare a new patch release |
