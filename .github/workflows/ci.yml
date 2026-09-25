@@ -27,6 +27,7 @@ jobs:
       integrations: ${{ steps.paths.outputs.integrations }}
       viewer: ${{ steps.paths.outputs.viewer }}
       documentation: ${{ steps.paths.outputs.documentation }}
+      shards: ${{ steps.shards.outputs.shards }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -63,6 +64,23 @@ jobs:
           fi
           printf '### CI routing\n\n' >> "$GITHUB_STEP_SUMMARY"
           cat "$RUNNER_TEMP/ci-routing.txt" >> "$GITHUB_STEP_SUMMARY"
+      - id: shards
+        name: Select compatibility shards
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          # Windows is ~4x the slowest Linux shard even in parallel. It runs in the
+          # post-merge workflow instead, and on demand through workflow_dispatch.
+          shards='[{"label":"linux-py313","os":"ubuntu-latest","python":"3.13"},
+                   {"label":"linux-py314","os":"ubuntu-latest","python":"3.14"},
+                   {"label":"macos-py312","os":"macos-latest","python":"3.12"}]'
+          if [ "$EVENT_NAME" = pull_request ]; then
+            selected="$(python -c 'import json,sys; print(json.dumps(json.loads(sys.argv[1])))' "$shards")"
+          else
+            selected="$(python -c 'import json,sys; s=json.loads(sys.argv[1]); s.append({"label":"windows-py312","os":"windows-latest","python":"3.12"}); print(json.dumps(s))' "$shards")"
+          fi
+          echo "shards=$selected" >> "$GITHUB_OUTPUT"
+          printf -- '- shards: %s\n' "$(python -c 'import json,sys; print(", ".join(e["label"] for e in json.loads(sys.argv[1])))' "$selected")" >> "$GITHUB_STEP_SUMMARY"
 
   python:
     name: Python
@@ -96,7 +114,7 @@ jobs:
           version: "0.12.0"
           enable-cache: false
       - run: uv sync --frozen --extra server --extra postgres
-      - run: uv run --no-sync pytest --cov --cov-branch --cov-report=term-missing --cov-report=json --cov-report=xml
+      - run: uv run --no-sync pytest -n auto --cov --cov-branch --cov-report=term-missing --cov-report=json --cov-report=xml
       - run: uv run --no-sync python scripts/check_coverage.py
       - run: uv run --no-sync diff-cover coverage.xml --compare-branch=origin/main --fail-under=100
       - run: uv run --no-sync python scripts/check_regression_tests.py
@@ -146,11 +164,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - {label: linux-py313, os: ubuntu-latest, python: "3.13"}
-          - {label: linux-py314, os: ubuntu-latest, python: "3.14"}
-          - {label: macos-py312, os: macos-latest, python: "3.12"}
-          - {label: windows-py312, os: windows-latest, python: "3.12"}
+        include: ${{ fromJSON(needs.changes.outputs.shards) }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -166,7 +180,7 @@ jobs:
       - name: Run compatibility tests with branch coverage
         env:
           COVERAGE_FILE: coverage-${{ matrix.label }}
-        run: uv run --no-sync pytest -q --cov --cov-branch --cov-report=
+        run: uv run --no-sync pytest -q -n auto --cov --cov-branch --cov-report=
       - name: Upload compatibility coverage
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
