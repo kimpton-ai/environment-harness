@@ -28,12 +28,12 @@ def _bounded_points(points, max_points):
     return selected, True
 
 
-def turn_series(store, environment, who, *, start_turn=1, end_turn=None, max_points=300):
+def turn_series(store, environment, access, *, start_turn=1, end_turn=None, max_points=300):
     """Project bounded turn-level evidence series for comparison and visualization."""
     with store.transaction() as db:
-        row = store.environment(db, environment, who, ("researcher", "scorer"))
+        row = store.environment(db, environment, access, "evidence.read.full")
         participants = list(json.loads(row["participants"]))
-    events = list(store.replay(environment, who))
+    events = list(store.replay(environment, access))
     turns = [
         turn
         for turn in build_timeline(events, participants)
@@ -147,9 +147,9 @@ def turn_series(store, environment, who, *, start_turn=1, end_turn=None, max_poi
     }
 
 
-def rollouts(store, environment, who, *, require_token_ids=False, require_logprobs=False):
+def rollouts(store, environment, access, *, require_token_ids=False, require_logprobs=False):
     with store.transaction() as db:
-        row = store.environment(db, environment, who, ("researcher", "scorer"))
+        row = store.environment(db, environment, access, "evidence.read.full")
         manifest = json.loads(row["manifest"])
         if (
             manifest["purpose"] != "training"
@@ -162,7 +162,7 @@ def rollouts(store, environment, who, *, require_token_ids=False, require_logpro
             raise Unsupported("requested inference detail was not captured")
         lineage, parent, status = row["lineage"], row["parent"], row["status"]
     # Stream from the evidence store. Join each action individually to keep campaign memory bounded.
-    for event in store.replay(environment, who):
+    for event in store.replay(environment, access):
         if event["kind"] != "action.executed":
             continue
         outcome = event["payload"]
@@ -193,7 +193,9 @@ def rollouts(store, environment, who, *, require_token_ids=False, require_logpro
             "truncated": outcome["truncated"],
             "reason": outcome["reason"],
             "delayed_rewards": [
-                r for r in store.reports(environment, who) if outcome["participant"] in r["report"]["rewards"]
+                r
+                for r in store.reports(environment, access)
+                if outcome["participant"] in r["report"]["rewards"]
             ],
             "outcomes_pending": status == "outcomes_pending",
             "token_ids": None,
@@ -201,11 +203,11 @@ def rollouts(store, environment, who, *, require_token_ids=False, require_logpro
         }
 
 
-def compare(store, environments, who):
+def compare(store, environments, access):
     groups, cohorts, records = {}, {}, []
     for environment in dict.fromkeys(environments):
         with store.transaction() as db:
-            row = store.environment(db, environment, who, ("researcher", "scorer"))
+            row = store.environment(db, environment, access, "evidence.read.full")
             manifest = json.loads(row["manifest"])
             cohort = {k: manifest[k] for k in ("environment", "participants", "purpose", "split", "policy")}
             cohort["operations"] = manifest.get("operations", [])
@@ -222,7 +224,7 @@ def compare(store, environments, who):
                 "cohort": cohort_id,
             }
         cohorts.setdefault(cohort_id, []).append(record)
-        reports = store.reports(environment, who)
+        reports = store.reports(environment, access)
         record["latest_report"] = reports[-1] if reports else None
         selected = {}
         for envelope in reports:

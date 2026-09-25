@@ -13,18 +13,18 @@ import pytest
 
 from environment_harness import (
     AgentSpec,
-    EnvironmentSession,
     EvidenceStore,
     ExperimentSpec,
-    Principal,
     runner,
 )
+from environment_harness.access import _AccessContext
 from environment_harness.adapters import _subprocess
 from environment_harness.adapters.process import ProcessEnvironment
 from environment_harness.adapters.programs import CommandAgent
 from environment_harness.errors import Conflict, Unavailable
 from environment_harness.fixtures import SyntheticEnvironment
 from environment_harness.history import inherit, reconstruct_inherited
+from environment_harness.runtime import _SessionRuntime
 
 
 def inherited_chunk(*, encoding="base64-json-v1", environment="parent"):
@@ -286,8 +286,8 @@ def test_phase_guard_and_main_loop_deadlines_are_independent(tmp_path, monkeypat
     assert isinstance(failures[0], TimeoutError) and signal.is_set()
 
     implementation = SyntheticEnvironment()
-    session = EnvironmentSession(EvidenceStore(tmp_path), implementation)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    session = _SessionRuntime(EvidenceStore(tmp_path), implementation)
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     spec = ExperimentSpec(
         environment=implementation.spec,
         participants=(AgentSpec(id="a", implementation="synthetic-agent@1", policy_version="1"),),

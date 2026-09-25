@@ -11,9 +11,10 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from environment_harness import backends, hosted, plugins, receipts, worker
+from environment_harness.access import _AccessContext
 from environment_harness.adapters.programs import HTTPAgent, InstrumentedModel, MCPTools
 from environment_harness.client import EnvironmentClient, NoRedirect
-from environment_harness.contracts import AgentSpec, ExperimentSpec, Principal
+from environment_harness.contracts import AgentSpec, ExperimentSpec
 from environment_harness.errors import Conflict, Forbidden, HarnessError, Unsupported
 from environment_harness.fixtures import SyntheticEnvironment
 
@@ -84,7 +85,7 @@ def test_remote_client_validates_transport_and_builds_public_requests(monkeypatc
     assert client.credentials("env", "a", ttl=30)[2] == {"participant": "a", "ttl": 30}
     assert client.reports("env")[1].endswith("/reports")
     assert client.events("env", 7)[1].endswith("events?after=7")
-    assert client.activity_snapshot()[1] == "/v1/activity/snapshot"
+    assert client.activity_hierarchy()[1] == "/v1/activity/snapshot"
     assert client.activity(3)[1].endswith("activity/events?after=3")
     assert client.experiment_activity("a/b", 4)[1].endswith("experiments/a%2Fb/events?after=4")
     assert client.session_activity("a/b", 5)[1].endswith("environments/a%2Fb/activity?after=5")
@@ -175,10 +176,12 @@ def test_remote_client_streaming_translates_http_errors():
         list(client.export_trajectory_snapshot("snapshot"))
 
 
-def test_advanced_module_exposes_the_low_level_workflow():
+def test_advanced_module_exposes_the_explicit_specification_workflow():
     import environment_harness.advanced as advanced
 
-    assert advanced.EnvironmentSession is not None
+    # The authorization-aware runtime is private and must not be re-exported.
+    assert not hasattr(advanced, "EnvironmentSession")
+    assert not hasattr(advanced, "_SessionRuntime")
     assert advanced.ExperimentSpec is ExperimentSpec
     assert callable(advanced.run)
 
@@ -532,7 +535,13 @@ def test_postgres_store_queries_transactions_and_artifacts(monkeypatch):
         )
     )
     assert store._environment_row(db, "env")["id"] == "env"
-    who = Principal(tenant="t", subject="a", role="agent", participant="a")
+    who = _AccessContext(
+        tenant="t",
+        subject="a",
+        policy="participant",
+        session="0" * 32,
+        participant="a",
+    )
     assert store._event_page(db, "env", 0, who, 10) == [{"seq": 1}]
 
     class Context:
@@ -583,7 +592,13 @@ def test_http_model_and_mcp_adapters_record_boundaries(monkeypatch):
         )
         append = staticmethod(lambda *args: appended.append(args[3:]))
 
-    principal = Principal(tenant="t", subject="a", role="agent", participant="a")
+    principal = _AccessContext(
+        tenant="t",
+        subject="a",
+        policy="participant",
+        session="0" * 32,
+        participant="a",
+    )
     model = InstrumentedModel(Store(), "env", principal, lambda request: {"text": request})
     assert model.call("hello")["text"] == "hello"
     assert [item[0] for item in appended] == ["model.request", "model.response"]

@@ -7,14 +7,15 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
+from environment_harness.access import _AccessContext
 from environment_harness.adapters.legacy import LegacyEnvironment
 from environment_harness.adapters.ors import ORSClient, ORSError, read_result
 from environment_harness.adapters.remote import PROTOCOL, HTTPWorkerTransport, RemoteEnvironment
-from environment_harness.contracts import Action, AgentSpec, ExperimentSpec, Principal
+from environment_harness.contracts import Action, AgentSpec, ExperimentSpec
 from environment_harness.coordinator import advance
 from environment_harness.errors import Forbidden, Unavailable
 from environment_harness.fixtures import SyntheticEnvironment
-from environment_harness.runtime import EnvironmentSession
+from environment_harness.runtime import _SessionRuntime
 from environment_harness.store import EvidenceStore
 from environment_harness.worker import dispatch
 from environment_harness.worker_server import create_worker_app
@@ -206,8 +207,8 @@ def test_transport_rejects_unsafe_origins(endpoint):
 def test_external_agents_advance_without_hosted_model(tmp_path):
     env = SyntheticEnvironment(mode="simultaneous")
     env.spec = env.spec.model_copy(update={"phase_deadline": "coordinator"})
-    session = EnvironmentSession(EvidenceStore(tmp_path), env)
-    who = Principal(tenant="synthetic", subject="owner", role="researcher")
+    session = _SessionRuntime(EvidenceStore(tmp_path), env)
+    who = _AccessContext(tenant="synthetic", subject="owner", policy="trusted-local")
     experiment = ExperimentSpec(
         environment=env.spec,
         participants=tuple(
@@ -217,14 +218,7 @@ def test_external_agents_advance_without_hosted_model(tmp_path):
     identity = session.create(experiment, who)["id"]
     first = None
     for participant in ("alice", "bob"):
-        principal = who.model_copy(
-            update={
-                "role": "agent",
-                "subject": participant,
-                "participant": participant,
-                "environment": identity,
-            }
-        )
+        principal = session.participant_context(identity, who, participant)
         observation = session.observe(identity, principal)
         assert observation["payload"]["total"] == 0
         action = Action(
@@ -403,8 +397,8 @@ def test_coordinator_respects_scheduling_and_lost_authority(tmp_path, monkeypatc
 
     env = SyntheticEnvironment(mode=mode)
     env.spec = env.spec.model_copy(update={"phase_deadline": "coordinator"})
-    session = EnvironmentSession(EvidenceStore(tmp_path), env)
-    who = Principal(tenant="synthetic", subject="owner", role="researcher")
+    session = _SessionRuntime(EvidenceStore(tmp_path), env)
+    who = _AccessContext(tenant="synthetic", subject="owner", policy="trusted-local")
     identity = session.create(
         ExperimentSpec(
             environment=env.spec,
@@ -412,9 +406,7 @@ def test_coordinator_respects_scheduling_and_lost_authority(tmp_path, monkeypatc
         ),
         who,
     )["id"]
-    agent = who.model_copy(
-        update={"role": "agent", "subject": "alice", "participant": "alice", "environment": identity}
-    )
+    agent = who.replace(policy="participant", subject="alice", participant="alice", session=identity)
     observation = session.observe(identity, agent)
     session.submit(
         identity,

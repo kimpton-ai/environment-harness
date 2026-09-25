@@ -5,21 +5,23 @@ import time
 
 import pytest
 
-from environment_harness import AgentSpec, EnvironmentSession, EvidenceStore, ExperimentSpec, Principal
+from environment_harness import AgentSpec, EvidenceStore, ExperimentSpec
+from environment_harness.access import _AccessContext
 from environment_harness.contracts import RunPolicy, ScoreReport
 from environment_harness.errors import Conflict
 from environment_harness.evaluation import compare
 from environment_harness.fixtures import SyntheticAgent, SyntheticEnvironment
 from environment_harness.history import reconstruct_inherited
 from environment_harness.presentation import build_timeline, render_comparison, render_timeline
+from environment_harness.runtime import _SessionRuntime
 from environment_harness.store import digest, encode
 
 
 def setup(path, limit=4096):
     store = EvidenceStore(path)
     env = SyntheticEnvironment()
-    session = EnvironmentSession(store, env)
-    who = Principal(tenant="local", subject="researcher", role="researcher")
+    session = _SessionRuntime(store, env)
+    who = _AccessContext(tenant="local", subject="researcher", policy="trusted-local")
     spec = ExperimentSpec(
         environment=env.spec,
         participants=tuple(
@@ -163,8 +165,8 @@ def test_large_history_is_lossless_private_and_does_not_grow_on_rebranch(tmp_pat
     restored = list(reconstruct_inherited(history))
     assert next(r["record"] for r in restored if r["record"]["kind"] == "private.large") == original_row
     assert store.verify(child, who)["events"] == len(history)
-    alice = Principal(tenant="local", subject="a", role="agent", environment=child, participant="a")
-    bob = alice.model_copy(update={"subject": "b", "participant": "b"})
+    alice = _AccessContext(tenant="local", subject="a", policy="participant", session=child, participant="a")
+    bob = alice.replace(subject="b", participant="b")
     assert any(
         r["record"]["kind"] == "private.large" for r in reconstruct_inherited(store.replay(child, alice))
     )

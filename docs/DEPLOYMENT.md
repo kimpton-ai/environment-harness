@@ -124,14 +124,20 @@ request requires a bearer credential.
 The following synthetic application is suitable for integration testing, not production hosting:
 
 ```python
-from environment_harness import EnvironmentSession, EvidenceStore
-from environment_harness.fixtures import SyntheticEnvironment
+from environment_harness import EnvironmentHarness, EvidenceStore
+from environment_harness.fixtures import SyntheticAgent, SyntheticEnvironment
 from environment_harness.server import create_app
 
-store = EvidenceStore("./environment-sessions")
-session = EnvironmentSession(store, SyntheticEnvironment())
-app = create_app(session)
+harness = EnvironmentHarness(
+    EvidenceStore("./environment-sessions"),
+    environment_factory=SyntheticEnvironment,
+    agent_factories={"alice": SyntheticAgent},
+)
+app = create_app(harness)
 ```
+
+Issue management credentials with `harness.management_credential()`. The server never accepts a
+policy, role, or permission from a request. See [Authentication](AUTHENTICATION.md).
 
 Save that module as `app.py`, then run it behind Uvicorn during development:
 

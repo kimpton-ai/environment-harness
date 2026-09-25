@@ -1,11 +1,14 @@
 """Local browser connection must not remove the supplier API's authentication boundary."""
 
 import pytest
+from _credentials import bearer
 from fastapi.testclient import TestClient
 
-from environment_harness import EnvironmentSession, EvidenceStore, Principal, local_viewer
+from environment_harness import EvidenceStore, local_viewer
+from environment_harness.access import _AccessContext
 from environment_harness.fixtures import SyntheticEnvironment
 from environment_harness.local_viewer import LocalViewerAccess
+from environment_harness.runtime import _SessionRuntime
 from environment_harness.server import create_app
 
 ORIGIN = "http://127.0.0.1:8765"
@@ -13,9 +16,9 @@ ORIGIN = "http://127.0.0.1:8765"
 
 @pytest.fixture
 def local_service(tmp_path):
-    session = EnvironmentSession(EvidenceStore(tmp_path), SyntheticEnvironment())
-    principal = Principal(tenant="local", subject="researcher", role="researcher")
-    access = LocalViewerAccess(ORIGIN, session.store.issue(principal))
+    session = _SessionRuntime(EvidenceStore(tmp_path), SyntheticEnvironment())
+    principal = _AccessContext(tenant="local", subject="researcher", policy="trusted-local")
+    access = LocalViewerAccess(ORIGIN, bearer(session.store, principal))
     app = create_app(session, local_access=access)
     return session, access, app
 

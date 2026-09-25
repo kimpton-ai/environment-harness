@@ -2,19 +2,21 @@ import math
 
 import pytest
 
-from environment_harness import AgentSpec, EnvironmentSession, EvidenceStore, ExperimentSpec, Principal
+from environment_harness import AgentSpec, EvidenceStore, ExperimentSpec
+from environment_harness.access import _AccessContext
 from environment_harness.adapters.programs import InstrumentedModel
 from environment_harness.contracts import RunPolicy
 from environment_harness.errors import Conflict
 from environment_harness.fixtures import SyntheticEnvironment
 from environment_harness.runner import run
+from environment_harness.runtime import _SessionRuntime
 
 
 def test_instrumented_model_correlates_calls_to_durable_agent_work(tmp_path):
     store = EvidenceStore(tmp_path)
     environment = SyntheticEnvironment()
-    session = EnvironmentSession(store, environment)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    session = _SessionRuntime(store, environment)
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     environment_id = session.create(
         ExperimentSpec(
             environment=environment.spec,
@@ -23,11 +25,11 @@ def test_instrumented_model_correlates_calls_to_durable_agent_work(tmp_path):
         ),
         researcher,
     )["id"]
-    agent_principal = Principal(
+    agent_principal = _AccessContext(
         tenant="tenant",
         subject="alice",
-        role="agent",
-        environment=environment_id,
+        policy="participant",
+        session=environment_id,
         participant="alice",
     )
 
@@ -87,8 +89,8 @@ def test_instrumented_model_correlates_calls_to_durable_agent_work(tmp_path):
 def test_instrumented_model_rejects_invalid_token_evidence(tmp_path, response):
     store = EvidenceStore(tmp_path)
     environment = SyntheticEnvironment()
-    session = EnvironmentSession(store, environment)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    session = _SessionRuntime(store, environment)
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     environment_id = session.create(
         ExperimentSpec(
             environment=environment.spec,
@@ -96,11 +98,11 @@ def test_instrumented_model_rejects_invalid_token_evidence(tmp_path, response):
         ),
         researcher,
     )["id"]
-    principal = Principal(
+    principal = _AccessContext(
         tenant="tenant",
         subject="alice",
-        role="agent",
-        environment=environment_id,
+        policy="participant",
+        session=environment_id,
         participant="alice",
     )
     model = InstrumentedModel(store, environment_id, principal, lambda _request: response)
@@ -112,8 +114,8 @@ def test_instrumented_model_rejects_invalid_token_evidence(tmp_path, response):
 def test_instrumented_model_spills_oversized_detail_to_participant_artifacts(tmp_path):
     store = EvidenceStore(tmp_path)
     environment = SyntheticEnvironment()
-    session = EnvironmentSession(store, environment)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    session = _SessionRuntime(store, environment)
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     environment_id = session.create(
         ExperimentSpec(
             environment=environment.spec,
@@ -122,11 +124,11 @@ def test_instrumented_model_spills_oversized_detail_to_participant_artifacts(tmp
         ),
         researcher,
     )["id"]
-    principal = Principal(
+    principal = _AccessContext(
         tenant="tenant",
         subject="alice",
-        role="agent",
-        environment=environment_id,
+        policy="participant",
+        session=environment_id,
         participant="alice",
     )
     request = {"prompt": "r" * 10_000}
@@ -172,8 +174,8 @@ def test_instrumented_model_spills_oversized_detail_to_participant_artifacts(tmp
 def test_instrumented_model_rejects_unserializable_requests_and_non_mapping_responses(tmp_path):
     store = EvidenceStore(tmp_path)
     environment = SyntheticEnvironment()
-    session = EnvironmentSession(store, environment)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    session = _SessionRuntime(store, environment)
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     environment_id = session.create(
         ExperimentSpec(
             environment=environment.spec,
@@ -181,11 +183,11 @@ def test_instrumented_model_rejects_unserializable_requests_and_non_mapping_resp
         ),
         researcher,
     )["id"]
-    principal = Principal(
+    principal = _AccessContext(
         tenant="tenant",
         subject="alice",
-        role="agent",
-        environment=environment_id,
+        policy="participant",
+        session=environment_id,
         participant="alice",
     )
     model = InstrumentedModel(store, environment_id, principal, lambda _request: "not-a-mapping")
@@ -199,8 +201,8 @@ def test_instrumented_model_rejects_unserializable_requests_and_non_mapping_resp
 def test_instrumented_model_rejects_an_oversized_artifact_summary(tmp_path):
     store = EvidenceStore(tmp_path)
     environment = SyntheticEnvironment()
-    session = EnvironmentSession(store, environment)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    session = _SessionRuntime(store, environment)
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     environment_id = session.create(
         ExperimentSpec(
             environment=environment.spec,
@@ -209,11 +211,11 @@ def test_instrumented_model_rejects_an_oversized_artifact_summary(tmp_path):
         ),
         researcher,
     )["id"]
-    principal = Principal(
+    principal = _AccessContext(
         tenant="tenant",
         subject="alice",
-        role="agent",
-        environment=environment_id,
+        policy="participant",
+        session=environment_id,
         participant="alice",
     )
     model = InstrumentedModel(

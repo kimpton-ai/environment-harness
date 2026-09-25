@@ -4,18 +4,18 @@ import pytest
 
 from environment_harness import (
     AgentSpec,
-    EnvironmentSession,
     EvidenceStore,
     ExperimentSpec,
     Policy,
-    Principal,
     ResourceRegistry,
     Trajectory,
     TrajectoryRepository,
     TrajectorySnapshot,
 )
+from environment_harness.access import _AccessContext
 from environment_harness.errors import Conflict, Forbidden, Unsupported
 from environment_harness.fixtures import SyntheticEnvironment
+from environment_harness.runtime import _SessionRuntime
 from environment_harness.store import digest, encode
 from environment_harness.trajectories import (
     API_VERSION,
@@ -115,8 +115,8 @@ def test_policy_resource_round_trips_and_native_manifest_synthesizes_legacy_poli
 
     environment = SyntheticEnvironment()
     store = EvidenceStore(tmp_path)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
-    environment_id = EnvironmentSession(store, environment).create(
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
+    environment_id = _SessionRuntime(store, environment).create(
         ExperimentSpec(
             environment=environment.spec,
             participants=(AgentSpec(id="alice", implementation="synthetic", policy_version="legacy-v1"),),
@@ -171,8 +171,8 @@ def test_snapshot_freezes_source_score_and_artifact_boundaries():
 def test_repository_projects_existing_evidence_without_creating_another_journal(tmp_path):
     environment = SyntheticEnvironment()
     store = EvidenceStore(tmp_path)
-    session = EnvironmentSession(store, environment)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    session = _SessionRuntime(store, environment)
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     spec = ExperimentSpec(
         environment=environment.spec,
         participants=(AgentSpec(id="alice", implementation="synthetic", policy_version="1"),),
@@ -194,8 +194,8 @@ def test_repository_projects_existing_evidence_without_creating_another_journal(
 def test_native_resume_creates_a_continuation_segment_without_breaking_causality(tmp_path):
     environment = SyntheticEnvironment()
     store = EvidenceStore(tmp_path)
-    session = EnvironmentSession(store, environment)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    session = _SessionRuntime(store, environment)
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     environment_id = session.create(
         ExperimentSpec(
             environment=environment.spec,
@@ -222,8 +222,8 @@ def test_native_resume_creates_a_continuation_segment_without_breaking_causality
 def test_frozen_snapshot_does_not_change_when_new_evidence_is_appended(tmp_path):
     environment = SyntheticEnvironment()
     store = EvidenceStore(tmp_path)
-    session = EnvironmentSession(store, environment)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    session = _SessionRuntime(store, environment)
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     spec = ExperimentSpec(
         environment=environment.spec,
         participants=(AgentSpec(id="alice", implementation="synthetic", policy_version="1"),),
@@ -252,7 +252,7 @@ def test_frozen_snapshot_does_not_change_when_new_evidence_is_appended(tmp_path)
 
 def test_source_registration_is_idempotent_and_conflicting_metadata_fails(tmp_path):
     repository = TrajectoryRepository(EvidenceStore(tmp_path))
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     registration = SourceRegistration(
         namespace="com.example.simulator",
         run_id="run-7",
@@ -286,7 +286,7 @@ def test_source_registration_requires_a_stable_namespaced_identity():
 
 def test_registered_source_status_is_inspectable_before_any_records_arrive(tmp_path):
     repository = TrajectoryRepository(EvidenceStore(tmp_path))
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     receipt = repository.register_source(
         SourceRegistration(
             namespace="com.example.simulator",
@@ -311,7 +311,7 @@ def test_registered_source_status_is_inspectable_before_any_records_arrive(tmp_p
 
 def test_ingestion_retries_identically_and_rejects_conflicts_or_broken_chains(tmp_path):
     repository = TrajectoryRepository(EvidenceStore(tmp_path))
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     source = repository.register_source(
         SourceRegistration(
             namespace="com.example.simulator",
@@ -376,7 +376,7 @@ def test_ingestion_retries_identically_and_rejects_conflicts_or_broken_chains(tm
 
 def test_imported_source_uses_the_same_trajectory_interface_and_preserves_authority(tmp_path):
     repository = TrajectoryRepository(EvidenceStore(tmp_path))
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     source = repository.register_source(
         SourceRegistration(
             namespace="com.example.simulator",
@@ -417,7 +417,7 @@ def test_imported_source_uses_the_same_trajectory_interface_and_preserves_author
 
 def test_collection_completion_requires_terminal_acknowledgement_and_no_gaps(tmp_path):
     repository = TrajectoryRepository(EvidenceStore(tmp_path))
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     source = repository.register_source(
         SourceRegistration(
             namespace="com.example.simulator",
@@ -487,7 +487,7 @@ def test_collection_completion_requires_terminal_acknowledgement_and_no_gaps(tmp
 
 def test_imported_collection_health_preserves_backlog_gaps_and_acknowledged_boundary(tmp_path):
     repository = TrajectoryRepository(EvidenceStore(tmp_path))
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     source = repository.register_source(
         SourceRegistration(
             namespace="com.example.simulator",
@@ -541,8 +541,8 @@ def test_imported_collection_health_preserves_backlog_gaps_and_acknowledged_boun
 def test_registry_decodes_built_in_resources_and_rejects_duplicate_ownership(tmp_path):
     environment = SyntheticEnvironment()
     store = EvidenceStore(tmp_path)
-    session = EnvironmentSession(store, environment)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    session = _SessionRuntime(store, environment)
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     environment_id = session.create(
         ExperimentSpec(
             environment=environment.spec,
@@ -565,8 +565,8 @@ def test_registry_decodes_built_in_resources_and_rejects_duplicate_ownership(tmp
 def test_unified_trajectory_index_pages_native_and_imported_runs(tmp_path):
     environment = SyntheticEnvironment()
     store = EvidenceStore(tmp_path)
-    session = EnvironmentSession(store, environment)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    session = _SessionRuntime(store, environment)
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     native_id = session.create(
         ExperimentSpec(
             environment=environment.spec,
@@ -598,7 +598,7 @@ def test_unified_trajectory_index_pages_native_and_imported_runs(tmp_path):
 
 def test_imported_trajectory_can_be_frozen_and_reexported_without_native_environment(tmp_path):
     store = EvidenceStore(tmp_path)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     repository = TrajectoryRepository(store)
     source = repository.register_source(
         SourceRegistration(
@@ -673,15 +673,15 @@ def test_registry_rejects_duplicate_record_decoder_registration():
 def test_snapshot_listing_is_trajectory_scoped_and_tenant_isolated(tmp_path):
     environment = SyntheticEnvironment()
     store = EvidenceStore(tmp_path)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
-    environment_id = EnvironmentSession(store, environment).create(
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
+    environment_id = _SessionRuntime(store, environment).create(
         ExperimentSpec(
             environment=environment.spec,
             participants=(AgentSpec(id="alice", implementation="synthetic", policy_version="legacy-v1"),),
         ),
         researcher,
     )["id"]
-    session = EnvironmentSession(store, environment)
+    session = _SessionRuntime(store, environment)
     session.observe(environment_id, researcher, "alice")
     repository = TrajectoryRepository(store)
     frozen = repository.freeze(environment_id, researcher)
@@ -691,7 +691,7 @@ def test_snapshot_listing_is_trajectory_scoped_and_tenant_isolated(tmp_path):
     assert (
         repository.list_snapshots(
             environment_id,
-            Principal(tenant="another-tenant", subject="researcher", role="researcher"),
+            _AccessContext(tenant="another-tenant", subject="researcher", policy="trusted-local"),
         )
         == []
     )
@@ -900,20 +900,28 @@ def _source_record(record_id, position, previous_hash, *, segment="segment-1"):
 def test_repository_authority_paging_and_cursor_edges(tmp_path):
     store = EvidenceStore(tmp_path)
     repository = TrajectoryRepository(store)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
-    worker = Principal(tenant="tenant", subject="worker", role="worker")
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
+    # A participant credential is the negative case that survives the removal
+    # of the four-role model: it can only observe and act inside its session.
+    read_only = _AccessContext(
+        tenant="tenant",
+        subject="alice",
+        policy="participant",
+        session="0" * 32,
+        participant="alice",
+    )
     source = _registered_source(repository, researcher)
     first = _source_record("record-1", "1", "0" * 64)
     second = _source_record("record-2", "2", first.source_hash, segment="segment-2")
     repository.ingest(source.id, (first, second), researcher)
 
-    with pytest.raises(Forbidden, match="index authority"):
-        repository.list_page(worker)
+    with pytest.raises(Forbidden, match="policy denies"):
+        repository.list_page(read_only)
     with pytest.raises(ValueError, match="page size"):
         repository.list_page(researcher, limit=0)
     with pytest.raises(ValueError, match="cursor"):
         repository.list_page(researcher, cursor="missing")
-    with pytest.raises(Forbidden, match="registration authority"):
+    with pytest.raises(Forbidden, match="policy denies"):
         repository.register_source(
             SourceRegistration(
                 namespace="com.example.denied",
@@ -923,10 +931,10 @@ def test_repository_authority_paging_and_cursor_edges(tmp_path):
                 participants=(),
                 purpose="evaluation",
             ),
-            worker,
+            read_only,
         )
-    with pytest.raises(Forbidden, match="record authority"):
-        repository.records_page(source.id, worker)
+    with pytest.raises(Forbidden, match="policy denies"):
+        repository.records_page(source.id, read_only)
     with pytest.raises(ValueError, match="record page"):
         repository.records_page(source.id, researcher, after=-1)
     with pytest.raises(Forbidden, match="trajectory unavailable"):
@@ -943,8 +951,8 @@ def test_repository_authority_paging_and_cursor_edges(tmp_path):
 def test_native_record_paging_tracks_resume_segments(tmp_path):
     store = EvidenceStore(tmp_path)
     environment = SyntheticEnvironment()
-    session = EnvironmentSession(store, environment)
-    who = Principal(tenant="tenant", subject="researcher", role="researcher")
+    session = _SessionRuntime(store, environment)
+    who = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     environment_id = session.create(
         ExperimentSpec(
             environment=environment.spec,
@@ -967,13 +975,21 @@ def test_native_record_paging_tracks_resume_segments(tmp_path):
 def test_ingestion_and_source_status_rejection_paths(tmp_path):
     store = EvidenceStore(tmp_path)
     repository = TrajectoryRepository(store)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
-    worker = Principal(tenant="tenant", subject="worker", role="worker")
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
+    # A participant credential is the negative case that survives the removal
+    # of the four-role model: it can only observe and act inside its session.
+    read_only = _AccessContext(
+        tenant="tenant",
+        subject="alice",
+        policy="participant",
+        session="0" * 32,
+        participant="alice",
+    )
     source = _registered_source(repository, researcher)
     record = _source_record("record-1", "1", "0" * 64)
 
-    with pytest.raises(Forbidden, match="ingestion authority"):
-        repository.ingest(source.id, (record,), worker)
+    with pytest.raises(Forbidden, match="policy denies"):
+        repository.ingest(source.id, (record,), read_only)
     with pytest.raises(ValueError, match="1 to 1000"):
         repository.ingest(source.id, (), researcher)
     with pytest.raises(Forbidden, match="source unavailable"):
@@ -984,7 +1000,7 @@ def test_ingestion_and_source_status_rejection_paths(tmp_path):
             (record.model_copy(update={"source_hash": "f" * 64}),),
             researcher,
         )
-    with pytest.raises(Forbidden, match="source-status authority"):
+    with pytest.raises(Forbidden, match="policy denies"):
         repository.update_source_status(
             source.id,
             SourceStatusUpdate(
@@ -995,7 +1011,7 @@ def test_ingestion_and_source_status_rejection_paths(tmp_path):
                 terminal_position="1",
                 terminal_hash=record.source_hash,
             ),
-            worker,
+            read_only,
         )
     with pytest.raises(Forbidden, match="source unavailable"):
         repository.update_source_status(
@@ -1032,8 +1048,8 @@ def test_ingestion_and_source_status_rejection_paths(tmp_path):
         with pytest.raises(Conflict, match=message):
             repository.update_source_status(source.id, SourceStatusUpdate(**update), researcher)
 
-    with pytest.raises(Forbidden, match="source-status authority"):
-        repository.source_status(source.id, worker)
+    with pytest.raises(Forbidden, match="policy denies"):
+        repository.source_status(source.id, read_only)
     with pytest.raises(Forbidden, match="source unavailable"):
         repository.source_status("missing", researcher)
 
@@ -1041,10 +1057,18 @@ def test_ingestion_and_source_status_rejection_paths(tmp_path):
 def test_empty_trajectory_and_snapshot_legacy_authority_paths(tmp_path, monkeypatch):
     store = EvidenceStore(tmp_path)
     repository = TrajectoryRepository(store)
-    who = Principal(tenant="tenant", subject="researcher", role="researcher")
-    worker = Principal(tenant="tenant", subject="worker", role="worker")
+    who = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
+    # A participant credential is the negative case that survives the removal
+    # of the four-role model: it can only observe and act inside its session.
+    read_only = _AccessContext(
+        tenant="tenant",
+        subject="alice",
+        policy="participant",
+        session="0" * 32,
+        participant="alice",
+    )
     environment = SyntheticEnvironment()
-    session = EnvironmentSession(store, environment)
+    session = _SessionRuntime(store, environment)
     environment_id = session.create(
         ExperimentSpec(
             environment=environment.spec,
@@ -1059,8 +1083,8 @@ def test_empty_trajectory_and_snapshot_legacy_authority_paths(tmp_path, monkeypa
     source = _registered_source(repository, who, "empty-import")
     with pytest.raises(ValueError, match="no evidence"):
         repository.get(source.id, who)
-    with pytest.raises(Forbidden, match="source unavailable"):
-        repository.get(source.id, worker)
+    with pytest.raises(Forbidden, match="policy denies"):
+        repository.get(source.id, read_only)
     with pytest.raises(Forbidden, match="source unavailable"):
         repository.get("missing", who)
     portable = Trajectory.model_validate(_portable_trajectory_payload())
@@ -1068,12 +1092,12 @@ def test_empty_trajectory_and_snapshot_legacy_authority_paths(tmp_path, monkeypa
     with pytest.raises(Forbidden, match="trajectory unavailable"):
         repository.freeze("missing", who)
 
-    with pytest.raises(Forbidden, match="snapshot authority"):
-        repository.get_snapshot("missing", worker)
+    with pytest.raises(Forbidden, match="policy denies"):
+        repository.get_snapshot("missing", read_only)
     with pytest.raises(Forbidden, match="snapshot unavailable"):
         repository.get_snapshot("missing", who)
-    with pytest.raises(Forbidden, match="snapshot authority"):
-        repository.list_snapshots(environment_id, worker)
+    with pytest.raises(Forbidden, match="policy denies"):
+        repository.list_snapshots(environment_id, read_only)
 
     snapshot = _portable_trajectory_payload()
     legacy = {

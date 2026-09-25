@@ -68,18 +68,11 @@ available. Source namespaces are stable namespaced identifiers, and `(tenant, na
 is immutable.
 
 ```python
-from environment_harness import EvidenceStore, Principal
-from environment_harness.trajectories import (
-    SourceRecord,
-    SourceRegistration,
-    TrajectoryRepository,
-)
+from environment_harness.trajectories import SourceRecord, SourceRegistration
 
-store = EvidenceStore(".local/evidence")
-researcher = Principal(tenant="local", subject="researcher", role="researcher")
-repository = TrajectoryRepository(store)
+repository = harness.sources()
 
-source = repository.register_source(
+source = repository.register(
     SourceRegistration(
         namespace="com.example.simulator",
         run_id="run-42",

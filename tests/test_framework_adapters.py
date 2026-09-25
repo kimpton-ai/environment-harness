@@ -1,19 +1,21 @@
 import pytest
 
-from environment_harness import AgentSpec, EnvironmentSession, EvidenceStore, ExperimentSpec, Principal
+from environment_harness import AgentSpec, EvidenceStore, ExperimentSpec
+from environment_harness.access import _AccessContext
 from environment_harness.adapters import frameworks
 from environment_harness.contracts import RunPolicy
 from environment_harness.errors import Unsupported
 from environment_harness.fixtures import SyntheticAgent, SyntheticEnvironment
 from environment_harness.runner import run
+from environment_harness.runtime import _SessionRuntime
 
 
 def test_verifiers_031_bridge_projects_the_canonical_trajectory(monkeypatch, tmp_path):
     monkeypatch.setattr(frameworks, "version", lambda _package: "0.3.1")
     store = EvidenceStore(tmp_path)
-    who = Principal(tenant="tenant", subject="researcher", role="researcher")
+    who = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     environment = SyntheticEnvironment()
-    session = EnvironmentSession(store, environment)
+    session = _SessionRuntime(store, environment)
     environment_id = session.create(
         ExperimentSpec(
             environment=environment.spec,

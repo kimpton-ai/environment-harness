@@ -3,10 +3,11 @@ import sys
 import threading
 import types
 
+import pytest
 from fastapi.testclient import TestClient
 
 from environment_harness import cli, local_viewer, plugins
-from environment_harness.contracts import Principal
+from environment_harness.access import _AccessContext
 from environment_harness.store import EvidenceStore
 from environment_harness.trajectories import (
     SourceRecord,
@@ -31,7 +32,7 @@ def test_cli_public_session_journey(tmp_path, monkeypatch, capsys):
     assert result["experiment"]["policy"]["max_turns"] == 1
 
     recorded = EvidenceStore(store_path)
-    researcher = Principal(tenant="local", subject="local-researcher", role="researcher")
+    researcher = _AccessContext(tenant="local", subject="local-researcher", policy="trusted-local")
     events = list(recorded.replay(environment, researcher))
     assert {"checkpoint.committed", "artifact", "report"} <= {event["kind"] for event in events}
     assert any(
@@ -70,7 +71,6 @@ def test_cli_public_session_journey(tmp_path, monkeypatch, capsys):
     assert invoke(monkeypatch, capsys, store_path, "replay", environment).startswith("{")
     assert invoke(monkeypatch, capsys, store_path, "export", environment).startswith("{")
     assert len(invoke(monkeypatch, capsys, store_path, "token").strip()) > 20
-    assert len(invoke(monkeypatch, capsys, store_path, "token", "--environment", environment).strip()) > 20
     assert (
         len(
             invoke(
@@ -78,7 +78,7 @@ def test_cli_public_session_journey(tmp_path, monkeypatch, capsys):
                 capsys,
                 store_path,
                 "token",
-                "--environment",
+                "--session",
                 environment,
                 "--participant",
                 "alice",
@@ -86,6 +86,8 @@ def test_cli_public_session_journey(tmp_path, monkeypatch, capsys):
         )
         > 20
     )
+    with pytest.raises(ValueError, match="both --session and --participant"):
+        invoke(monkeypatch, capsys, store_path, "token", "--participant", "alice")
     attached = json.loads(invoke(monkeypatch, capsys, store_path, "attach", environment))
     assert attached["id"] == environment
 
@@ -113,7 +115,7 @@ def test_cli_public_session_journey(tmp_path, monkeypatch, capsys):
 def test_cli_source_status_inspects_registered_sources_without_a_mutation_file(tmp_path, monkeypatch, capsys):
     store_path = tmp_path / "source-status"
     store = EvidenceStore(store_path)
-    who = Principal(tenant="local", subject="local-researcher", role="researcher")
+    who = _AccessContext(tenant="local", subject="local-researcher", policy="trusted-local")
     source = TrajectoryRepository(store).register_source(
         SourceRegistration(
             namespace="com.example.simulator",
@@ -165,8 +167,8 @@ def test_quickstart_builds_a_grouped_experiment_and_review_routes(tmp_path, monk
     }
 
     recorded = EvidenceStore(store_path)
-    researcher = Principal(tenant="local", subject="local-researcher", role="researcher")
-    snapshot = recorded.activity_snapshot(researcher)
+    researcher = _AccessContext(tenant="local", subject="local-researcher", policy="trusted-local")
+    snapshot = recorded.activity_hierarchy(researcher)
     assert snapshot["experiments"][0]["id"] == experiment["id"]
     assert {
         scenario["metadata"]["name"] for item in snapshot["experiments"] for scenario in item["scenarios"]
@@ -378,7 +380,8 @@ def test_cli_serve_uses_loopback_local_access_without_writing_a_credential(tmp_p
     assert client.get("/viewer/config").json() == {"authentication": "local"}
     response = client.post("/local/connect", headers={"Origin": "http://127.0.0.1:9876"})
     assert response.status_code == 200
-    assert EvidenceStore(store_path).authenticate(response.json()["token"]).role == "researcher"
+    resolved = EvidenceStore(store_path).authenticate(response.json()["token"])
+    assert resolved.policy == "viewer" and not resolved.allows("session.create")
 
 
 def test_cli_serve_exits_cleanly_on_keyboard_interrupt(tmp_path, monkeypatch, capsys):
@@ -437,6 +440,6 @@ def test_cli_open_flag_only_launches_the_plain_viewer_url(tmp_path, monkeypatch,
 
 def test_cli_inspect_forwards_limit(tmp_path, monkeypatch, capsys):
     store = EvidenceStore(tmp_path / "store")
-    who = Principal(tenant="local", subject="local-researcher", role="researcher")
-    assert who.role == "researcher"
+    who = _AccessContext(tenant="local", subject="local-researcher", policy="trusted-local")
+    assert who.allows("session.create") and who.full_evidence
     assert json.loads(invoke(monkeypatch, capsys, store.root, "list", "--json", "--limit", "1")) == []

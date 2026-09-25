@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+from .access import _AccessContext
 from .contracts import (
     Action,
     AgentSpec,
     ExperimentSpec,
     Finding,
     MetricDefinition,
-    Principal,
     RunPolicy,
     Scenario,
     ScoreReport,
@@ -16,10 +16,10 @@ from .contracts import (
 from .fixtures import SyntheticEnvironment, SyntheticScenarioInput, SyntheticShowcaseAgent
 from .harness import EnvironmentHarness
 from .runner import run
-from .runtime import EnvironmentSession
+from .runtime import _SessionRuntime
 
 
-def _record_synthetic_comparison_report(store, researcher: Principal, environment: str) -> None:
+def _record_synthetic_comparison_report(store, researcher, environment: str) -> None:
     """Record deterministic fixture metrics that exercise cross-session comparison."""
     evidence = list(store.replay(environment, researcher))
     executed = [event for event in evidence if event["kind"] == "action.executed"]
@@ -64,7 +64,7 @@ def _record_synthetic_comparison_report(store, researcher: Principal, environmen
 
 def create_synthetic_experiment_showcase(
     store,
-    researcher: Principal,
+    researcher,
     *,
     turns: int = 3,
     name: str = "Customer support workflow",
@@ -139,7 +139,7 @@ def create_synthetic_experiment_showcase(
 
 def create_synthetic_review_demo(
     store,
-    researcher: Principal,
+    researcher,
     *,
     turns: int = 10,
     training: bool = False,
@@ -228,7 +228,7 @@ def create_synthetic_review_demo(
 
 def create_synthetic_showcase(
     store,
-    researcher: Principal,
+    researcher,
     *,
     turns: int = 10,
     participants: tuple[str, ...] = ("alice", "bob"),
@@ -240,7 +240,7 @@ def create_synthetic_showcase(
     if turns < 1:
         raise ValueError("showcase turns must be at least one")
     implementation = SyntheticEnvironment()
-    session = EnvironmentSession(store, implementation)
+    session = _SessionRuntime(store, implementation)
     spec = ExperimentSpec(
         environment=implementation.spec,
         participants=tuple(
@@ -272,11 +272,11 @@ def create_synthetic_showcase(
         blocked = None
         if turn_number == blocked_turn:
             participant = participants[0]
-            principal = Principal(
+            principal = _AccessContext(
                 tenant=researcher.tenant,
                 subject=participant,
-                role="agent",
-                environment=environment,
+                policy="participant",
+                session=environment,
                 participant=participant,
             )
             observation = session.observe(environment, principal)

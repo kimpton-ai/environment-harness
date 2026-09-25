@@ -9,7 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from environment_harness import EvidenceStore, Principal, showcase
+from environment_harness import EvidenceStore, showcase
+from environment_harness.access import _AccessContext
 from environment_harness.fixtures import SyntheticShowcaseAgent
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,8 +28,8 @@ def test_branch_example_outcomes_and_private_history(tmp_path):
     assert report["comparison"]["environments"][0]["participants"] == ["alice", "bob"]
     store = EvidenceStore(tmp_path)
     for environment in (report["parent"], report["branch"]):
-        alice = Principal(
-            tenant="local", subject="alice", role="agent", environment=environment, participant="alice"
+        alice = _AccessContext(
+            tenant="local", subject="alice", policy="participant", session=environment, participant="alice"
         )
         events = json.dumps(list(store.replay(environment, alice)))
         assert "synthetic-secret-alice" in events
@@ -103,7 +104,7 @@ def test_custom_environment_experiment_records_operations_scores_and_findings(tm
     assert {session["findings"] for session in summary["sessions"]} == {1}
 
     store = EvidenceStore(store_path)
-    researcher = Principal(tenant="local", subject="example", role="researcher")
+    researcher = _AccessContext(tenant="local", subject="example", policy="trusted-local")
     for session in summary["sessions"]:
         record = store.reports(session["id"], researcher)
         assert record[-1]["report"]["metrics"]["operation_receipts"] == 1
@@ -137,7 +138,7 @@ def test_external_environment_experiment_connects_to_a_separate_simulator(tmp_pa
     assert {session["receipt"]["status"] for session in summary["sessions"]} == {"moved"}
 
     store = EvidenceStore(store_path)
-    researcher = Principal(tenant="local", subject="example", role="researcher")
+    researcher = _AccessContext(tenant="local", subject="example", policy="trusted-local")
     for session in summary["sessions"]:
         reports = store.reports(session["id"], researcher)
         assert reports[-1]["report"]["metrics"]["external_operations"] == 1
@@ -166,7 +167,7 @@ def test_optional_pettingzoo_example_matches_its_frozen_agent_implementation(tmp
 
 
 def test_synthetic_showcase_rejects_invalid_fixture_inputs(tmp_path, monkeypatch):
-    researcher = Principal(tenant="local", subject="researcher", role="researcher")
+    researcher = _AccessContext(tenant="local", subject="researcher", policy="trusted-local")
     store = EvidenceStore(tmp_path)
     with pytest.raises(ValueError, match="turns must be at least one"):
         showcase.create_synthetic_experiment_showcase(store, researcher, turns=0)
@@ -176,7 +177,7 @@ def test_synthetic_showcase_rejects_invalid_fixture_inputs(tmp_path, monkeypatch
         SyntheticShowcaseAgent().restore({"offset": 9})
 
     monkeypatch.setattr(
-        showcase.EnvironmentSession,
+        showcase._SessionRuntime,
         "submit",
         lambda *_args, **_kwargs: {"status": "completed"},
     )

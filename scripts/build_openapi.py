@@ -7,8 +7,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-from environment_harness import EnvironmentSession, EvidenceStore
+from environment_harness import EvidenceStore
 from environment_harness.fixtures import SyntheticEnvironment
+from environment_harness.runtime import _SessionRuntime
 from environment_harness.server import create_app
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,7 +18,7 @@ OUTPUT = ROOT / "contracts" / "openapi.json"
 
 def render() -> str:
     with tempfile.TemporaryDirectory(prefix="environment-harness-openapi-") as directory:
-        session = EnvironmentSession(EvidenceStore(directory), SyntheticEnvironment())
+        session = _SessionRuntime(EvidenceStore(directory), SyntheticEnvironment())
         document = create_app(session).openapi()
     return json.dumps(document, indent=2, sort_keys=True) + "\n"
 

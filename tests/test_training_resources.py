@@ -2,12 +2,15 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from _credentials import bearer
 
-from environment_harness import AgentSpec, EnvironmentSession, EvidenceStore, ExperimentSpec, Principal
+from environment_harness import AgentSpec, EvidenceStore, ExperimentSpec
+from environment_harness.access import _AccessContext
 from environment_harness.contracts import RunPolicy
 from environment_harness.errors import Conflict, Forbidden
 from environment_harness.fixtures import SyntheticAgent, SyntheticEnvironment
 from environment_harness.runner import run
+from environment_harness.runtime import _SessionRuntime
 from environment_harness.server import create_app
 from environment_harness.training import (
     TrainingOutput,
@@ -24,7 +27,7 @@ from environment_harness.trajectories import (
 
 def completed_session(store, who, *, purpose="training", split="training"):
     environment = SyntheticEnvironment()
-    session = EnvironmentSession(store, environment)
+    session = _SessionRuntime(store, environment)
     environment_id = session.create(
         ExperimentSpec(
             environment=environment.spec,
@@ -43,7 +46,7 @@ def completed_session(store, who, *, purpose="training", split="training"):
 
 def test_dataset_freezes_training_trajectories_and_streams_reproducible_export(tmp_path):
     store = EvidenceStore(tmp_path)
-    who = Principal(tenant="tenant", subject="researcher", role="researcher")
+    who = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     environment = completed_session(store, who)
     repository = TrainingRepository(store)
 
@@ -67,7 +70,7 @@ def test_dataset_freezes_training_trajectories_and_streams_reproducible_export(t
 
 def test_dataset_rejects_heldout_evaluation_even_when_snapshot_export_is_allowed(tmp_path):
     store = EvidenceStore(tmp_path)
-    who = Principal(tenant="tenant", subject="researcher", role="researcher")
+    who = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     environment = completed_session(store, who, purpose="evaluation", split="heldout")
 
     with pytest.raises(Forbidden, match="training-entitled"):
@@ -124,7 +127,7 @@ def imported_training_trajectory(store, who, rewards):
 
 def test_dataset_resolves_delayed_reward_supersession_chains(tmp_path):
     store = EvidenceStore(tmp_path)
-    who = Principal(tenant="tenant", subject="researcher", role="researcher")
+    who = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     source = imported_training_trajectory(
         store,
         who,
@@ -149,7 +152,7 @@ def test_dataset_resolves_delayed_reward_supersession_chains(tmp_path):
 
 def test_dataset_rejects_cyclic_reward_supersession(tmp_path):
     store = EvidenceStore(tmp_path)
-    who = Principal(tenant="tenant", subject="researcher", role="researcher")
+    who = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     source = imported_training_trajectory(
         store,
         who,
@@ -165,7 +168,7 @@ def test_dataset_rejects_cyclic_reward_supersession(tmp_path):
 
 def test_training_integration_records_immutable_result_without_serializing_live_instance(tmp_path):
     store = EvidenceStore(tmp_path)
-    who = Principal(tenant="tenant", subject="researcher", role="researcher")
+    who = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     environment = completed_session(store, who)
     repository = TrainingRepository(store)
     dataset = repository.freeze_dataset("synthetic-training", (environment,), who)
@@ -224,11 +227,11 @@ def test_http_can_freeze_and_read_datasets_but_exposes_no_training_execution_rou
     from fastapi.testclient import TestClient
 
     store = EvidenceStore(tmp_path)
-    who = Principal(tenant="tenant", subject="researcher", role="researcher")
+    who = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     environment_id = completed_session(store, who)
-    session = EnvironmentSession(store, SyntheticEnvironment())
+    session = _SessionRuntime(store, SyntheticEnvironment())
     client = TestClient(create_app(session), base_url="http://testserver")
-    headers = {"Authorization": "Bearer " + store.issue(who)}
+    headers = {"Authorization": "Bearer " + bearer(store, who)}
 
     created = client.post(
         "/v1/trajectory-datasets",
@@ -254,16 +257,24 @@ def test_http_can_freeze_and_read_datasets_but_exposes_no_training_execution_rou
 
 def test_dataset_authority_and_lifecycle_rejection_paths(tmp_path, monkeypatch):
     store = EvidenceStore(tmp_path)
-    who = Principal(tenant="tenant", subject="researcher", role="researcher")
-    worker = Principal(tenant="tenant", subject="worker", role="worker")
+    who = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
+    # A participant credential is the negative case that survives the removal
+    # of the four-role model: it can only observe and act inside its session.
+    read_only = _AccessContext(
+        tenant="tenant",
+        subject="alice",
+        policy="participant",
+        session="0" * 32,
+        participant="alice",
+    )
     environment = completed_session(store, who)
     trajectory_repository = TrajectoryRepository(store)
     trajectory = trajectory_repository.get(environment, who)
     snapshot = trajectory_repository.freeze(environment, who)
     repository = TrainingRepository(store)
 
-    with pytest.raises(Forbidden, match="training authority"):
-        repository.freeze_dataset("denied", (environment,), worker)
+    with pytest.raises(Forbidden, match="policy denies"):
+        repository.freeze_dataset("denied", (environment,), read_only)
     with pytest.raises(ValueError, match="name and trajectories"):
         repository.freeze_dataset("", (), who)
 
@@ -398,19 +409,27 @@ def test_dataset_and_training_run_lookup_listing_and_conflict_edges(tmp_path, mo
     from environment_harness import training as training_module
 
     store = EvidenceStore(tmp_path)
-    who = Principal(tenant="tenant", subject="researcher", role="researcher")
-    worker = Principal(tenant="tenant", subject="worker", role="worker")
+    who = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
+    # A participant credential is the negative case that survives the removal
+    # of the four-role model: it can only observe and act inside its session.
+    read_only = _AccessContext(
+        tenant="tenant",
+        subject="alice",
+        policy="participant",
+        session="0" * 32,
+        participant="alice",
+    )
     environment = completed_session(store, who)
     repository = TrainingRepository(store)
     monkeypatch.setattr(training_module, "_now", lambda: "2026-09-22T15:00:00Z")
     dataset = repository.freeze_dataset("edge-dataset", (environment,), who)
 
-    with pytest.raises(Forbidden, match="dataset authority"):
-        repository.get_dataset(dataset.metadata.id, worker)
+    with pytest.raises(Forbidden, match="policy denies"):
+        repository.get_dataset(dataset.metadata.id, read_only)
     with pytest.raises(Forbidden, match="dataset unavailable"):
         repository.get_dataset("missing", who)
-    with pytest.raises(Forbidden, match="dataset authority"):
-        repository.list_datasets(worker)
+    with pytest.raises(Forbidden, match="policy denies"):
+        repository.list_datasets(read_only)
     with pytest.raises(ValueError, match="dataset page size"):
         repository.list_datasets(who, limit=0)
     assert repository.list_datasets(who) == (dataset,)
@@ -446,17 +465,17 @@ def test_dataset_and_training_run_lookup_listing_and_conflict_edges(tmp_path, mo
     clean_environment = completed_session(clean_store, who)
     runs = TrainingRepository(clean_store)
     selected = runs.freeze_dataset("runs", (clean_environment,), who)
-    with pytest.raises(Forbidden, match="training authority"):
-        runs.run(selected.metadata.id, Integration(), {}, worker)
+    with pytest.raises(Forbidden, match="policy denies"):
+        runs.run(selected.metadata.id, Integration(), {}, read_only)
     recorded = runs.run(selected.metadata.id, Integration(), {}, who)
     assert runs.list_runs(who) == (recorded,)
     assert runs.list_runs(who, dataset=selected.metadata.id) == (recorded,)
-    with pytest.raises(Forbidden, match="training-run authority"):
-        runs.get_run(recorded.metadata.id, worker)
+    with pytest.raises(Forbidden, match="policy denies"):
+        runs.get_run(recorded.metadata.id, read_only)
     with pytest.raises(Forbidden, match="training run unavailable"):
         runs.get_run("missing", who)
-    with pytest.raises(Forbidden, match="training-run authority"):
-        runs.list_runs(worker)
+    with pytest.raises(Forbidden, match="policy denies"):
+        runs.list_runs(read_only)
     with pytest.raises(ValueError, match="training-run page size"):
         runs.list_runs(who, limit=0)
     with clean_store.transaction() as database:

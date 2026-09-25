@@ -193,6 +193,42 @@
         "title": "ActivityExperiment",
         "type": "object"
       },
+      "ActivityHierarchy": {
+        "additionalProperties": false,
+        "description": "Authoritative recovery projection for the live ownership hierarchy.\n\n\"Snapshot\" names the immutable ``TrajectorySnapshot`` resource, so the\nactivity projection uses \"hierarchy\" instead.",
+        "properties": {
+          "cursor": {
+            "minimum": 0.0,
+            "title": "Cursor",
+            "type": "integer"
+          },
+          "experiments": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ActivityExperiment"
+            },
+            "title": "Experiments",
+            "type": "array"
+          },
+          "standalone": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ActivitySession"
+            },
+            "title": "Standalone",
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/ActivitySummary"
+          }
+        },
+        "required": [
+          "summary",
+          "cursor"
+        ],
+        "title": "ActivityHierarchy",
+        "type": "object"
+      },
       "ActivityPage": {
         "additionalProperties": false,
         "description": "A resumable JSON page from an activity feed.",
@@ -434,42 +470,6 @@
           "updated"
         ],
         "title": "ActivitySession",
-        "type": "object"
-      },
-      "ActivitySnapshot": {
-        "additionalProperties": false,
-        "description": "Authoritative recovery snapshot for the live activity hierarchy.",
-        "properties": {
-          "cursor": {
-            "minimum": 0.0,
-            "title": "Cursor",
-            "type": "integer"
-          },
-          "experiments": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/ActivityExperiment"
-            },
-            "title": "Experiments",
-            "type": "array"
-          },
-          "standalone": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/ActivitySession"
-            },
-            "title": "Standalone",
-            "type": "array"
-          },
-          "summary": {
-            "$ref": "#/components/schemas/ActivitySummary"
-          }
-        },
-        "required": [
-          "summary",
-          "cursor"
-        ],
-        "title": "ActivitySnapshot",
         "type": "object"
       },
       "ActivitySummary": {
@@ -2707,7 +2707,7 @@
     "securitySchemes": {
       "BearerAuth": {
         "bearerFormat": "opaque",
-        "description": "Opaque EnvironmentHarness credential issued for a scoped principal.",
+        "description": "Opaque EnvironmentHarness credential. The server resolves it to an identity and one of its fixed management, viewer, or participant access policies.",
         "scheme": "bearer",
         "type": "http"
       }
@@ -3042,22 +3042,18 @@
         "summary": "Read tenant activity",
         "tags": [
           "Activity"
-        ],
-        "x-roles": [
-          "researcher",
-          "worker"
         ]
       }
     },
     "/v1/activity/snapshot": {
       "get": {
-        "operationId": "activity_snapshot_v1_activity_snapshot_get",
+        "operationId": "activity_hierarchy_v1_activity_snapshot_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ActivitySnapshot"
+                  "$ref": "#/components/schemas/ActivityHierarchy"
                 }
               }
             },
@@ -3182,10 +3178,6 @@
         "summary": "Get the current activity hierarchy",
         "tags": [
           "Activity"
-        ],
-        "x-roles": [
-          "researcher",
-          "worker"
         ]
       }
     },
@@ -3332,10 +3324,6 @@
         "summary": "Compare environment sessions",
         "tags": [
           "Evaluation"
-        ],
-        "x-roles": [
-          "researcher",
-          "scorer"
         ]
       }
     },
@@ -3470,12 +3458,6 @@
         "summary": "Get the active environment contract",
         "tags": [
           "Service"
-        ],
-        "x-roles": [
-          "researcher",
-          "worker",
-          "scorer",
-          "agent"
         ]
       }
     },
@@ -3657,9 +3639,6 @@
         "summary": "List environment sessions",
         "tags": [
           "Environment sessions"
-        ],
-        "x-roles": [
-          "researcher"
         ]
       },
       "post": {
@@ -3813,9 +3792,6 @@
         "summary": "Create an environment session",
         "tags": [
           "Environment sessions"
-        ],
-        "x-roles": [
-          "researcher"
         ]
       }
     },
@@ -3961,12 +3937,6 @@
         "summary": "Get an environment session",
         "tags": [
           "Environment sessions"
-        ],
-        "x-roles": [
-          "researcher",
-          "worker",
-          "scorer",
-          "agent"
         ]
       }
     },
@@ -4122,9 +4092,6 @@
         "summary": "Submit a participant action",
         "tags": [
           "Environment sessions"
-        ],
-        "x-roles": [
-          "agent"
         ]
       }
     },
@@ -4326,10 +4293,6 @@
         "summary": "Read activity for an environment session",
         "tags": [
           "Activity"
-        ],
-        "x-roles": [
-          "researcher",
-          "worker"
         ]
       }
     },
@@ -4487,11 +4450,6 @@
         "summary": "List agent work records",
         "tags": [
           "Environment sessions"
-        ],
-        "x-roles": [
-          "researcher",
-          "worker",
-          "agent"
         ]
       }
     },
@@ -4637,12 +4595,6 @@
         "summary": "Store an artifact",
         "tags": [
           "Evidence"
-        ],
-        "x-roles": [
-          "researcher",
-          "worker",
-          "scorer",
-          "agent"
         ]
       }
     },
@@ -4797,12 +4749,6 @@
         "summary": "Download an artifact",
         "tags": [
           "Evidence"
-        ],
-        "x-roles": [
-          "researcher",
-          "worker",
-          "scorer",
-          "agent"
         ]
       }
     },
@@ -4975,16 +4921,12 @@
           "transfer",
           "external_event",
           "finalize_outcomes"
-        ],
-        "x-roles": [
-          "researcher",
-          "worker",
-          "agent"
         ]
       }
     },
     "/v1/environments/{environment}/credentials": {
       "post": {
+        "description": "Issue a credential constrained to one session, participant, and generation.\n\nThis is the only operation that mints a participant credential, so no\nother route can widen a caller's scope.",
         "operationId": "credential_v1_environments__environment__credentials_post",
         "parameters": [
           {
@@ -5137,9 +5079,6 @@
         "summary": "Issue a participant credential",
         "tags": [
           "Environment sessions"
-        ],
-        "x-roles": [
-          "researcher"
         ]
       }
     },
@@ -5334,12 +5273,6 @@
         "summary": "Read environment-session evidence events",
         "tags": [
           "Evidence"
-        ],
-        "x-roles": [
-          "researcher",
-          "worker",
-          "scorer",
-          "agent"
         ]
       }
     },
@@ -5495,12 +5428,6 @@
         "summary": "Export environment-session records",
         "tags": [
           "Evaluation"
-        ],
-        "x-roles": [
-          "researcher",
-          "worker",
-          "scorer",
-          "agent"
         ]
       }
     },
@@ -5662,12 +5589,6 @@
         "summary": "Observe an environment session",
         "tags": [
           "Environment sessions"
-        ],
-        "x-roles": [
-          "researcher",
-          "worker",
-          "scorer",
-          "agent"
         ]
       }
     },
@@ -5825,9 +5746,6 @@
         "summary": "Prepare an external operation",
         "tags": [
           "Environment sessions"
-        ],
-        "x-roles": [
-          "agent"
         ]
       }
     },
@@ -5973,10 +5891,6 @@
         "summary": "List score reports",
         "tags": [
           "Evaluation"
-        ],
-        "x-roles": [
-          "researcher",
-          "scorer"
         ]
       },
       "post": {
@@ -6130,10 +6044,6 @@
         "summary": "Publish a score report",
         "tags": [
           "Evaluation"
-        ],
-        "x-roles": [
-          "researcher",
-          "scorer"
         ]
       }
     },
@@ -6319,10 +6229,6 @@
         "summary": "Read bounded turn-level evidence series",
         "tags": [
           "Evaluation"
-        ],
-        "x-roles": [
-          "researcher",
-          "scorer"
         ]
       }
     },
@@ -6524,10 +6430,6 @@
         "summary": "Read activity for an experiment",
         "tags": [
           "Activity"
-        ],
-        "x-roles": [
-          "researcher",
-          "worker"
         ]
       }
     },
@@ -6700,10 +6602,6 @@
         "summary": "List recorded local training results",
         "tags": [
           "Trajectories"
-        ],
-        "x-roles": [
-          "researcher",
-          "scorer"
         ]
       }
     },
@@ -6851,10 +6749,6 @@
         "summary": "Get a recorded local training result",
         "tags": [
           "Trajectories"
-        ],
-        "x-roles": [
-          "researcher",
-          "scorer"
         ]
       }
     },
@@ -7027,10 +6921,6 @@
         "summary": "List native and imported trajectories",
         "tags": [
           "Trajectories"
-        ],
-        "x-roles": [
-          "researcher",
-          "scorer"
         ]
       }
     },
@@ -7178,10 +7068,6 @@
         "summary": "Get a portable trajectory",
         "tags": [
           "Trajectories"
-        ],
-        "x-roles": [
-          "researcher",
-          "scorer"
         ]
       }
     },
@@ -7352,10 +7238,6 @@
         "summary": "Page through trajectory records",
         "tags": [
           "Trajectories"
-        ],
-        "x-roles": [
-          "researcher",
-          "scorer"
         ]
       }
     },
@@ -7503,10 +7385,6 @@
         "summary": "Freeze an authorized trajectory snapshot",
         "tags": [
           "Trajectories"
-        ],
-        "x-roles": [
-          "researcher",
-          "scorer"
         ]
       }
     },
@@ -7661,10 +7539,6 @@
         "summary": "List immutable trajectory datasets",
         "tags": [
           "Trajectories"
-        ],
-        "x-roles": [
-          "researcher",
-          "scorer"
         ]
       },
       "post": {
@@ -7809,9 +7683,6 @@
         "summary": "Freeze a training-entitled trajectory dataset",
         "tags": [
           "Trajectories"
-        ],
-        "x-roles": [
-          "researcher"
         ]
       }
     },
@@ -7959,10 +7830,6 @@
         "summary": "Get an immutable trajectory dataset",
         "tags": [
           "Trajectories"
-        ],
-        "x-roles": [
-          "researcher",
-          "scorer"
         ]
       }
     },
@@ -8108,10 +7975,6 @@
         "summary": "Export an immutable trajectory dataset as JSONL",
         "tags": [
           "Trajectories"
-        ],
-        "x-roles": [
-          "researcher",
-          "scorer"
         ]
       }
     },
@@ -8276,10 +8139,6 @@
         "summary": "List immutable snapshot boundaries for a trajectory",
         "tags": [
           "Trajectories"
-        ],
-        "x-roles": [
-          "researcher",
-          "scorer"
         ]
       }
     },
@@ -8427,10 +8286,6 @@
         "summary": "Get an immutable trajectory snapshot",
         "tags": [
           "Trajectories"
-        ],
-        "x-roles": [
-          "researcher",
-          "scorer"
         ]
       }
     },
@@ -8576,10 +8431,6 @@
         "summary": "Export an immutable trajectory snapshot as JSONL",
         "tags": [
           "Trajectories"
-        ],
-        "x-roles": [
-          "researcher",
-          "scorer"
         ]
       }
     },
@@ -8727,10 +8578,6 @@
         "summary": "Inspect trajectory-source collection and execution status",
         "tags": [
           "Trajectories"
-        ],
-        "x-roles": [
-          "researcher",
-          "scorer"
         ]
       }
     }

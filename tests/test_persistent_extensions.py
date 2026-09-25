@@ -1,10 +1,11 @@
 import pytest
 
+from environment_harness.access import _AccessContext
 from environment_harness.agent_state import AgentJournal
-from environment_harness.contracts import Action, AgentSpec, ExperimentSpec, Principal
+from environment_harness.contracts import Action, AgentSpec, ExperimentSpec
 from environment_harness.errors import Conflict, Forbidden
 from environment_harness.fixtures import SyntheticEnvironment
-from environment_harness.runtime import EnvironmentSession
+from environment_harness.runtime import _SessionRuntime
 from environment_harness.store import EvidenceStore
 
 
@@ -12,8 +13,8 @@ def test_coordinator_journal_and_inherited_artifact_isolation(tmp_path):
     env = SyntheticEnvironment()
     env.spec = env.spec.model_copy(update={"phase_deadline": "coordinator"})
     store = EvidenceStore(tmp_path)
-    session = EnvironmentSession(store, env)
-    who = Principal(tenant="t", subject="r", role="researcher")
+    session = _SessionRuntime(store, env)
+    who = _AccessContext(tenant="t", subject="r", policy="trusted-local")
     spec = ExperimentSpec(
         environment=env.spec,
         participants=tuple(
@@ -22,14 +23,16 @@ def test_coordinator_journal_and_inherited_artifact_isolation(tmp_path):
         ),
     )
     environment = session.create(spec, who)["id"]
-    agent = Principal(tenant="t", subject="a", role="agent", participant="a", environment=environment)
+    agent = _AccessContext(
+        tenant="t", subject="a", policy="participant", participant="a", session=environment
+    )
     journal = AgentJournal(session, environment, agent, 0)
     artifact = store.artifact(environment, agent, b"private context")
     journal.save({"revision": 0, "tool_response": "durable"}, {"artifact": artifact["id"]})
     assert journal.load()["tool_response"] == "durable"
     lease = session.lease(environment, who, "worker")
     for p in ("a", "b"):
-        principal = agent.model_copy(update={"participant": p, "subject": p})
+        principal = agent.replace(participant=p, subject=p)
         obs = session.observe(environment, principal)
         session.submit(
             environment,
@@ -44,19 +47,17 @@ def test_coordinator_journal_and_inherited_artifact_isolation(tmp_path):
         journal.save({"revision": 0}, {})
     checkpoint = session.checkpoint(environment, who, lease)
     child = session.branch(environment, who, checkpoint["id"])["id"]
-    child_agent = agent.model_copy(update={"environment": child})
+    child_agent = agent.replace(session=child)
     assert store.read_artifact(child, child_agent, artifact["id"])[0] == b"private context"
     with pytest.raises(Forbidden):
-        store.read_artifact(
-            child, child_agent.model_copy(update={"participant": "b", "subject": "b"}), artifact["id"]
-        )
+        store.read_artifact(child, child_agent.replace(participant="b", subject="b"), artifact["id"])
     assert store.verify(child, who)["events"] > 0
 
 
 def setup_environment(tmp_path, env=None):
     env = env or SyntheticEnvironment()
-    session = EnvironmentSession(EvidenceStore(tmp_path), env)
-    who = Principal(tenant="t", subject="r", role="researcher")
+    session = _SessionRuntime(EvidenceStore(tmp_path), env)
+    who = _AccessContext(tenant="t", subject="r", policy="trusted-local")
     spec = ExperimentSpec(
         environment=env.spec,
         participants=(

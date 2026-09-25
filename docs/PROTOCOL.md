@@ -7,7 +7,7 @@ family replaces or rewrites environment-session evidence.
 
 ## Authority and transport
 
-The supplier service owns the environment. HTTPS commands use bearer credentials. Loopback HTTP is an explicit development option. Credentials bind tenant, role, environment, participant and authority generation. Researcher, worker, scorer and participant permissions are separate. Participant credential issuance is researcher-only. Expired credentials fail closed; researchers may issue replacements without changing participant generation. Authority transfer increments generation and invalidates the old controller.
+The supplier service owns the environment. HTTPS requests carry only an opaque bearer credential; the server resolves it to an identity plus one of its fixed management, viewer, or participant access policies. Loopback HTTP is an explicit development option. There is no public role model and requests never assert permissions. A participant credential is bound to one session, participant, and authority generation, and is issued only through the purpose-specific participant-credential operation. Invalid, expired, or revoked credentials return `401`; a valid credential denied by its policy or constraint returns a non-enumerating `403`. Authority transfer increments the generation and invalidates the old controller. See [Authentication](AUTHENTICATION.md).
 
 Administrative Python methods are trusted embedding APIs. They must not be exposed directly to untrusted agents. Store directories are private to the operating-system account. SQL credentials, signing keys, model credentials and resource handles belong to the server or worker scope.
 
@@ -23,7 +23,7 @@ The loopback CLI's `serve` command configures automatic local viewer access inde
 | Authorized observation | `GET /v1/environments/{id}/observation` |
 | Submit decision | `POST /v1/environments/{id}/actions` |
 | Events | `GET /v1/environments/{id}/events?after=CURSOR` |
-| Activity snapshot | `GET /v1/activity/snapshot` |
+| Activity hierarchy | `GET /v1/activity/snapshot` |
 | Global activity | `GET /v1/activity/events?after=CURSOR` |
 | Experiment activity | `GET /v1/experiments/{id}/events?after=CURSOR` |
 | Environment-session activity | `GET /v1/environments/{id}/activity?after=CURSOR` |

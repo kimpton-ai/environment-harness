@@ -474,9 +474,8 @@ class TrajectoryRepository:
     def __init__(self, store):
         self.store = store
 
-    def list_page(self, who, limit=100, cursor=None):
-        if who.role not in ("researcher", "scorer"):
-            raise Forbidden("trajectory index authority required")
+    def list_page(self, access, limit=100, cursor=None):
+        access.require("trajectory.read")
         if not 1 <= limit <= 1000:
             raise ValueError("invalid trajectory page size")
         with self.store.transaction() as db:
@@ -493,7 +492,7 @@ class TrajectoryRepository:
                     run_id=row["id"],
                 )
                 for row in db.execute(
-                    "SELECT id,status FROM environments WHERE tenant=?", (who.tenant,)
+                    "SELECT id,status FROM environments WHERE tenant=?", (access.tenant,)
                 ).fetchall()
             ]
             summaries.extend(
@@ -509,7 +508,7 @@ class TrajectoryRepository:
                 for row in db.execute(
                     "SELECT id,namespace,run_id,collection_state,execution_state "
                     "FROM trajectory_sources WHERE tenant=?",
-                    (who.tenant,),
+                    (access.tenant,),
                 ).fetchall()
             )
         summaries.sort(key=lambda summary: summary.id, reverse=True)
@@ -523,16 +522,15 @@ class TrajectoryRepository:
         next_cursor = page[-1].id if start + len(page) < len(summaries) else None
         return page, next_cursor
 
-    def register_source(self, registration: SourceRegistration, who) -> SourceRegistrationReceipt:
-        if who.role != "researcher":
-            raise Forbidden("researcher source-registration authority required")
+    def register_source(self, registration: SourceRegistration, access) -> SourceRegistrationReceipt:
+        access.require("source.register")
         body = registration.model_dump(mode="json")
         registration_hash = digest(body)
         source_id = (
             "source-"
             + digest(
                 {
-                    "authority": who.tenant,
+                    "authority": access.tenant,
                     "namespace": registration.namespace,
                     "run_id": registration.run_id,
                 }
@@ -541,7 +539,7 @@ class TrajectoryRepository:
         with self.store.transaction() as db:
             existing = db.execute(
                 "SELECT * FROM trajectory_sources WHERE tenant=? AND namespace=? AND run_id=?",
-                (who.tenant, registration.namespace, registration.run_id),
+                (access.tenant, registration.namespace, registration.run_id),
             ).fetchone()
             if existing is not None:
                 if existing["registration_hash"] != registration_hash:
@@ -557,7 +555,7 @@ class TrajectoryRepository:
                 "INSERT INTO trajectory_sources VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     source_id,
-                    who.tenant,
+                    access.tenant,
                     registration.namespace,
                     registration.run_id,
                     encode(body),
@@ -582,17 +580,16 @@ class TrajectoryRepository:
             collection_state="registered",
         )
 
-    def records_page(self, trajectory: str, who, *, after=0, limit=200) -> TrajectoryRecordPage:
-        if who.role not in ("researcher", "scorer"):
-            raise Forbidden("trajectory record authority required")
+    def records_page(self, trajectory: str, access, *, after=0, limit=200) -> TrajectoryRecordPage:
+        access.require("trajectory.read")
         if after < 0 or not 1 <= limit <= 1000:
             raise ValueError("invalid trajectory record page")
         with self.store.transaction() as db:
             native = db.execute(
-                "SELECT id FROM environments WHERE id=? AND tenant=?", (trajectory, who.tenant)
+                "SELECT id FROM environments WHERE id=? AND tenant=?", (trajectory, access.tenant)
             ).fetchone()
         if native is not None:
-            events = self.store.events(trajectory, who, after=after, limit=limit)
+            events = self.store.events(trajectory, access, after=after, limit=limit)
             previous_id = None
             segment_index = 1
             if events and events[0]["seq"] > 1:
@@ -627,7 +624,7 @@ class TrajectoryRepository:
 
         with self.store.transaction() as db:
             source = db.execute(
-                "SELECT id FROM trajectory_sources WHERE id=? AND tenant=?", (trajectory, who.tenant)
+                "SELECT id FROM trajectory_sources WHERE id=? AND tenant=?", (trajectory, access.tenant)
             ).fetchone()
             if source is None:
                 raise Forbidden("trajectory unavailable")
@@ -710,15 +707,14 @@ class TrajectoryRepository:
             }
         )
 
-    def ingest(self, source: str, records: tuple[SourceRecord, ...], who) -> SourceAcknowledgement:
-        if who.role != "researcher":
-            raise Forbidden("researcher ingestion authority required")
+    def ingest(self, source: str, records: tuple[SourceRecord, ...], access) -> SourceAcknowledgement:
+        access.require("source.ingest")
         if not 1 <= len(records) <= 1000:
             raise ValueError("ingestion batch must contain 1 to 1000 records")
         accepted = 0
         with self.store.transaction() as db:
             source_row = db.execute(
-                "SELECT * FROM trajectory_sources WHERE id=? AND tenant=?", (source, who.tenant)
+                "SELECT * FROM trajectory_sources WHERE id=? AND tenant=?", (source, access.tenant)
             ).fetchone()
             if source_row is None:
                 raise Forbidden("trajectory source unavailable")
@@ -772,12 +768,11 @@ class TrajectoryRepository:
             collection_state="current",
         )
 
-    def update_source_status(self, source: str, update: SourceStatusUpdate, who):
-        if who.role != "researcher":
-            raise Forbidden("researcher source-status authority required")
+    def update_source_status(self, source: str, update: SourceStatusUpdate, access):
+        access.require("source.status.write")
         with self.store.transaction() as db:
             source_row = db.execute(
-                "SELECT * FROM trajectory_sources WHERE id=? AND tenant=?", (source, who.tenant)
+                "SELECT * FROM trajectory_sources WHERE id=? AND tenant=?", (source, access.tenant)
             ).fetchone()
             if source_row is None:
                 raise Forbidden("trajectory source unavailable")
@@ -818,12 +813,11 @@ class TrajectoryRepository:
             )
         return update
 
-    def source_status(self, source: str, who) -> SourceStatus:
-        if who.role not in ("researcher", "scorer"):
-            raise Forbidden("trajectory source-status authority required")
+    def source_status(self, source: str, access) -> SourceStatus:
+        access.require("trajectory.read")
         with self.store.transaction() as db:
             row = db.execute(
-                "SELECT * FROM trajectory_sources WHERE id=? AND tenant=?", (source, who.tenant)
+                "SELECT * FROM trajectory_sources WHERE id=? AND tenant=?", (source, access.tenant)
             ).fetchone()
         if row is None:
             raise Forbidden("trajectory source unavailable")
@@ -843,17 +837,17 @@ class TrajectoryRepository:
             verified_outcome=VerifiedOutcome.model_validate_json(row["verified_outcome"]),
         )
 
-    def get(self, environment: str, who) -> Trajectory:
+    def get(self, environment: str, access) -> Trajectory:
         with self.store.transaction() as db:
             native = db.execute("SELECT 1 FROM environments WHERE id=?", (environment,)).fetchone()
         if native is None:
-            return self._get_imported(environment, who)
+            return self._get_imported(environment, access)
         with self.store.transaction() as db:
-            row = self.store.environment(db, environment, who, ("researcher", "scorer"))
+            row = self.store.environment(db, environment, access, "evidence.read.full")
             manifest = json.loads(row["manifest"])
             participants = tuple(json.loads(row["participants"]))
             execution_state = row["status"]
-        events = list(self.store.replay(environment, who))
+        events = list(self.store.replay(environment, access))
         if not events:
             raise ValueError("trajectory has no evidence")
 
@@ -957,12 +951,11 @@ class TrajectoryRepository:
             }
         )
 
-    def _get_imported(self, source: str, who) -> Trajectory:
-        if who.role not in ("researcher", "scorer"):
-            raise Forbidden("trajectory source unavailable")
+    def _get_imported(self, source: str, access) -> Trajectory:
+        access.require("trajectory.read")
         with self.store.transaction() as db:
             source_row = db.execute(
-                "SELECT * FROM trajectory_sources WHERE id=? AND tenant=?", (source, who.tenant)
+                "SELECT * FROM trajectory_sources WHERE id=? AND tenant=?", (source, access.tenant)
             ).fetchone()
             if source_row is None:
                 raise Forbidden("trajectory source unavailable")
@@ -1061,12 +1054,13 @@ class TrajectoryRepository:
             }
         )
 
-    def freeze(self, environment: str, who) -> TrajectorySnapshot:
-        trajectory = self.get(environment, who)
+    def freeze(self, environment: str, access) -> TrajectorySnapshot:
+        access.require("snapshot.create")
+        trajectory = self.get(environment, access)
         records = [record.model_dump(mode="json", by_alias=True) for record in trajectory.status.records]
         with self.store.transaction() as db:
             native = db.execute(
-                "SELECT tenant FROM environments WHERE id=? AND tenant=?", (environment, who.tenant)
+                "SELECT tenant FROM environments WHERE id=? AND tenant=?", (environment, access.tenant)
             ).fetchone()
             if native is not None:
                 reports = db.execute(
@@ -1080,7 +1074,7 @@ class TrajectoryRepository:
             else:
                 source = db.execute(
                     "SELECT tenant FROM trajectory_sources WHERE id=? AND tenant=?",
-                    (environment, who.tenant),
+                    (environment, access.tenant),
                 ).fetchone()
                 if source is None:
                     raise Forbidden("trajectory unavailable")
@@ -1112,7 +1106,7 @@ class TrajectoryRepository:
                 for report in reports
             ],
             "artifacts": [{"id": artifact["id"], "sha256": artifact["sha256"]} for artifact in artifacts],
-            "audience": [who.role],
+            "audience": ["*"] if access.full_evidence else [access.participant],
         }
         manifest_dump = trajectory.spec.manifest.model_dump(mode="json", by_alias=True)
         status_without_digest = {
@@ -1159,33 +1153,31 @@ class TrajectoryRepository:
                     )
         return snapshot
 
-    def _snapshot_body(self, snapshot: str, who):
-        if who.role not in ("researcher", "scorer"):
-            raise Forbidden("snapshot authority required")
+    def _snapshot_body(self, snapshot: str, access):
+        access.require("trajectory.read")
         with self.store.transaction() as db:
             row = db.execute(
-                "SELECT body FROM trajectory_snapshots WHERE id=? AND tenant=?", (snapshot, who.tenant)
+                "SELECT body FROM trajectory_snapshots WHERE id=? AND tenant=?", (snapshot, access.tenant)
             ).fetchone()
         if row is None:
             raise Forbidden("snapshot unavailable")
         return json.loads(row["body"])
 
-    def get_snapshot(self, snapshot: str, who) -> TrajectorySnapshot:
-        return TrajectorySnapshot.model_validate(self._snapshot_body(snapshot, who)["snapshot"])
+    def get_snapshot(self, snapshot: str, access) -> TrajectorySnapshot:
+        return TrajectorySnapshot.model_validate(self._snapshot_body(snapshot, access)["snapshot"])
 
-    def list_snapshots(self, environment: str, who, *, limit: int = 100) -> list[TrajectorySnapshot]:
-        if who.role not in ("researcher", "scorer"):
-            raise Forbidden("snapshot authority required")
+    def list_snapshots(self, environment: str, access, *, limit: int = 100) -> list[TrajectorySnapshot]:
+        access.require("trajectory.read")
         with self.store.transaction() as db:
             rows = db.execute(
                 """SELECT body FROM trajectory_snapshots
                    WHERE tenant=? AND environment=? ORDER BY created,id LIMIT ?""",
-                (who.tenant, environment, limit),
+                (access.tenant, environment, limit),
             ).fetchall()
         return [TrajectorySnapshot.model_validate(json.loads(row["body"])["snapshot"]) for row in rows]
 
-    def export_snapshot(self, snapshot: str, who):
-        body = self._snapshot_body(snapshot, who)
+    def export_snapshot(self, snapshot: str, access):
+        body = self._snapshot_body(snapshot, access)
         yield {"snapshot": body["snapshot"]}
         if "records" in body:  # Read prerelease snapshots written before normalized record storage.
             yield from body["records"]

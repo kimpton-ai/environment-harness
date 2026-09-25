@@ -4,13 +4,14 @@ import sys
 from pathlib import Path
 
 from . import presentation
-from .contracts import ExperimentSpec, Principal
+from .access import trusted_local
+from .contracts import ExperimentSpec
 from .errors import HarnessError
 from .evaluation import compare, rollouts
 from .fixtures import SyntheticEnvironment
 from .plugins import doctor, environment
 from .runner import run
-from .runtime import EnvironmentSession
+from .runtime import _SessionRuntime
 from .showcase import create_synthetic_review_demo
 from .store import EvidenceStore, encode
 from .training import TrainingRepository
@@ -94,14 +95,15 @@ def main():
         "--verbose", "-v", action="store_true", help="Include recorded payloads"
     )
     token = sub.add_parser("token")
-    token.add_argument("--environment")
-    token.add_argument("--participant")
+    token.add_argument("--session", help="Issue a participant credential bound to this environment session")
+    token.add_argument("--participant", help="Participant bound to the issued credential")
     args = parser.parse_args()
     if args.command == "doctor":
         print(json.dumps(doctor(), indent=2))
         return
     store = EvidenceStore(args.store)
-    who = Principal(tenant=args.tenant, subject="local-researcher", role="researcher")
+    # The in-process CLI is a trusted local interface and needs no credential.
+    who = trusted_local(args.tenant, "local-cli")
     if args.command.startswith("trajectory-") or args.command in ("snapshot", "snapshot-export"):
         repository = TrajectoryRepository(store)
         if args.command == "trajectory-list":
@@ -175,7 +177,7 @@ def main():
             spec.environment.id,
             **({"mode": spec.environment.scheduling} if spec.environment.id == "synthetic-protocol" else {}),
         )
-    session = EnvironmentSession(store, env)
+    session = _SessionRuntime(store, env)
     if args.command in ("quickstart", "run"):
         if args.command == "quickstart":
             result = create_synthetic_review_demo(store, who, turns=args.turns, training=args.training)
@@ -186,7 +188,7 @@ def main():
 
             spec = ExperimentSpec.model_validate_json(Path(args.manifest).read_text())
             env = environment(spec.environment.id)
-            session = EnvironmentSession(store, env)
+            session = _SessionRuntime(store, env)
             agents = {p.id: CommandAgent(p.config["command"], p.implementation) for p in spec.participants}
         created = session.create(spec, who)
         result = run(session, created["id"], who, agents, turns=args.turns)
@@ -200,7 +202,7 @@ def main():
         from .local_viewer import LocalViewerAccess, open_when_ready
         from .server import create_app
 
-        credential = store.issue(who, 86400)
+        credential = store.issue_viewer(args.tenant, ttl=86400)
         origin = f"http://127.0.0.1:{args.port}"
         print(f"Viewer: {origin}", flush=True)
         access = LocalViewerAccess(origin, credential)
@@ -221,21 +223,23 @@ def main():
             pass
         return
     if args.command == "token":
+        if bool(args.participant) != bool(args.session):
+            raise ValueError("participant credentials require both --session and --participant")
         if args.participant:
             with store.transaction() as db:
-                row = store.environment(db, args.environment, who)
+                row = store.environment(db, args.session, who, "credential.participant.issue")
                 member = json.loads(row["participants"])[args.participant]
-            who = Principal(
-                tenant=args.tenant,
-                subject=member["controller"],
-                role="agent",
-                environment=args.environment,
-                participant=args.participant,
-                generation=member["generation"],
+            print(
+                store.issue_participant(
+                    args.tenant,
+                    member["controller"],
+                    session=args.session,
+                    participant=args.participant,
+                    generation=member["generation"],
+                )
             )
-        elif args.environment:
-            who = who.model_copy(update={"environment": args.environment})
-        print(store.issue(who))
+        else:
+            print(store.issue_management(args.tenant))
         return
     if args.command == "attach":
         result = session.get(args.environment, who)
@@ -262,7 +266,7 @@ def main():
 
 def inspect(store, who, args):
     """Read-only inspection. Human-readable by default; --json prints the underlying records."""
-    session = EnvironmentSession(store, SyntheticEnvironment())
+    session = _SessionRuntime(store, SyntheticEnvironment())
     if args.command == "list":
         rows = session.list(who, args.limit)
         print(json.dumps(rows, indent=2) if args.json else presentation.render_list(rows))

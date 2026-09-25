@@ -179,7 +179,7 @@ class EnvironmentClient:
             "GET", f"/v1/environments/{urllib.parse.quote(environment, safe='')}/events?after={after}"
         )
 
-    def activity_snapshot(self):
+    def activity_hierarchy(self):
         return self.request("GET", "/v1/activity/snapshot")
 
     def activity(self, after=0):

@@ -1,0 +1,1971 @@
+{
+  "authorization_model": {
+    "kind": "public four-role literal",
+    "note": "Removed in 0.3.0rc1 and replaced by server-owned credential policies.",
+    "roles": [
+      "agent",
+      "researcher",
+      "scorer",
+      "worker"
+    ]
+  },
+  "baseline_commit": "43346e7",
+  "contract": "environmentharness.dev/v1alpha1",
+  "description": "Frozen pre-change HTTP operation inventory. Every entry must be classified exactly once in contracts/migrations/http-0.2-to-0.3.json.",
+  "operations": [
+    {
+      "authentication": "unauthenticated",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": null,
+        "policies": [],
+        "resource_scope": "/health",
+        "roles": null
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "GET",
+      "operationId": "health_health_get",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/health",
+      "request": null,
+      "security": [],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Check service health"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "worker credential"
+        ],
+        "resource_scope": "/v1/activity/events",
+        "roles": [
+          "researcher",
+          "worker"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "GET",
+      "operationId": "global_activity_v1_activity_events_get",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/activity/events",
+      "request": null,
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json",
+          "text/event-stream"
+        ]
+      },
+      "summary": "Read tenant activity"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "worker credential"
+        ],
+        "resource_scope": "/v1/activity/snapshot",
+        "roles": [
+          "researcher",
+          "worker"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "GET",
+      "operationId": "activity_snapshot_v1_activity_snapshot_get",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/activity/snapshot",
+      "request": null,
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Get the current activity hierarchy"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/compare",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "POST",
+      "operationId": "comparison_v1_compare_post",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/compare",
+      "request": [
+        "application/json"
+      ],
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Compare environment sessions"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "worker credential",
+          "scorer credential",
+          "participant-scoped agent credential"
+        ],
+        "resource_scope": "/v1/environment",
+        "roles": [
+          "researcher",
+          "worker",
+          "scorer",
+          "agent"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "GET",
+      "operationId": "environment_v1_environment_get",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/environment",
+      "request": null,
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Get the active environment contract"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential"
+        ],
+        "resource_scope": "/v1/environments",
+        "roles": [
+          "researcher"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "GET",
+      "operationId": "environments_v1_environments_get",
+      "pagination": {
+        "headers": [
+          "Link",
+          "X-Next-Cursor"
+        ],
+        "representation": "bare list"
+      },
+      "path": "/v1/environments",
+      "request": null,
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "List environment sessions"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential"
+        ],
+        "resource_scope": "/v1/environments",
+        "roles": [
+          "researcher"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "POST",
+      "operationId": "create_v1_environments_post",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/environments",
+      "request": [
+        "application/json"
+      ],
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Create an environment session"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant + optional principal.environment + agent generation",
+        "policies": [
+          "unscoped researcher credential",
+          "worker credential",
+          "scorer credential",
+          "participant-scoped agent credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}",
+        "roles": [
+          "researcher",
+          "worker",
+          "scorer",
+          "agent"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "GET",
+      "operationId": "get_v1_environments__environment__get",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/environments/{environment}",
+      "request": null,
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Get an environment session"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "participant-scoped agent credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}/actions",
+        "roles": [
+          "agent"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "POST",
+      "operationId": "action_v1_environments__environment__actions_post",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/environments/{environment}/actions",
+      "request": [
+        "application/json"
+      ],
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Submit a participant action"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "worker credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}/activity",
+        "roles": [
+          "researcher",
+          "worker"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "GET",
+      "operationId": "environment_activity_v1_environments__environment__activity_get",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/environments/{environment}/activity",
+      "request": null,
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json",
+          "text/event-stream"
+        ]
+      },
+      "summary": "Read activity for an environment session"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "worker credential",
+          "participant-scoped agent credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}/agent-work",
+        "roles": [
+          "researcher",
+          "worker",
+          "agent"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "GET",
+      "operationId": "agent_work_v1_environments__environment__agent_work_get",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/environments/{environment}/agent-work",
+      "request": null,
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "List agent work records"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "worker credential",
+          "scorer credential",
+          "participant-scoped agent credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}/artifacts",
+        "roles": [
+          "researcher",
+          "worker",
+          "scorer",
+          "agent"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "POST",
+      "operationId": "artifact_v1_environments__environment__artifacts_post",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/environments/{environment}/artifacts",
+      "request": null,
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Store an artifact"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "worker credential",
+          "scorer credential",
+          "participant-scoped agent credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}/artifacts/{key}",
+        "roles": [
+          "researcher",
+          "worker",
+          "scorer",
+          "agent"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "GET",
+      "operationId": "read_artifact_v1_environments__environment__artifacts__key__get",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/environments/{environment}/artifacts/{key}",
+      "request": null,
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Download an artifact"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "worker credential",
+          "participant-scoped agent credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}/commands",
+        "roles": [
+          "researcher",
+          "worker",
+          "agent"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "POST",
+      "operationId": "command_v1_environments__environment__commands_post",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/environments/{environment}/commands",
+      "request": [
+        "application/json"
+      ],
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Run an environment-session command"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}/credentials",
+        "roles": [
+          "researcher"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "POST",
+      "operationId": "credential_v1_environments__environment__credentials_post",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/environments/{environment}/credentials",
+      "request": [
+        "application/json"
+      ],
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Issue a participant credential"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "worker credential",
+          "scorer credential",
+          "participant-scoped agent credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}/events",
+        "roles": [
+          "researcher",
+          "worker",
+          "scorer",
+          "agent"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "GET",
+      "operationId": "events_v1_environments__environment__events_get",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/environments/{environment}/events",
+      "request": null,
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Read environment-session evidence events"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "worker credential",
+          "scorer credential",
+          "participant-scoped agent credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}/export",
+        "roles": [
+          "researcher",
+          "worker",
+          "scorer",
+          "agent"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "GET",
+      "operationId": "export_v1_environments__environment__export_get",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/environments/{environment}/export",
+      "request": null,
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Export environment-session records"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "worker credential",
+          "scorer credential",
+          "participant-scoped agent credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}/observation",
+        "roles": [
+          "researcher",
+          "worker",
+          "scorer",
+          "agent"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "GET",
+      "operationId": "observation_v1_environments__environment__observation_get",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/environments/{environment}/observation",
+      "request": null,
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Observe an environment session"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "participant-scoped agent credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}/operations",
+        "roles": [
+          "agent"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "POST",
+      "operationId": "prepare_v1_environments__environment__operations_post",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/environments/{environment}/operations",
+      "request": [
+        "application/json"
+      ],
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Prepare an external operation"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}/reports",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "GET",
+      "operationId": "reports_v1_environments__environment__reports_get",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/environments/{environment}/reports",
+      "request": null,
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "List score reports"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}/reports",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "POST",
+      "operationId": "report_v1_environments__environment__reports_post",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/environments/{environment}/reports",
+      "request": [
+        "application/json"
+      ],
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Publish a score report"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}/turn-series",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "GET",
+      "operationId": "environment_turn_series_v1_environments__environment__turn_series_get",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/environments/{environment}/turn-series",
+      "request": null,
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Read bounded turn-level evidence series"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "worker credential"
+        ],
+        "resource_scope": "/v1/experiments/{experiment}/events",
+        "roles": [
+          "researcher",
+          "worker"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "GET",
+      "operationId": "experiment_activity_v1_experiments__experiment__events_get",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/experiments/{experiment}/events",
+      "request": null,
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json",
+          "text/event-stream"
+        ]
+      },
+      "summary": "Read activity for an experiment"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/training-runs",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "GET",
+      "operationId": "training_runs_v1_training_runs_get",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/training-runs",
+      "request": null,
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "List recorded local training results"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/training-runs/{training_run}",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "GET",
+      "operationId": "training_run_v1_training_runs__training_run__get",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/training-runs/{training_run}",
+      "request": null,
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Get a recorded local training result"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/trajectories",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "GET",
+      "operationId": "trajectory_index_v1_trajectories_get",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/trajectories",
+      "request": null,
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "List native and imported trajectories"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/trajectories/{trajectory}",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "GET",
+      "operationId": "trajectory_resource_v1_trajectories__trajectory__get",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/trajectories/{trajectory}",
+      "request": null,
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Get a portable trajectory"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/trajectories/{trajectory}/records",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "GET",
+      "operationId": "trajectory_records_v1_trajectories__trajectory__records_get",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/trajectories/{trajectory}/records",
+      "request": null,
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Page through trajectory records"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/trajectories/{trajectory}/snapshots",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "POST",
+      "operationId": "freeze_trajectory_snapshot_v1_trajectories__trajectory__snapshots_post",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/trajectories/{trajectory}/snapshots",
+      "request": null,
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Freeze an authorized trajectory snapshot"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/trajectory-datasets",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "GET",
+      "operationId": "trajectory_datasets_v1_trajectory_datasets_get",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/trajectory-datasets",
+      "request": null,
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "List immutable trajectory datasets"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential"
+        ],
+        "resource_scope": "/v1/trajectory-datasets",
+        "roles": [
+          "researcher"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "POST",
+      "operationId": "freeze_trajectory_dataset_v1_trajectory_datasets_post",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/trajectory-datasets",
+      "request": [
+        "application/json"
+      ],
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Freeze a training-entitled trajectory dataset"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/trajectory-datasets/{dataset}",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "GET",
+      "operationId": "trajectory_dataset_v1_trajectory_datasets__dataset__get",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/trajectory-datasets/{dataset}",
+      "request": null,
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Get an immutable trajectory dataset"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/trajectory-datasets/{dataset}/export",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "GET",
+      "operationId": "export_trajectory_dataset_v1_trajectory_datasets__dataset__export_get",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/trajectory-datasets/{dataset}/export",
+      "request": null,
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Export an immutable trajectory dataset as JSONL"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/trajectory-snapshots",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "GET",
+      "operationId": "trajectory_snapshots_v1_trajectory_snapshots_get",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/trajectory-snapshots",
+      "request": null,
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "List immutable snapshot boundaries for a trajectory"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/trajectory-snapshots/{snapshot}",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "GET",
+      "operationId": "trajectory_snapshot_v1_trajectory_snapshots__snapshot__get",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/trajectory-snapshots/{snapshot}",
+      "request": null,
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Get an immutable trajectory snapshot"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/trajectory-snapshots/{snapshot}/export",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "GET",
+      "operationId": "export_trajectory_snapshot_v1_trajectory_snapshots__snapshot__export_get",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/trajectory-snapshots/{snapshot}/export",
+      "request": null,
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Export an immutable trajectory snapshot as JSONL"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential"
+        ],
+        "resource_scope": "/v1/trajectory-sources",
+        "roles": [
+          "researcher"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "POST",
+      "operationId": "register_trajectory_source_v1_trajectory_sources_post",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/trajectory-sources",
+      "request": [
+        "application/json"
+      ],
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Register an external trajectory source"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential"
+        ],
+        "resource_scope": "/v1/trajectory-sources/{source}/records",
+        "roles": [
+          "researcher"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "POST",
+      "operationId": "ingest_trajectory_records_v1_trajectory_sources__source__records_post",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/trajectory-sources/{source}/records",
+      "request": [
+        "application/json"
+      ],
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Ingest a bounded trajectory-source batch"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/trajectory-sources/{source}/status",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "GET",
+      "operationId": "trajectory_source_status_v1_trajectory_sources__source__status_get",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/trajectory-sources/{source}/status",
+      "request": null,
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Inspect trajectory-source collection and execution status"
+    },
+    {
+      "authentication": "bearer",
+      "authorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential"
+        ],
+        "resource_scope": "/v1/trajectory-sources/{source}/status",
+        "roles": [
+          "researcher"
+        ]
+      },
+      "errors": [
+        "400",
+        "401",
+        "402",
+        "403",
+        "404",
+        "405",
+        "409",
+        "413",
+        "422",
+        "500",
+        "503"
+      ],
+      "method": "PUT",
+      "operationId": "update_trajectory_source_status_v1_trajectory_sources__source__status_put",
+      "pagination": {
+        "headers": [],
+        "representation": "typed body"
+      },
+      "path": "/v1/trajectory-sources/{source}/status",
+      "request": [
+        "application/json"
+      ],
+      "security": [
+        [
+          "BearerAuth"
+        ]
+      ],
+      "success": {
+        "200": [
+          "application/json"
+        ]
+      },
+      "summary": "Update trajectory-source collection and execution status"
+    }
+  ],
+  "package": "0.2.4rc2",
+  "schema": "environment-harness.http-operation-inventory.v1"
+}

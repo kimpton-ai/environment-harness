@@ -20,6 +20,8 @@ class CommandAgent:
     """Trusted local command. Use DockerBackend for hostile agent programs."""
 
     managed_cancellation = True
+    # Declared rather than inferred: the hooks below exist only to reject use.
+    supports_checkpoint = False
 
     def __init__(self, command, implementation, *, timeout=30, max_bytes=1048576):
         self.command, self.implementation = list(command), implementation
@@ -115,6 +117,8 @@ class CommandAgent:
 
 
 class HTTPAgent:
+    supports_checkpoint = False
+
     def __init__(self, endpoint, token, implementation, *, allow_loopback=False):
         self.client = EnvironmentClient(endpoint, token, allow_loopback=allow_loopback)
         self.implementation = implementation
@@ -136,7 +140,7 @@ class InstrumentedModel:
         self,
         store,
         environment,
-        principal,
+        access,
         generate,
         *,
         model="unidentified",
@@ -145,10 +149,10 @@ class InstrumentedModel:
         seed=None,
         capture_content=False,
     ):
-        self.store, self.environment, self.principal, self.generate = (
+        self.store, self.environment, self.access, self.generate = (
             store,
             environment,
-            principal,
+            access,
             generate,
         )
         self.model = model
@@ -187,21 +191,21 @@ class InstrumentedModel:
             "inference.request",
         )
         with self.store.transaction() as db:
-            row = self.store.environment(db, self.environment, self.principal, ("agent",))
+            row = self.store.environment(db, self.environment, self.access, "participant.act")
             self.store.append(
                 db,
                 self.environment,
                 row["revision"],
                 "model.request",
                 request_payload,
-                (self.principal.participant,),
+                (self.access.participant,),
             )
         try:
             response = self.generate(request)
             self._validate_response(response)
         except Exception as error:
             with self.store.transaction() as db:
-                row = self.store.environment(db, self.environment, self.principal)
+                row = self.store.environment(db, self.environment, self.access, "session.read")
                 self.store.append(
                     db,
                     self.environment,
@@ -212,7 +216,7 @@ class InstrumentedModel:
                         "category": "malformed" if isinstance(error, Conflict) else "infrastructure",
                         "request_digest": request_digest,
                     },
-                    (self.principal.participant,),
+                    (self.access.participant,),
                 )
             raise
         response_payload = identity | {
@@ -230,29 +234,29 @@ class InstrumentedModel:
             "inference.response",
         )
         with self.store.transaction() as db:
-            row = self.store.environment(db, self.environment, self.principal)
+            row = self.store.environment(db, self.environment, self.access, "session.read")
             self.store.append(
                 db,
                 self.environment,
                 row["revision"],
                 "model.response",
                 response_payload,
-                (self.principal.participant,),
+                (self.access.participant,),
             )
         return response
 
     def _spill_detail(self, payload, fields, purpose):
         with self.store.transaction() as db:
-            row = self.store.environment(db, self.environment, self.principal, ("agent",))
+            row = self.store.environment(db, self.environment, self.access, "participant.act")
             max_event_bytes = json.loads(row["manifest"])["policy"]["max_event_bytes"]
         if len(encode(payload).encode()) <= max_event_bytes:
             return payload
         detail = {field: payload[field] for field in fields}
         artifact = self.store.artifact(
             self.environment,
-            self.principal,
+            self.access,
             encode(detail).encode(),
-            audience=(self.principal.participant,),
+            audience=(self.access.participant,),
             media_type="application/json",
         )
         summary = payload | {field: None for field in fields}

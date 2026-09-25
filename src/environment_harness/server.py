@@ -15,9 +15,9 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from .contracts import Action, ActivityPage, ActivitySnapshot, ExperimentSpec, ScoreReport
+from .contracts import Action, ActivityHierarchy, ActivityPage, ExperimentSpec, ScoreReport
 from .coordinator import advance
-from .errors import BudgetExceeded, Conflict, Forbidden, HarnessError, Unsupported
+from .errors import BudgetExceeded, Conflict, Forbidden, HarnessError, Unauthenticated, Unsupported
 from .evaluation import compare, rollouts, turn_series
 from .operations import Operations
 from .store import encode
@@ -194,6 +194,15 @@ def _error_response(request: Request, code: str, message: str, status: int, deta
 
 
 def create_app(session, *, local_access=None, trajectory_ingestion=False):
+    """Build the authenticated session API for one environment implementation.
+
+    ``session`` is normally an :class:`~environment_harness.EnvironmentHarness`;
+    the app resolves its private session runtime internally so embedders never
+    construct an authorization-aware object themselves.
+    """
+
+    if hasattr(session, "environment_factory"):
+        session = session._runtime()
     store = session.store
     trajectories = TrajectoryRepository(store)
     training = TrainingRepository(store)
@@ -217,7 +226,10 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         auto_error=False,
         scheme_name="BearerAuth",
         bearerFormat="opaque",
-        description="Opaque EnvironmentHarness credential issued for a scoped principal.",
+        description=(
+            "Opaque EnvironmentHarness credential. The server resolves it to an identity and one "
+            "of its fixed management, viewer, or participant access policies."
+        ),
     )
 
     @app.middleware("http")
@@ -269,7 +281,9 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
     @app.exception_handler(HarnessError)
     async def failure(request, error):
         status = (
-            403
+            401
+            if isinstance(error, Unauthenticated)
+            else 403
             if isinstance(error, Forbidden)
             else 409
             if isinstance(error, Conflict)
@@ -340,6 +354,12 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         return _error_response(request, "internal_error", "Internal server error", 500)
 
     def actor(credentials: Annotated[HTTPAuthorizationCredentials | None, Security(bearer)]):
+        """Resolve the opaque bearer credential into its server-owned policy.
+
+        Callers never send permissions: the stored policy alone decides what an
+        operation may do.
+        """
+
         if credentials is None or credentials.scheme.lower() != "bearer":
             raise HTTPException(401, "Bearer credential required")
         return store.authenticate(credentials.credentials)
@@ -369,7 +389,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         "/v1/environment",
         tags=["Service"],
         summary="Get the active environment contract",
-        openapi_extra={"x-roles": ["researcher", "worker", "scorer", "agent"]},
     )
     def environment(who=Depends(actor)):
         return session.environment.spec
@@ -379,7 +398,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         tags=["Trajectories"],
         summary="List native and imported trajectories",
         response_model=list[TrajectorySummary],
-        openapi_extra={"x-roles": ["researcher", "scorer"]},
     )
     def trajectory_index(
         response: Response,
@@ -398,7 +416,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         tags=["Trajectories"],
         summary="Get a portable trajectory",
         response_model=Trajectory,
-        openapi_extra={"x-roles": ["researcher", "scorer"]},
     )
     def trajectory_resource(trajectory: str, who=Depends(actor)):
         return trajectories.get(trajectory, who)
@@ -408,7 +425,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         tags=["Trajectories"],
         summary="Page through trajectory records",
         response_model=TrajectoryRecordPage,
-        openapi_extra={"x-roles": ["researcher", "scorer"]},
     )
     def trajectory_records(
         trajectory: str,
@@ -430,7 +446,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         tags=["Trajectories"],
         summary="Freeze an authorized trajectory snapshot",
         response_model=TrajectorySnapshot,
-        openapi_extra={"x-roles": ["researcher", "scorer"]},
     )
     def freeze_trajectory_snapshot(trajectory: str, who=Depends(actor)):
         return trajectories.freeze(trajectory, who)
@@ -440,7 +455,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         tags=["Trajectories"],
         summary="List immutable snapshot boundaries for a trajectory",
         response_model=list[TrajectorySnapshot],
-        openapi_extra={"x-roles": ["researcher", "scorer"]},
     )
     def trajectory_snapshots(
         trajectory: str = Query(min_length=1),
@@ -454,7 +468,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         tags=["Trajectories"],
         summary="Get an immutable trajectory snapshot",
         response_model=TrajectorySnapshot,
-        openapi_extra={"x-roles": ["researcher", "scorer"]},
     )
     def trajectory_snapshot(snapshot: str, who=Depends(actor)):
         return trajectories.get_snapshot(snapshot, who)
@@ -463,7 +476,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         "/v1/trajectory-snapshots/{snapshot}/export",
         tags=["Trajectories"],
         summary="Export an immutable trajectory snapshot as JSONL",
-        openapi_extra={"x-roles": ["researcher", "scorer"]},
     )
     def export_trajectory_snapshot(snapshot: str, who=Depends(actor)):
         return StreamingResponse(
@@ -476,7 +488,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         tags=["Trajectories"],
         summary="Freeze a training-entitled trajectory dataset",
         response_model=TrajectoryDataset,
-        openapi_extra={"x-roles": ["researcher"]},
     )
     def freeze_trajectory_dataset(body: DatasetCreate, who=Depends(actor)):
         return training.freeze_dataset(body.name, body.trajectories, who)
@@ -486,7 +497,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         tags=["Trajectories"],
         summary="List immutable trajectory datasets",
         response_model=list[TrajectoryDataset],
-        openapi_extra={"x-roles": ["researcher", "scorer"]},
     )
     def trajectory_datasets(who=Depends(actor), limit: int = Query(100, ge=1, le=1000)):
         return training.list_datasets(who, limit=limit)
@@ -496,7 +506,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         tags=["Trajectories"],
         summary="Get an immutable trajectory dataset",
         response_model=TrajectoryDataset,
-        openapi_extra={"x-roles": ["researcher", "scorer"]},
     )
     def trajectory_dataset(dataset: str, who=Depends(actor)):
         return training.get_dataset(dataset, who)
@@ -505,7 +514,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         "/v1/trajectory-datasets/{dataset}/export",
         tags=["Trajectories"],
         summary="Export an immutable trajectory dataset as JSONL",
-        openapi_extra={"x-roles": ["researcher", "scorer"]},
     )
     def export_trajectory_dataset(dataset: str, who=Depends(actor)):
         return StreamingResponse(
@@ -518,7 +526,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         tags=["Trajectories"],
         summary="Get a recorded local training result",
         response_model=TrainingRun,
-        openapi_extra={"x-roles": ["researcher", "scorer"]},
     )
     def training_run(training_run: str, who=Depends(actor)):
         return training.get_run(training_run, who)
@@ -528,7 +535,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         tags=["Trajectories"],
         summary="List recorded local training results",
         response_model=list[TrainingRun],
-        openapi_extra={"x-roles": ["researcher", "scorer"]},
     )
     def training_runs(
         who=Depends(actor),
@@ -542,7 +548,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         tags=["Trajectories"],
         summary="Inspect trajectory-source collection and execution status",
         response_model=SourceStatus,
-        openapi_extra={"x-roles": ["researcher", "scorer"]},
     )
     def trajectory_source_status(source: str, who=Depends(actor)):
         return trajectories.source_status(source, who)
@@ -554,7 +559,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
             tags=["Trajectories"],
             summary="Register an external trajectory source",
             response_model=SourceRegistrationReceipt,
-            openapi_extra={"x-roles": ["researcher"]},
         )
         def register_trajectory_source(body: SourceRegistration, who=Depends(actor)):
             return trajectories.register_source(body, who)
@@ -564,7 +568,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
             tags=["Trajectories"],
             summary="Ingest a bounded trajectory-source batch",
             response_model=SourceAcknowledgement,
-            openapi_extra={"x-roles": ["researcher"]},
         )
         def ingest_trajectory_records(source: str, body: SourceIngestionBatch, who=Depends(actor)):
             return trajectories.ingest(source, body.records, who)
@@ -574,7 +577,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
             tags=["Trajectories"],
             summary="Update trajectory-source collection and execution status",
             response_model=SourceStatusUpdate,
-            openapi_extra={"x-roles": ["researcher"]},
         )
         def update_trajectory_source_status(source: str, body: SourceStatusUpdate, who=Depends(actor)):
             return trajectories.update_source_status(source, body, who)
@@ -583,7 +585,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         "/v1/environments",
         tags=["Environment sessions"],
         summary="Create an environment session",
-        openapi_extra={"x-roles": ["researcher"]},
     )
     def create(spec: ExperimentSpec, x_operation_id: str = Header(), who=Depends(actor)):
         return session.create(spec, who, environment_id=x_operation_id)
@@ -592,7 +593,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         "/v1/environments",
         tags=["Environment sessions"],
         summary="List environment sessions",
-        openapi_extra={"x-roles": ["researcher"]},
         responses={
             200: {
                 "description": "A descending page of environment sessions",
@@ -625,7 +625,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         "/v1/environments/{environment}",
         tags=["Environment sessions"],
         summary="Get an environment session",
-        openapi_extra={"x-roles": ["researcher", "worker", "scorer", "agent"]},
     )
     def get(environment: str, who=Depends(actor)):
         return session.get(environment, who)
@@ -634,7 +633,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         "/v1/environments/{environment}/observation",
         tags=["Environment sessions"],
         summary="Observe an environment session",
-        openapi_extra={"x-roles": ["researcher", "worker", "scorer", "agent"]},
     )
     def observation(environment: str, participant: str | None = None, who=Depends(actor)):
         return session.observe(environment, who, participant)
@@ -643,7 +641,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         "/v1/environments/{environment}/actions",
         tags=["Environment sessions"],
         summary="Submit a participant action",
-        openapi_extra={"x-roles": ["agent"]},
     )
     def action(environment: str, action: Action, who=Depends(actor)):
         return session.submit(environment, who, action)
@@ -652,7 +649,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         "/v1/environments/{environment}/events",
         tags=["Evidence"],
         summary="Read environment-session evidence events",
-        openapi_extra={"x-roles": ["researcher", "worker", "scorer", "agent"]},
     )
     def events(
         environment: str,
@@ -699,7 +695,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         summary="Read tenant activity",
         response_model=ActivityPage,
         responses={200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}}},
-        openapi_extra={"x-roles": ["researcher", "worker"]},
     )
     def global_activity(
         after: int = Query(0, ge=0),
@@ -715,11 +710,10 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         "/v1/activity/snapshot",
         tags=["Activity"],
         summary="Get the current activity hierarchy",
-        response_model=ActivitySnapshot,
-        openapi_extra={"x-roles": ["researcher", "worker"]},
+        response_model=ActivityHierarchy,
     )
-    def activity_snapshot(who=Depends(actor)):
-        return store.activity_snapshot(who)
+    def activity_hierarchy(who=Depends(actor)):
+        return store.activity_hierarchy(who)
 
     @app.get(
         "/v1/experiments/{experiment}/events",
@@ -727,7 +721,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         summary="Read activity for an experiment",
         response_model=ActivityPage,
         responses={200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}}},
-        openapi_extra={"x-roles": ["researcher", "worker"]},
     )
     def experiment_activity(
         experiment: str,
@@ -746,7 +739,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         summary="Read activity for an environment session",
         response_model=ActivityPage,
         responses={200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}}},
-        openapi_extra={"x-roles": ["researcher", "worker"]},
     )
     def environment_activity(
         environment: str,
@@ -763,15 +755,14 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         "/v1/environments/{environment}/agent-work",
         tags=["Environment sessions"],
         summary="List agent work records",
-        openapi_extra={"x-roles": ["researcher", "worker", "agent"]},
     )
     def agent_work(environment: str, who=Depends(actor), limit: int = Query(100, ge=1, le=1000)):
         with store.transaction() as db:
-            store.environment(db, environment, who, ("researcher", "worker", "agent"))
+            store.environment(db, environment, who, "session.read")
             records = db.execute(
                 "SELECT id,revision,participant,generation,status FROM agent_work WHERE environment=? "
-                "AND (? <> 'agent' OR participant=?) ORDER BY revision DESC,participant LIMIT ?",
-                (environment, who.role, who.participant, limit),
+                "AND (? = 1 OR participant=?) ORDER BY revision DESC,participant LIMIT ?",
+                (environment, int(who.full_evidence), who.participant, limit),
             ).fetchall()
             return {"work": [dict(record) for record in records]}
 
@@ -779,10 +770,7 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         "/v1/environments/{environment}/commands",
         tags=["Environment sessions"],
         summary="Run an environment-session command",
-        openapi_extra={
-            "x-roles": ["researcher", "worker", "agent"],
-            "x-command-operations": [operation.value for operation in CommandOperation],
-        },
+        openapi_extra={"x-command-operations": [operation.value for operation in CommandOperation]},
     )
     def command(environment: str, cmd: Command, who=Depends(actor)):
         a = cmd.arguments
@@ -818,33 +806,37 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         tags=["Environment sessions"],
         summary="Issue a participant credential",
         response_model=CredentialResponse,
-        openapi_extra={"x-roles": ["researcher"]},
     )
     def credential(environment: str, body: CredentialRequest, who=Depends(actor)):
+        """Issue a credential constrained to one session, participant, and generation.
+
+        This is the only operation that mints a participant credential, so no
+        other route can widen a caller's scope.
+        """
+
         with store.transaction() as db:
-            row = store.environment(db, environment, who, ("researcher",))
+            row = store.environment(db, environment, who, "credential.participant.issue")
             participants = json.loads(row["participants"])
             participant = body.participant
             if participant not in participants:
                 raise Forbidden("unknown participant")
-            p = participants[participant]
-            principal = who.model_copy(
-                update={
-                    "environment": environment,
-                    "role": "agent",
-                    "subject": p["controller"],
-                    "participant": participant,
-                    "generation": p["generation"],
-                }
+            member = participants[participant]
+        return {
+            "token": store.issue_participant(
+                who.tenant,
+                member["controller"],
+                session=environment,
+                participant=participant,
+                generation=member["generation"],
+                ttl=min(body.ttl, 86400),
             )
-        return {"token": store.issue(principal, min(body.ttl, 86400))}
+        }
 
     @app.post(
         "/v1/environments/{environment}/operations",
         tags=["Environment sessions"],
         summary="Prepare an external operation",
         response_model=OperationIntentResponse,
-        openapi_extra={"x-roles": ["agent"]},
     )
     def prepare(environment: str, body: OperationIntentRequest, who=Depends(actor)):
         return Operations(store).prepare(environment, who, **body.model_dump())
@@ -853,7 +845,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         "/v1/environments/{environment}/artifacts",
         tags=["Evidence"],
         summary="Store an artifact",
-        openapi_extra={"x-roles": ["researcher", "worker", "scorer", "agent"]},
     )
     async def artifact(environment: str, request: Request, who=Depends(actor)):
         chunks, size = [], 0
@@ -873,7 +864,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         "/v1/environments/{environment}/artifacts/{key}",
         tags=["Evidence"],
         summary="Download an artifact",
-        openapi_extra={"x-roles": ["researcher", "worker", "scorer", "agent"]},
     )
     def read_artifact(environment: str, key: str, who=Depends(actor)):
         data, media = store.read_artifact(environment, who, key)
@@ -887,7 +877,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         "/v1/environments/{environment}/reports",
         tags=["Evaluation"],
         summary="List score reports",
-        openapi_extra={"x-roles": ["researcher", "scorer"]},
     )
     def reports(environment: str, who=Depends(actor)):
         return store.reports(environment, who)
@@ -896,7 +885,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         "/v1/environments/{environment}/turn-series",
         tags=["Evaluation"],
         summary="Read bounded turn-level evidence series",
-        openapi_extra={"x-roles": ["researcher", "scorer"]},
     )
     def environment_turn_series(
         environment: str,
@@ -920,7 +908,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         "/v1/environments/{environment}/reports",
         tags=["Evaluation"],
         summary="Publish a score report",
-        openapi_extra={"x-roles": ["researcher", "scorer"]},
     )
     def report(environment: str, body: ScoreReport, who=Depends(actor)):
         return store.report(environment, who, body)
@@ -929,7 +916,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         "/v1/environments/{environment}/export",
         tags=["Evaluation"],
         summary="Export environment-session records",
-        openapi_extra={"x-roles": ["researcher", "worker", "scorer", "agent"]},
     )
     def export(environment: str, format: str = "evidence", who=Depends(actor)):
         session.get(environment, who)
@@ -956,7 +942,6 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         "/v1/compare",
         tags=["Evaluation"],
         summary="Compare environment sessions",
-        openapi_extra={"x-roles": ["researcher", "scorer"]},
     )
     def comparison(body: dict, who=Depends(actor)):
         ids = body.get("environments", [])

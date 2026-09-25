@@ -2,11 +2,11 @@
 
 The EnvironmentHarness HTTP API exposes environment sessions, evidence, activity, artifacts, and evaluation results. API version 1 uses the `/v1` path prefix and the `environment-session.v1` protocol.
 
-The canonical machine-readable contract is [`contracts/openapi.json`](../contracts/openapi.json). A running service exposes the same document at `/openapi.json` and interactive Swagger UI at `/docs`. Standalone JSON Schemas under `contracts/`, including `ActivityPage.schema.json` and `ActivitySnapshot.schema.json`, record the corresponding durable response shapes. [`PROTOCOL.md`](PROTOCOL.md) defines authority, lifecycle, recovery, and evidence guarantees that cannot be expressed completely in OpenAPI.
+The canonical machine-readable contract is [`contracts/openapi.json`](../contracts/openapi.json). A running service exposes the same document at `/openapi.json` and interactive Swagger UI at `/docs`. Standalone JSON Schemas under `contracts/`, including `ActivityPage.schema.json` and `ActivityHierarchy.schema.json`, record the corresponding durable response shapes. [`PROTOCOL.md`](PROTOCOL.md) defines authority, lifecycle, recovery, and evidence guarantees that cannot be expressed completely in OpenAPI.
 
 ## Base URL and authentication
 
-The local CLI listens on `http://127.0.0.1:8765` by default. Remote services must use HTTPS. Generate a local researcher credential from the same evidence store that the service uses:
+The local CLI listens on `http://127.0.0.1:8765` by default. Remote services must use HTTPS. Generate a local management credential from the same evidence store that the service uses:
 
 ```sh
 export EH_TOKEN="$(environment-harness --store .local/demo token)"
@@ -21,16 +21,22 @@ supplier authentication flow described in [Deployment](DEPLOYMENT.md).
 Authorization: Bearer <credential>
 ```
 
-Credentials are scoped to a tenant and role. Agent credentials are additionally scoped to one environment session, participant, and authority generation.
+Callers send only an opaque bearer credential. The server resolves it to an identity plus one of
+three fixed access policies — `management`, `viewer`, or `participant` — and never accepts a policy,
+role, or permission from a request. A participant credential is additionally constrained to one
+environment session, participant, and authority generation. See [Authentication](AUTHENTICATION.md).
 
-| Role | Intended authority |
+| Credential policy | Server-assigned authority |
 | --- | --- |
-| `researcher` | Create and inspect environment sessions, issue participant credentials, control lifecycle, and evaluate results. |
-| `worker` | Operate and recover authorized environment sessions without researcher-only creation or scoring authority. |
-| `scorer` | Read authorized evidence and publish or inspect score reports. |
-| `agent` | Observe and act only as the credential's bound participant. |
+| `management` | Create and inspect environment sessions, run lifecycle commands, read full evidence, publish score reports, register and ingest sources, freeze snapshots and datasets, and issue participant credentials. |
+| `viewer` | Read-only inspection. It cannot mutate anything, ingest evidence, create a dataset, or issue a credential. |
+| `participant` | Observe and act only as the credential's bound session, participant, and authority generation. |
 
-The `x-roles` field on each OpenAPI operation lists the accepted roles. A listed role can still receive `403` when its tenant, environment-session scope, participant, audience, or authority generation does not authorize the specific resource.
+OpenAPI publishes only its standard HTTP bearer security scheme; there is no `x-roles`,
+`x-principal-kinds`, or other custom caller extension. An authenticated caller can still receive
+`403` when its server-owned policy, tenant, environment-session scope, participant, audience, or
+authority generation does not authorize the specific resource. An invalid, expired, or revoked
+credential returns `401` instead.
 
 ## Common conventions
 
@@ -53,31 +59,31 @@ export ARTIFACT_KEY="artifact_example"
 
 ## Endpoint summary
 
-| Method and path | Roles | Purpose |
+| Method and path | Credential policies | Purpose |
 | --- | --- | --- |
 | `GET /health` | Public | Check service and protocol health. |
-| `GET /v1/environment` | All authenticated roles | Read the active environment contract. |
-| `POST /v1/environments` | Researcher | Create an environment session idempotently. |
-| `GET /v1/environments` | Researcher | List environment sessions. |
-| `GET /v1/environments/{environment}` | All authenticated roles | Read one authorized environment session. |
-| `GET /v1/environments/{environment}/observation` | All authenticated roles | Read a participant-specific observation. |
-| `POST /v1/environments/{environment}/actions` | Agent | Submit a participant action. |
-| `GET /v1/environments/{environment}/events` | All authenticated roles | Read authorized evidence as JSON or SSE. |
-| `GET /v1/activity/events` | Researcher, worker | Read tenant activity as JSON or SSE. |
-| `GET /v1/activity/snapshot` | Researcher, worker | Read the current experiment, scenario, and environment-session hierarchy. |
-| `GET /v1/experiments/{experiment}/events` | Researcher, worker | Read activity for one experiment. |
-| `GET /v1/environments/{environment}/activity` | Researcher, worker | Read activity for one environment session. |
-| `GET /v1/environments/{environment}/agent-work` | Researcher, worker, agent | Read agent-work records. |
-| `POST /v1/environments/{environment}/commands` | Researcher, worker, or agent; command-specific | Execute a lifecycle command. |
-| `POST /v1/environments/{environment}/credentials` | Researcher | Issue a scoped participant credential. |
-| `POST /v1/environments/{environment}/operations` | Agent | Persist an authorized external-operation intent. |
-| `POST /v1/environments/{environment}/artifacts` | All authenticated roles | Store an authorized artifact. |
-| `GET /v1/environments/{environment}/artifacts/{key}` | All authenticated roles | Download an authorized artifact. |
-| `GET /v1/environments/{environment}/reports` | Researcher, scorer | List versioned score reports. |
-| `POST /v1/environments/{environment}/reports` | Researcher, scorer | Publish a versioned score report. |
-| `GET /v1/environments/{environment}/turn-series` | Researcher, scorer | Read bounded turn-level evidence series for analysis and visualization. |
-| `GET /v1/environments/{environment}/export` | All authenticated roles | Stream evidence or entitled training rows as NDJSON. |
-| `POST /v1/compare` | Researcher, scorer | Compare 1 to 100 environment sessions. |
+| `GET /v1/environment` | Any valid credential | Read the active environment contract. |
+| `POST /v1/environments` | Management | Create an environment session idempotently. |
+| `GET /v1/environments` | Management | List environment sessions. |
+| `GET /v1/environments/{environment}` | Any valid credential | Read one authorized environment session. |
+| `GET /v1/environments/{environment}/observation` | Any valid credential | Read a participant-specific observation. |
+| `POST /v1/environments/{environment}/actions` | Participant | Submit a participant action. |
+| `GET /v1/environments/{environment}/events` | Any valid credential | Read authorized evidence as JSON or SSE. |
+| `GET /v1/activity/events` | Management, viewer | Read tenant activity as JSON or SSE. |
+| `GET /v1/activity/snapshot` | Management, viewer | Read the current experiment, scenario, and environment-session hierarchy. |
+| `GET /v1/experiments/{experiment}/events` | Management, viewer | Read activity for one experiment. |
+| `GET /v1/environments/{environment}/activity` | Management, viewer | Read activity for one environment session. |
+| `GET /v1/environments/{environment}/agent-work` | Management, viewer, participant | Read agent-work records. |
+| `POST /v1/environments/{environment}/commands` | Management; command-specific | Execute a lifecycle command. |
+| `POST /v1/environments/{environment}/credentials` | Management | Issue a scoped participant credential. |
+| `POST /v1/environments/{environment}/operations` | Participant | Persist an authorized external-operation intent. |
+| `POST /v1/environments/{environment}/artifacts` | Any valid credential | Store an authorized artifact. |
+| `GET /v1/environments/{environment}/artifacts/{key}` | Any valid credential | Download an authorized artifact. |
+| `GET /v1/environments/{environment}/reports` | Management, viewer | List versioned score reports. |
+| `POST /v1/environments/{environment}/reports` | Management, viewer | Publish a versioned score report. |
+| `GET /v1/environments/{environment}/turn-series` | Management, viewer | Read bounded turn-level evidence series for analysis and visualization. |
+| `GET /v1/environments/{environment}/export` | Any valid credential | Stream evidence or entitled training rows as NDJSON. |
+| `POST /v1/compare` | Management, viewer | Compare 1 to 100 environment sessions. |
 
 `{environment}` is always an environment-session ID, despite the historical plural route name.
 
@@ -155,7 +161,7 @@ The response includes the current status, revision, frozen manifest, participant
 
 ### Read an observation
 
-An agent credential is already bound to its participant. A researcher, worker, or scorer can select a participant explicitly.
+A participant credential is already bound to its participant. A management or viewer credential can select a participant explicitly.
 
 ```sh
 curl --fail-with-body -H "Authorization: Bearer $EH_TOKEN" \
@@ -231,23 +237,23 @@ The command envelope is always:
 
 Supported operation names are `advance`, `lease`, `release`, `cancel`, `resolve`, `close_phase`, `checkpoint`, `reconcile_agent`, `resume`, `branch`, `control`, `memory`, `transfer`, `external_event`, and `finalize_outcomes`. `advance` resolves at most one ready externally controlled phase under the normal fenced writer lease; it returns `waiting` while required actions or events are missing and never executes a model. Other arguments are the corresponding `EnvironmentSession` method arguments after `environment` and `who`. Unknown operations or incompatible arguments return the documented `422 invalid_request` envelope. See [`PROTOCOL.md`](PROTOCOL.md), [`coordinated-sessions.md`](coordinated-sessions.md), and [`REMOTE-WORKERS.md`](REMOTE-WORKERS.md) before building recovery, remote-worker, or branching automation.
 
-| Operation | Authorized role | Required arguments | Success result | Common errors |
+| Operation | Required policy | Required arguments | Success result | Common errors |
 | --- | --- | --- | --- | --- |
-| `advance` | Researcher, worker | None; optional `owner` | One ready phase result, or `{"status":"waiting","revision":N,"deadline_exceeded":false}` | `403` scope, `409` lost authority or invalid phase, `503` supplier unavailable |
-| `lease` | Researcher, worker | `owner`; optional `ttl` (1–300 seconds) | Fenced lease with `owner`, `epoch`, and `expires` | `409` another writer is active, `422` invalid owner/TTL |
-| `release` | Researcher, worker | `lease` | `{"released":true}` | `403` scope, `409` stale/expired lease |
-| `cancel` | Researcher | None | Cancelled status plus unresolved agent-work and operation IDs | `403` role/scope, `409` already terminal |
-| `resolve` | Researcher, worker | `lease` | Committed revision, status, and evidence event | `409` incomplete phase, stale lease, or invalid transition; `503` supplier unavailable |
-| `close_phase` | Researcher, worker | `lease`, `revision`; optional `reason` | Closed revision receipt | `409` stale phase/lease, `422` wall-clock phase |
-| `checkpoint` | Researcher | `lease`; optional `exact_agents` | Checkpoint ID, revision, hash, and exactness | `409` unsettled work, `422` unsupported capability |
-| `reconcile_agent` | Researcher, worker | `lease`, `operation_id`, `response`, `evidence`; optional `agent_state` | Responded operation receipt | `409` conflicting/stale work, `422` invalid evidence |
-| `resume` | Researcher, worker | `lease`; optional `implementations` | Updated environment session | `409` unsettled effects or changed implementations, `422` unsupported capability |
-| `branch` | Researcher | `checkpoint`; optional `interventions`, `new_environment` | New environment session | `403` unavailable checkpoint, `409` integrity/version conflict, `422` unsupported pending/live-write state |
-| `control` | Researcher | `lease`, `command` (`pause` or `cancel`) | Updated lifecycle status | `409` stale lease/terminal session, `422` unknown command |
-| `memory` | Agent | `memory`; optional `agent_state`, `expected_revision` | `null` after the update commits | `403` participant authority, `409` stale revision/size, `422` missing checkpoint hook |
-| `transfer` | Researcher | `lease`, `participant`, `controller`; optional `active` | New scoped participant principal | `409` decision boundary/last participant, `422` undeclared participant |
-| `external_event` | Researcher, worker | `lease`, `source`, `cursor`, `event_time`, `payload`; optional `gap` | Evidence event receipt | `409` stale cursor/queue limit/lease |
-| `finalize_outcomes` | Researcher, worker | `lease`, `report_revision` | Completed outcome receipt | `409` missing report or unsettled operations |
+| `advance` | Management, viewer | None; optional `owner` | One ready phase result, or `{"status":"waiting","revision":N,"deadline_exceeded":false}` | `403` scope, `409` lost authority or invalid phase, `503` supplier unavailable |
+| `lease` | Management, viewer | `owner`; optional `ttl` (1–300 seconds) | Fenced lease with `owner`, `epoch`, and `expires` | `409` another writer is active, `422` invalid owner/TTL |
+| `release` | Management, viewer | `lease` | `{"released":true}` | `403` scope, `409` stale/expired lease |
+| `cancel` | Management | None | Cancelled status plus unresolved agent-work and operation IDs | `403` policy/scope, `409` already terminal |
+| `resolve` | Management, viewer | `lease` | Committed revision, status, and evidence event | `409` incomplete phase, stale lease, or invalid transition; `503` supplier unavailable |
+| `close_phase` | Management, viewer | `lease`, `revision`; optional `reason` | Closed revision receipt | `409` stale phase/lease, `422` wall-clock phase |
+| `checkpoint` | Management | `lease`; optional `exact_agents` | Checkpoint ID, revision, hash, and exactness | `409` unsettled work, `422` unsupported capability |
+| `reconcile_agent` | Management, viewer | `lease`, `operation_id`, `response`, `evidence`; optional `agent_state` | Responded operation receipt | `409` conflicting/stale work, `422` invalid evidence |
+| `resume` | Management, viewer | `lease`; optional `implementations` | Updated environment session | `409` unsettled effects or changed implementations, `422` unsupported capability |
+| `branch` | Management | `checkpoint`; optional `interventions`, `new_environment` | New environment session | `403` unavailable checkpoint, `409` integrity/version conflict, `422` unsupported pending/live-write state |
+| `control` | Management | `lease`, `command` (`pause` or `cancel`) | Updated lifecycle status | `409` stale lease/terminal session, `422` unknown command |
+| `memory` | Participant | `memory`; optional `agent_state`, `expected_revision` | `null` after the update commits | `403` participant authority, `409` stale revision/size, `422` missing checkpoint hook |
+| `transfer` | Management | `lease`, `participant`, `controller`; optional `active` | New scoped participant principal | `409` decision boundary/last participant, `422` undeclared participant |
+| `external_event` | Management, viewer | `lease`, `source`, `cursor`, `event_time`, `payload`; optional `gap` | Evidence event receipt | `409` stale cursor/queue limit/lease |
+| `finalize_outcomes` | Management, viewer | `lease`, `report_revision` | Completed outcome receipt | `409` missing report or unsettled operations |
 
 All command errors use the shared envelope below. A `403` can intentionally hide whether an environment session exists; a `409` means the caller should refresh state or reconcile authority rather than retry blindly; a `422` means the operation name, arguments, or frozen capability does not permit the request.
 
@@ -513,7 +519,8 @@ Every HTTP error uses the same JSON envelope:
 | `400` | `invalid_request` | The HTTP request is malformed. |
 | `401` | `unauthorized` | A bearer credential is missing. |
 | `402` | `budget_exhausted` | The frozen environment-session budget is exhausted. |
-| `403` | `forbidden` | The credential, role, scope, audience, or authority generation does not authorize the operation. Resource existence can be intentionally hidden. |
+| `401` | `unauthorized` | The credential is missing, malformed, expired, revoked, or otherwise invalid. No policy was consulted. |
+| `403` | `forbidden` | The credential is valid but its server-owned policy, scope, audience, or authority generation does not authorize the operation. Resource existence is intentionally hidden. |
 | `404` | `not_found` | An unprotected route or asset does not exist. Protected resources commonly use `403` to avoid disclosure. |
 | `405` | `method_not_allowed` | The route exists but does not support the requested HTTP method. |
 | `409` | `conflict` | Current session state conflicts with the requested operation. |

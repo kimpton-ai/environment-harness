@@ -21,21 +21,17 @@ as training data.
 ## Freeze and stream a dataset
 
 ```python
-from environment_harness import EvidenceStore, Principal, TrainingRepository
+trajectories = harness.sources()
 
-store = EvidenceStore(".local/evidence")
-researcher = Principal(tenant="local", subject="researcher", role="researcher")
-training = TrainingRepository(store)
+dataset = trajectories.freeze_dataset("synthetic-training", ("ENVIRONMENT_SESSION_ID",))
 
-dataset = training.freeze_dataset(
-    "synthetic-training",
-    ("ENVIRONMENT_SESSION_ID",),
-    researcher,
-)
-
-for row in training.export_dataset(dataset.metadata.id, researcher):
+for row in trajectories.export_dataset(dataset.metadata.id):
     process(row)
 ```
+
+`harness.sources()` is the trusted local management surface. It requires no credential because the
+in-process SDK is a trusted interface; the authenticated HTTP API never executes a training
+integration. See [Authentication](AUTHENTICATION.md).
 
 Dataset identity is derived from the canonical selection manifest and ordered trajectory digests,
 not local paths. Every member points to an immutable trajectory snapshot. Later evidence does not

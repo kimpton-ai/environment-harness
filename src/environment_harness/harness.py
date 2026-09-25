@@ -8,6 +8,7 @@ import threading
 import time
 from collections.abc import Callable, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -15,12 +16,13 @@ from typing import Any, Protocol
 from jsonschema import Draft202012Validator
 from pydantic import TypeAdapter
 
-from .contracts import AgentSpec, ExperimentSpec, Principal, RunPolicy, Scenario
+from .access import trusted_local
+from .contracts import AgentSpec, BranchRequest, ExperimentSpec, RunPolicy, Scenario
 from .errors import Conflict
 from .operations import environment_operations
 from .runner import run as run_session
-from .runtime import EnvironmentSession as RuntimeEnvironmentSession
-from .store import EvidenceStore, encode, uid
+from .runtime import _SessionRuntime
+from .store import EvidenceStore, digest, encode, uid
 
 
 def _session_seed(seed: int, scenario_id: str, trial: int) -> int:
@@ -33,39 +35,32 @@ class SessionRunner(Protocol):
 
     def __call__(
         self,
-        session: RuntimeEnvironmentSession,
+        session: Any,
         environment: str,
-        researcher: Principal,
+        access: Any,
         agents: Mapping[str, Any],
         *,
         turns: int,
     ) -> Mapping[str, Any]: ...
 
 
-class EnvironmentSession(RuntimeEnvironmentSession):
-    """A single environment-session handle.
+class EnvironmentSession:
+    """A typed domain handle for one environment session.
 
-    Constructing this class with ``(store, environment)`` retains the advanced,
-    low-level API. Handles returned by :class:`EnvironmentHarness` additionally
-    expose lifecycle properties and ``wait``/``stop``/``resume``.
+    The handle neither inherits from nor exposes the private session runtime,
+    and every public method accepts only domain inputs. Authorization stays
+    inside the trusted local context that :class:`EnvironmentHarness` owns.
     """
 
-    def __init__(
-        self,
-        store: EvidenceStore,
-        environment: Any,
-        *,
-        harness: EnvironmentHarness | None = None,
-        session_id: str | None = None,
-    ):
-        super().__init__(store, environment)
+    def __init__(self, harness: EnvironmentHarness, session_id: str):
         self._harness = harness
         self._session_id = session_id
 
+    def __repr__(self) -> str:
+        return f"EnvironmentSession(id={self._session_id!r})"
+
     def _run_record(self):
-        if self._session_id is None:
-            raise AttributeError("lifecycle properties are available on harness session handles")
-        with self.store.transaction() as db:
+        with self._harness.store.transaction() as db:
             row = db.execute("SELECT * FROM session_runs WHERE environment=?", (self._session_id,)).fetchone()
             if not row:
                 raise Conflict("environment session record is unavailable")
@@ -73,8 +68,6 @@ class EnvironmentSession(RuntimeEnvironmentSession):
 
     @property
     def id(self) -> str:
-        if self._session_id is None:
-            raise AttributeError("low-level sessions do not have an ID before create()")
         return self._session_id
 
     @property
@@ -99,24 +92,181 @@ class EnvironmentSession(RuntimeEnvironmentSession):
         return int(self._run_record()["trial"])
 
     def wait(self, timeout: float | None = None) -> EnvironmentSession:
-        if self._harness is None:
-            raise AttributeError("wait is available on harness session handles")
-        self._harness._wait(self.id, timeout)
+        self._harness._wait(self._session_id, timeout)
         return self
 
     def stop(self) -> EnvironmentSession:
-        if self._harness is None:
-            raise AttributeError("stop is available on harness session handles")
-        self._harness._stop(self.id)
+        self._harness._stop(self._session_id)
         return self
 
-    def resume(self, *args, **kwargs):
-        if args or kwargs:
-            return super().resume(*args, **kwargs)
-        if self._harness is None:
-            raise AttributeError("resume is available on harness session handles")
-        self._harness._resume(self.id)
+    def resume(self) -> EnvironmentSession:
+        self._harness._resume(self._session_id)
         return self
+
+    def advance(self, *, turns: int = 1) -> dict[str, Any]:
+        """Run more turns on this session inside its frozen turn budget."""
+
+        return dict(self._harness._advance(self._session_id, turns))
+
+    def record(self) -> dict[str, Any]:
+        """Return the current durable session projection."""
+
+        return dict(self._harness._runtime().get(self._session_id, self._harness._access))
+
+    def observation(self, participant: str) -> dict[str, Any]:
+        return dict(self._harness._runtime().observe(self._session_id, self._harness._access, participant))
+
+    def events(self, *, after: int = 0, limit: int = 200) -> list[dict[str, Any]]:
+        return self._harness.store.events(self._session_id, self._harness._access, after, limit)
+
+    def replay(self):
+        return self._harness.store.replay(self._session_id, self._harness._access)
+
+    def reports(self) -> list[dict[str, Any]]:
+        return self._harness.store.reports(self._session_id, self._harness._access)
+
+    def verify(self) -> dict[str, Any]:
+        return self._harness.store.verify(self._session_id, self._harness._access)
+
+    def trajectory(self):
+        from .trajectories import TrajectoryRepository
+
+        return TrajectoryRepository(self._harness.store).get(self._session_id, self._harness._access)
+
+    def records(self, *, after: int = 0, limit: int = 200):
+        from .trajectories import TrajectoryRepository
+
+        return TrajectoryRepository(self._harness.store).records_page(
+            self._session_id, self._harness._access, after=after, limit=limit
+        )
+
+    def snapshot(self):
+        from .trajectories import TrajectoryRepository
+
+        return TrajectoryRepository(self._harness.store).freeze(self._session_id, self._harness._access)
+
+    def checkpoint(self, *, exact_agents: bool = False) -> dict[str, Any]:
+        """Freeze immutable resumable state for this session revision."""
+
+        return dict(self._harness._checkpoint(self._session_id, exact_agents=exact_agents))
+
+    def checkpoints(self) -> list[dict[str, Any]]:
+        with self._harness.store.transaction() as db:
+            self._harness.store.environment(db, self._session_id, self._harness._access, "session.read")
+            return [
+                {"id": row["id"], "revision": row["revision"], "hash": row["hash"]}
+                for row in db.execute(
+                    "SELECT id,revision,hash FROM checkpoints WHERE environment=? ORDER BY revision,id",
+                    (self._session_id,),
+                )
+            ]
+
+    def branch(self, request: BranchRequest) -> EnvironmentSession:
+        """Create a child session that inherits this session's authorized prefix."""
+
+        return self._harness._branch(self._session_id, request)
+
+    def cancel(self) -> dict[str, Any]:
+        return dict(self._harness._runtime().cancel(self._session_id, self._harness._access))
+
+    def report(self, report) -> dict[str, Any]:
+        return self._harness.store.report(self._session_id, self._harness._access, report)
+
+    def artifact(self, data: bytes, *, audience=(), media_type="application/octet-stream"):
+        return self._harness.store.artifact(
+            self._session_id,
+            self._harness._access,
+            data,
+            audience=audience,
+            media_type=media_type,
+        )
+
+    def read_artifact(self, key: str):
+        return self._harness.store.read_artifact(self._session_id, self._harness._access, key)
+
+    def turn_series(self, **bounds) -> dict[str, Any]:
+        from .evaluation import turn_series
+
+        return turn_series(self._harness.store, self._session_id, self._harness._access, **bounds)
+
+    def participant_credential(self, participant: str, *, ttl: int = 3600) -> str:
+        """Issue an opaque credential bound to one participant and generation."""
+
+        return self._harness._participant_credential(self._session_id, participant, ttl)
+
+
+class TrajectoryAccess:
+    """Trusted local management surface for trajectories, sources, and datasets.
+
+    Every method accepts only domain inputs; the trusted local access context
+    stays inside :class:`EnvironmentHarness`.
+    """
+
+    def __init__(self, harness: EnvironmentHarness):
+        from .training import TrainingRepository
+        from .trajectories import TrajectoryRepository
+
+        self._access = harness._access
+        self._trajectories = TrajectoryRepository(harness.store)
+        self._training = TrainingRepository(harness.store)
+
+    # Source registration and bounded historical ingestion.
+    def register(self, registration):
+        return self._trajectories.register_source(registration, self._access)
+
+    def ingest(self, source: str, records):
+        return self._trajectories.ingest(source, tuple(records), self._access)
+
+    def update_status(self, source: str, update):
+        return self._trajectories.update_source_status(source, update, self._access)
+
+    def status(self, source: str):
+        return self._trajectories.source_status(source, self._access)
+
+    # Trajectory inspection.
+    def list(self, *, limit: int = 100, cursor: str | None = None):
+        return self._trajectories.list_page(self._access, limit, cursor)
+
+    def trajectory(self, identity: str):
+        return self._trajectories.get(identity, self._access)
+
+    def records(self, identity: str, *, after: int = 0, limit: int = 200):
+        return self._trajectories.records_page(identity, self._access, after=after, limit=limit)
+
+    # Immutable snapshots and streaming export.
+    def freeze(self, identity: str):
+        return self._trajectories.freeze(identity, self._access)
+
+    def snapshot(self, snapshot: str):
+        return self._trajectories.get_snapshot(snapshot, self._access)
+
+    def snapshots(self, identity: str, *, limit: int = 100):
+        return self._trajectories.list_snapshots(identity, self._access, limit=limit)
+
+    def export_snapshot(self, snapshot: str):
+        return self._trajectories.export_snapshot(snapshot, self._access)
+
+    # Training-entitled datasets and local integration receipts.
+    def freeze_dataset(self, name: str, trajectories):
+        return self._training.freeze_dataset(name, tuple(trajectories), self._access)
+
+    def dataset(self, dataset: str):
+        return self._training.get_dataset(dataset, self._access)
+
+    def datasets(self, *, limit: int = 100):
+        return self._training.list_datasets(self._access, limit=limit)
+
+    def export_dataset(self, dataset: str):
+        return self._training.export_dataset(dataset, self._access)
+
+    def train(self, dataset: str, integration, config=None):
+        return self._training.run(dataset, integration, config or {}, self._access)
+
+    def training_run(self, training_run: str):
+        return self._training.get_run(training_run, self._access)
+
+    def training_runs(self, *, dataset: str | None = None, limit: int = 100):
+        return self._training.list_runs(self._access, dataset=dataset, limit=limit)
 
 
 @dataclass(frozen=True)
@@ -217,7 +367,12 @@ class Experiment:
 
 
 class EnvironmentHarness:
-    """Run environment sessions locally with bounded threads and durable status."""
+    """Run environment sessions locally with bounded threads and durable status.
+
+    This is the only public local-execution facade. It is a trusted in-process
+    interface and requires no authentication; behind it, a private session
+    runtime requires an access context on every observation and mutation.
+    """
 
     def __init__(
         self,
@@ -247,7 +402,7 @@ class EnvironmentHarness:
         self.max_sessions = max_sessions
         self.max_concurrency = max_concurrency
         self.tenant = tenant
-        self.researcher = Principal(tenant=tenant, subject="environment-harness", role="researcher")
+        self._access = trusted_local(tenant)
         self._executor = ThreadPoolExecutor(
             max_workers=max_concurrency, thread_name_prefix="environment-session"
         )
@@ -257,6 +412,130 @@ class EnvironmentHarness:
         self._served: dict[str, int] = {}
         self._running_jobs = 0
         self._lock = threading.RLock()
+
+    def _runtime(self) -> _SessionRuntime:
+        return _SessionRuntime(self.store, self.environment_factory())
+
+    def management_credential(self, *, subject: str = "management", ttl: int = 3600) -> str:
+        """Issue an opaque management credential for the authenticated HTTP API."""
+
+        return self.store.issue_management(self.tenant, subject, ttl=ttl)
+
+    def viewer_credential(self, *, ttl: int = 3600) -> str:
+        """Issue the read-only loopback viewer credential."""
+
+        return self.store.issue_viewer(self.tenant, ttl=ttl)
+
+    def _advance(self, session: str, turns: int) -> Mapping[str, Any]:
+        if turns < 1:
+            raise ValueError("turns must be positive")
+        environment = self.environment_factory()
+        agents = {participant: factory() for participant, factory in self.agent_factories.items()}
+        runtime = _SessionRuntime(self.store, environment)
+        return self.session_runner(runtime, session, self._access, agents, turns=turns)
+
+    def _checkpoint(self, session: str, *, exact_agents: bool) -> Mapping[str, Any]:
+        runtime = self._runtime()
+        lease = runtime.lease(session, self._access, "environment-harness-checkpoint", ttl=60)
+        try:
+            return runtime.checkpoint(session, self._access, lease, exact_agents=exact_agents)
+        finally:
+            with suppress(Conflict):
+                runtime.release(session, self._access, lease)
+
+    def _branch(self, session: str, request: BranchRequest) -> EnvironmentSession:
+        """Create the child Session for one BranchRequest.
+
+        Repeating a request with the same idempotency key converges on one child
+        Session; reusing the key with different interventions fails.
+        """
+
+        if not isinstance(request, BranchRequest):
+            request = BranchRequest.model_validate(request)
+        child = (
+            uid()
+            if request.idempotency_key is None
+            else digest({"parent": session, "key": request.idempotency_key})[:32]
+        )
+        runtime = self._runtime()
+        created = runtime.branch(
+            session,
+            self._access,
+            request.checkpoint,
+            request.interventions,
+            new_environment=child,
+        )
+        now = time.time()
+        with self.store.transaction() as db:
+            parent = db.execute("SELECT * FROM session_runs WHERE environment=?", (session,)).fetchone()
+            existing = db.execute("SELECT * FROM session_runs WHERE environment=?", (child,)).fetchone()
+            if existing is None and parent is not None:
+                db.execute(
+                    "INSERT INTO session_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        child,
+                        self.tenant,
+                        parent["experiment"],
+                        parent["scenario"],
+                        parent["trial"],
+                        parent["seed"],
+                        # A child starts behind explicit resume so branching never
+                        # repeats an externally visible effect without caller intent.
+                        "interrupted",
+                        None,
+                        created["revision"],
+                        request.turns or parent["target_turns"],
+                        "Branched",
+                        parent["scenario_body"],
+                        now,
+                        now,
+                    ),
+                )
+                self._outbox(
+                    db,
+                    kind="environment_session.branched",
+                    body={
+                        "status": "interrupted",
+                        "scenario_id": parent["scenario"],
+                        "trial": parent["trial"],
+                        "parent": session,
+                        "checkpoint": request.checkpoint,
+                    },
+                    experiment=parent["experiment"],
+                    environment=child,
+                )
+                if parent["experiment"]:
+                    self._refresh_experiment(db, parent["experiment"])
+        return EnvironmentSession(self, child)
+
+    def compare(self, sessions) -> dict[str, Any]:
+        from .evaluation import compare as compare_sessions
+
+        return compare_sessions(self.store, list(sessions), self._access)
+
+    def sources(self) -> TrajectoryAccess:
+        """Return the trusted local trajectory, source, and dataset surface."""
+
+        return TrajectoryAccess(self)
+
+    def trajectories(self, *, limit: int = 100, cursor: str | None = None):
+        return TrajectoryAccess(self).list(limit=limit, cursor=cursor)
+
+    def _participant_credential(self, session: str, participant: str, ttl: int) -> str:
+        with self.store.transaction() as db:
+            row = self.store.environment(db, session, self._access, "credential.participant.issue")
+            members = json.loads(row["participants"])
+            if participant not in members:
+                raise Conflict("unknown participant")
+            member = members[participant]
+        return self.store.issue_participant(
+            self.tenant,
+            member["controller"],
+            session=session,
+            participant=participant,
+            generation=member["generation"],
+            ttl=min(ttl, 86400),
+        )
 
     def _validate_scenario(self, scenario: Scenario[Any]) -> Scenario[Any]:
         environment = self.environment_factory()
@@ -329,18 +608,40 @@ class EnvironmentHarness:
         with self._lock:
             self._jobs[environment_id] = job
             self._schedule_locked(job)
-        return EnvironmentSession(
-            self.store,
-            self.environment_factory(),
-            harness=self,
-            session_id=environment_id,
-        )
+        return EnvironmentSession(self, environment_id)
 
     def start(self, scenario: Scenario[Any], *, seed: int = 0, turns: int = 10) -> EnvironmentSession:
         return self._reserve(scenario, seed=seed, turns=turns)
 
     def run(self, scenario: Scenario[Any], *, seed: int = 0, turns: int = 10) -> EnvironmentSession:
         return self.start(scenario, seed=seed, turns=turns).wait()
+
+    def session(self, session_id: str) -> EnvironmentSession:
+        """Reconnect to a persisted session by its durable identity."""
+
+        with self.store.transaction() as db:
+            if not db.execute(
+                "SELECT 1 FROM session_runs WHERE environment=? AND tenant=?",
+                (session_id, self.tenant),
+            ).fetchone():
+                raise Conflict("environment session is unavailable")
+        return EnvironmentSession(self, session_id)
+
+    def sessions(self, *, limit: int = 100) -> tuple[EnvironmentSession, ...]:
+        with self.store.transaction() as db:
+            rows = db.execute(
+                "SELECT environment FROM session_runs WHERE tenant=? ORDER BY created DESC LIMIT ?",
+                (self.tenant, limit),
+            ).fetchall()
+        return tuple(EnvironmentSession(self, row["environment"]) for row in rows)
+
+    def activity(self, *, after: int = 0, limit: int = 200) -> list[dict[str, Any]]:
+        return self.store.activity(self._access, after, limit)
+
+    def hierarchy(self) -> dict[str, Any]:
+        """Return the current experiment/session ownership projection."""
+
+        return self.store.activity_hierarchy(self._access)
 
     def experiment(
         self,
@@ -525,23 +826,24 @@ class EnvironmentHarness:
                 "SELECT environment FROM session_runs WHERE experiment=? ORDER BY created,scenario,trial",
                 (experiment_id,),
             ).fetchall()
-        return tuple(
-            EnvironmentSession(
-                self.store,
-                self.environment_factory(),
-                harness=self,
-                session_id=row["environment"],
-            )
-            for row in rows
-        )
+        return tuple(EnvironmentSession(self, row["environment"]) for row in rows)
 
     def _agent_spec(self, participant: str, agent: Any) -> AgentSpec:
+        # Prefer a declared capability. An adapter may define checkpoint hooks
+        # only to reject them, so a callable probe alone would freeze a
+        # continuation contract the program cannot honor.
+        declared = getattr(agent, "supports_checkpoint", None)
+        supported = (
+            bool(declared)
+            if declared is not None
+            else all(callable(getattr(agent, name, None)) for name in ("checkpoint", "restore"))
+        )
         return AgentSpec(
             id=participant,
             implementation=str(agent.implementation),
             policy_version=str(getattr(agent, "policy_version", "1")),
             config=dict(getattr(agent, "config", {})),
-            checkpoint=all(callable(getattr(agent, name, None)) for name in ("checkpoint", "restore")),
+            checkpoint=supported,
         )
 
     def _execute(self, job: dict[str, Any]) -> None:
@@ -585,16 +887,22 @@ class EnvironmentHarness:
                 operations=operations,
             )
             self._set_status(environment_id, "running", "Started")
-            runtime = RuntimeEnvironmentSession(self.store, environment)
-            runtime.create(spec, self.researcher, environment_id=environment_id)
+            runtime = _SessionRuntime(self.store, environment)
+            with self.store.transaction() as db:
+                created = db.execute("SELECT 1 FROM environments WHERE id=?", (environment_id,)).fetchone()
+            if created is None:
+                runtime.create(spec, self._access, environment_id=environment_id)
+            else:
+                # Resumed and branched sessions keep their frozen manifest.
+                runtime.resume_if_paused(environment_id, self._access)
             result = self.session_runner(
                 runtime,
                 environment_id,
-                self.researcher,
+                self._access,
                 agents,
                 turns=job["turns"],
             )
-            current = runtime.get(environment_id, self.researcher)
+            current = runtime.get(environment_id, self._access)
             if not isinstance(result, Mapping) or any(
                 result.get(field) != current[field] for field in ("id", "revision", "status")
             ):
@@ -712,12 +1020,11 @@ class EnvironmentHarness:
         with self._lock:
             future = self._futures.get(environment)
         if future is None:
-            if EnvironmentSession(
-                self.store,
-                self.environment_factory(),
-                harness=self,
-                session_id=environment,
-            ).status not in ("succeeded", "failed", "stopped"):
+            if EnvironmentSession(self, environment).status not in (
+                "succeeded",
+                "failed",
+                "stopped",
+            ):
                 raise Conflict("environment session requires explicit resume")
             return
         future.result(timeout=timeout)
@@ -740,9 +1047,7 @@ class EnvironmentHarness:
         with self.store.transaction() as db:
             row = db.execute("SELECT 1 FROM environments WHERE id=?", (environment,)).fetchone()
         if row:
-            RuntimeEnvironmentSession(self.store, self.environment_factory()).cancel(
-                environment, self.researcher
-            )
+            self._runtime().cancel(environment, self._access)
         self._set_status(environment, "stopped", "Stopped")
 
     def _resume(self, environment: str) -> None:

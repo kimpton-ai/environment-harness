@@ -52,6 +52,7 @@ class PostgresEvidenceStore(EvidenceStore):
             raise ValueError("positive retained storage allowance required")
         self.dsn, self.object_store, self.schema = dsn, object_store, schema
         self.max_retained_bytes = max_retained_bytes
+        # Numbered SQL migrations own PostgreSQL schema state; see initialize().
 
     def connect(self):
         import psycopg
@@ -73,13 +74,13 @@ class PostgresEvidenceStore(EvidenceStore):
     def _environment_row(self, db, environment):
         return db.execute("SELECT * FROM environments WHERE id=? FOR UPDATE", (environment,)).fetchone()
 
-    def _event_page(self, db, environment, after, who, limit):
+    def _event_page(self, db, environment, after, access, limit):
         return db.execute(
             """SELECT * FROM events WHERE environment=? AND seq>? AND
-            (? IN ('researcher','scorer','worker') OR audience='["*"]' OR
+            (? = 1 OR audience='["*"]' OR
              EXISTS(SELECT 1 FROM jsonb_array_elements_text(audience::jsonb)
                     AS membership(value) WHERE value=?)) ORDER BY seq LIMIT ?""",
-            (environment, after, who.role, who.participant, limit),
+            (environment, after, int(access.full_evidence), access.participant, limit),
         ).fetchall()
 
     def initialize(self):
@@ -216,7 +217,7 @@ class PostgresEvidenceStore(EvidenceStore):
             if experiment_ids:
                 db.execute("DELETE FROM scenario_snapshots WHERE experiment=ANY(?)", (experiment_ids,))
             db.execute("DELETE FROM experiments WHERE tenant=?", (tenant,))
-            db.execute("DELETE FROM credentials WHERE principal::jsonb->>'tenant'=?", (tenant,))
+            db.execute("DELETE FROM credentials WHERE tenant=?", (tenant,))
             db.execute("DELETE FROM splits WHERE tenant=?", (tenant,))
             db.execute("DELETE FROM environments WHERE tenant=?", (tenant,))
         return {

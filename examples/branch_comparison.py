@@ -4,49 +4,41 @@ import argparse
 import json
 from pathlib import Path
 
-from environment_harness import AgentSpec, EnvironmentSession, EvidenceStore, ExperimentSpec, Principal
-from environment_harness.contracts import RunPolicy, ScoreReport
-from environment_harness.evaluation import compare
+from environment_harness import EnvironmentHarness, EvidenceStore, Scenario
+from environment_harness.contracts import BranchRequest, RunPolicy, ScoreReport
 from environment_harness.fixtures import SyntheticAgent, SyntheticEnvironment
 from environment_harness.runner import run
 
 
+def first_three_turns(session, environment, access, agents, *, turns):
+    """Stop after three turns so the example can checkpoint mid-budget."""
+
+    return run(session, environment, access, agents, turns=3)
+
+
 def experiment(directory):
     store = EvidenceStore(directory)
-    session = EnvironmentSession(store, SyntheticEnvironment())
-    who = Principal(tenant="local", subject="demo-researcher", role="researcher")
-    spec = ExperimentSpec(
-        environment=session.environment.spec,
-        participants=tuple(
-            AgentSpec(id=p, implementation="synthetic-agent@1", policy_version="1", checkpoint=True)
-            for p in ("alice", "bob")
-        ),
-        policy=RunPolicy(max_turns=5),
+    harness = EnvironmentHarness(
+        store,
+        environment_factory=SyntheticEnvironment,
+        agent_factories={"alice": SyntheticAgent, "bob": SyntheticAgent},
         scoring_versions=("synthetic-total@1",),
+        policy=RunPolicy(max_turns=5),
+        session_runner=first_three_turns,
     )
-
-    def advance(environment, turns):
-        return run(session, environment, who, {p: SyntheticAgent() for p in ("alice", "bob")}, turns=turns)
-
-    parent = session.create(spec, who)["id"]
-    advance(parent, 3)
+    parent = harness.run(Scenario(id="branch-demo", input={}), turns=5)
     print("Original session: two synthetic agents, three turns, shared counter total 6.")
-    lease = session.lease(parent, who, "demo-checkpoint")
-    try:
-        checkpoint = session.checkpoint(parent, who, lease, exact_agents=True)
-    finally:
-        session.release(parent, who, lease)
-    child = session.branch(parent, who, checkpoint["id"], {"total": 20})["id"]
+
+    checkpoint = parent.checkpoint(exact_agents=True)
+    observations = {p: parent.observation(p)["payload"] for p in ("alice", "bob")}
+    child = parent.branch(BranchRequest(checkpoint=checkpoint["id"], interventions={"total": 20}))
     print("Checkpoint saved. The branched session starts at total 20; the original stays at 6.")
 
-    observations = {p: session.observe(parent, who, p)["payload"] for p in ("alice", "bob")}
-    for environment in (parent, child):
-        advance(environment, 2)
-        total = session.observe(environment, who, "alice")["payload"]["total"]
-        cursor = store.verify(environment, who)["events"]
-        store.report(
-            environment,
-            who,
+    for session in (parent, child):
+        session.advance(turns=2)
+        total = session.observation("alice")["payload"]["total"]
+        cursor = session.verify()["events"]
+        session.report(
             ScoreReport(
                 scorer="synthetic-total",
                 version="1",
@@ -58,28 +50,32 @@ def experiment(directory):
                 },
                 uncertainty="Protocol fixture only. This is not a model-performance or safety measure.",
                 provenance={"synthetic": True, "source": "examples/branch_comparison.py"},
-            ),
+            )
         )
-        with (Path(directory) / f"{environment}.jsonl").open("w") as output:
-            for event in store.replay(environment, who):
+        with (Path(directory) / f"{session.id}.jsonl").open("w") as output:
+            for event in session.replay():
                 output.write(json.dumps(event) + "\n")
 
     result = {
         "synthetic": True,
-        "parent": parent,
-        "branch": child,
+        "parent": parent.id,
+        "branch": child.id,
         "checkpoint": checkpoint["id"],
         "observations_at_checkpoint": observations,
-        "totals": {w: session.observe(w, who, "alice")["payload"]["total"] for w in (parent, child)},
-        "statuses": {w: session.get(w, who)["status"] for w in (parent, child)},
-        "comparison": compare(store, [parent, child], who),
-        "evidence": {w: store.verify(w, who) for w in (parent, child)},
+        "totals": {s.id: s.observation("alice")["payload"]["total"] for s in (parent, child)},
+        "statuses": {s.id: s.record()["status"] for s in (parent, child)},
+        "comparison": harness.compare([parent.id, child.id]),
+        "evidence": {s.id: s.verify() for s in (parent, child)},
     }
     (Path(directory) / "demo.json").write_text(json.dumps(result, indent=2) + "\n")
     print("Both sessions advanced two more turns. Original total: 10. Branched total: 24.")
-    print(f"Original session: {parent}\nBranched session: {child}\nReport: {Path(directory) / 'demo.json'}")
     print(
-        "The environment sessions share one lineage. Their difference is not independent statistical evidence."
+        f"Original session: {parent.id}\nBranched session: {child.id}\n"
+        f"Report: {Path(directory) / 'demo.json'}"
+    )
+    print(
+        "The environment sessions share one lineage. Their difference is not independent "
+        "statistical evidence."
     )
     return result
 

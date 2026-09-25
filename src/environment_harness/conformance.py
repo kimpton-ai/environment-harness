@@ -2,10 +2,11 @@
 
 from contextlib import suppress
 
-from .contracts import Action, Principal
+from .access import _AccessContext, trusted_local
+from .contracts import Action
 from .errors import Conflict, Unsupported
 from .operations import environment_operations
-from .runtime import EnvironmentSession
+from .runtime import _SessionRuntime
 from .store import uid
 
 
@@ -14,8 +15,8 @@ def check(store, environment, experiment, action_factory, *, events=()):
     operations = environment_operations(environment)
     if environment.spec.scheduling == "event" and environment.spec.phase_deadline == "wall" and not events:
         raise Unsupported("event conformance requires explicit input events")
-    who = Principal(tenant=uid(), subject="conformance", role="researcher")
-    session = EnvironmentSession(store, environment)
+    who = trusted_local(uid(), "conformance")
+    session = _SessionRuntime(store, environment)
     environment_id = session.create(experiment, who)["id"]
     receipts = []
     lease = session.lease(environment_id, who, "conformance")
@@ -23,11 +24,11 @@ def check(store, environment, experiment, action_factory, *, events=()):
         for event in events:
             session.external_event(environment_id, who, lease, **event)
         for participant in experiment.participants:
-            agent = Principal(
+            agent = _AccessContext(
                 tenant=who.tenant,
                 subject=participant.id,
-                role="agent",
-                environment=environment_id,
+                policy="participant",
+                session=environment_id,
                 participant=participant.id,
             )
             observation = session.observe(environment_id, agent)

@@ -3,14 +3,17 @@ import json
 from datetime import datetime
 
 import pytest
+from _credentials import bearer
 from fastapi.testclient import TestClient
 
-from environment_harness import AgentSpec, EnvironmentSession, EvidenceStore, ExperimentSpec, Principal
+from environment_harness import AgentSpec, EvidenceStore, ExperimentSpec
+from environment_harness.access import _AccessContext
 from environment_harness.contracts import Action, RunPolicy, ScoreReport
 from environment_harness.errors import HarnessError
 from environment_harness.fixtures import SyntheticAgent, SyntheticEnvironment
 from environment_harness.presentation import SLOTS
 from environment_harness.runner import run
+from environment_harness.runtime import _SessionRuntime
 from environment_harness.server import create_app
 from environment_harness.store import uid
 
@@ -18,8 +21,8 @@ from environment_harness.store import uid
 def service(tmp_path):
     environment = SyntheticEnvironment()
     store = EvidenceStore(tmp_path)
-    session = EnvironmentSession(store, environment)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    session = _SessionRuntime(store, environment)
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     spec = ExperimentSpec(
         environment=environment.spec,
         participants=(AgentSpec(id="alice", implementation="synthetic-agent@1", policy_version="1"),),
@@ -32,67 +35,70 @@ def service(tmp_path):
     )
     identifier = session.create(spec, researcher)["id"]
     client = TestClient(create_app(session), base_url="http://testserver")
-    research_headers = {"Authorization": "Bearer " + store.issue(researcher)}
-    agent = Principal(
+    research_headers = {"Authorization": "Bearer " + bearer(store, researcher)}
+    agent = _AccessContext(
         tenant="tenant",
         subject="alice",
-        role="agent",
-        environment=identifier,
+        policy="participant",
+        session=identifier,
         participant="alice",
     )
-    agent_headers = {"Authorization": "Bearer " + store.issue(agent)}
+    agent_headers = {"Authorization": "Bearer " + bearer(store, agent)}
     return client, store, session, researcher, spec, identifier, research_headers, agent_headers
 
 
-ROUTE_ROLE_MATRIX = {
-    "health": {"researcher", "worker", "scorer", "agent"},
-    "environment-schema": {"researcher", "worker", "scorer", "agent"},
-    "create": {"researcher"},
-    "list": {"researcher"},
-    "trajectory-list": {"researcher", "scorer"},
-    "trajectory-get": {"researcher", "scorer"},
-    "get": {"researcher", "worker", "scorer", "agent"},
-    "observation": {"researcher", "worker", "scorer", "agent"},
-    "actions": {"agent"},
-    "events": {"researcher", "worker", "scorer", "agent"},
-    "turn-series": {"researcher", "scorer"},
-    "agent-work": {"researcher", "worker", "agent"},
-    "commands": {"researcher", "worker"},
-    "credentials": {"researcher"},
-    "operations": {"agent"},
-    "artifacts": {"researcher", "worker", "scorer", "agent"},
-    "artifact-read": {"researcher", "worker", "scorer", "agent"},
-    "reports": {"researcher", "scorer"},
-    "report": {"researcher", "scorer"},
-    "export": {"researcher", "worker", "scorer", "agent"},
-    "compare": {"researcher", "scorer"},
-    "viewer": {"researcher", "worker", "scorer", "agent"},
-    "viewer-asset": {"researcher", "worker", "scorer", "agent"},
+# Expected status for each route under every server-owned credential policy.
+# There is no public role model: a caller sends only a bearer credential and the
+# server decides from the policy it persisted beside that credential's hash.
+ROUTE_POLICY_MATRIX = {
+    "health": {"management": 200, "viewer": 200, "participant": 200},
+    "environment-schema": {"management": 200, "viewer": 200, "participant": 200},
+    "create": {"management": 200, "viewer": 403, "participant": 403},
+    "list": {"management": 200, "viewer": 200, "participant": 200},
+    "trajectory-list": {"management": 200, "viewer": 200, "participant": 403},
+    "trajectory-get": {"management": 200, "viewer": 200, "participant": 403},
+    "get": {"management": 200, "viewer": 200, "participant": 200},
+    "observation": {"management": 200, "viewer": 200, "participant": 200},
+    "actions": {"management": 403, "viewer": 403, "participant": 200},
+    "events": {"management": 200, "viewer": 200, "participant": 200},
+    "turn-series": {"management": 200, "viewer": 200, "participant": 403},
+    "agent-work": {"management": 200, "viewer": 200, "participant": 200},
+    "commands": {"management": 200, "viewer": 403, "participant": 403},
+    "credentials": {"management": 200, "viewer": 403, "participant": 403},
+    "operations": {"management": 403, "viewer": 403, "participant": 200},
+    "artifacts": {"management": 200, "viewer": 403, "participant": 200},
+    "artifact-read": {"management": 200, "viewer": 200, "participant": 200},
+    "reports": {"management": 200, "viewer": 200, "participant": 403},
+    "report": {"management": 200, "viewer": 403, "participant": 403},
+    "export": {"management": 200, "viewer": 200, "participant": 200},
+    "compare": {"management": 200, "viewer": 200, "participant": 403},
+    "viewer": {"management": 200, "viewer": 200, "participant": 200},
+    "viewer-asset": {"management": 200, "viewer": 200, "participant": 200},
 }
-ROLES = ("researcher", "worker", "scorer", "agent")
+POLICIES = ("management", "viewer", "participant")
 
 
-@pytest.mark.parametrize("case", ROUTE_ROLE_MATRIX)
-@pytest.mark.parametrize("role", ROLES)
-def test_every_http_route_has_an_explicit_role_decision(tmp_path, case, role):
+@pytest.mark.parametrize("case", ROUTE_POLICY_MATRIX)
+@pytest.mark.parametrize("policy", POLICIES)
+def test_every_http_route_has_an_explicit_credential_policy_decision(tmp_path, case, policy):
     client, store, session, researcher, spec, environment, _, _ = service(tmp_path)
     principal = (
-        Principal(
+        _AccessContext(
             tenant="tenant",
             subject="alice",
-            role="agent",
-            environment=environment,
+            policy="participant",
+            session=environment,
             participant="alice",
         )
-        if role == "agent"
-        else Principal(tenant="tenant", subject=role, role=role)
+        if policy == "participant"
+        else _AccessContext(tenant="tenant", subject=policy, policy=policy)
     )
-    headers = {"Authorization": "Bearer " + store.issue(principal)}
-    agent = Principal(
+    headers = {"Authorization": "Bearer " + bearer(store, principal)}
+    agent = _AccessContext(
         tenant="tenant",
         subject="alice",
-        role="agent",
-        environment=environment,
+        policy="participant",
+        session=environment,
         participant="alice",
     )
 
@@ -194,8 +200,8 @@ def test_every_http_route_has_an_explicit_role_decision(tmp_path, case, role):
     else:
         response = client.get("/viewer/app.js", headers=headers)
 
-    expected = 200 if role in ROUTE_ROLE_MATRIX[case] else 403
-    assert response.status_code == expected, (case, role, response.text)
+    expected = ROUTE_POLICY_MATRIX[case][policy]
+    assert response.status_code == expected, (case, policy, response.text)
 
 
 def test_http_negative_credential_matrix(tmp_path):
@@ -203,10 +209,11 @@ def test_http_negative_credential_matrix(tmp_path):
     protected = "/v1/environments"
     assert client.get(protected).status_code == 401
     assert client.get(protected, headers={"Authorization": "Basic value"}).status_code == 401
-    assert client.get(protected, headers={"Authorization": "Bearer invalid"}).status_code == 403
+    # An invalid credential is an authentication failure, never authorization.
+    assert client.get(protected, headers={"Authorization": "Bearer invalid"}).status_code == 401
 
-    expired = store.issue(researcher)
-    revoked = store.issue(researcher)
+    expired = bearer(store, researcher)
+    revoked = bearer(store, researcher)
     with store.transaction() as db:
         db.execute(
             "UPDATE credentials SET expires=0 WHERE hash=?",
@@ -216,11 +223,11 @@ def test_http_negative_credential_matrix(tmp_path):
             "UPDATE credentials SET revoked=1 WHERE hash=?",
             (hashlib.sha256(revoked.encode()).hexdigest(),),
         )
-    assert client.get(protected, headers={"Authorization": "Bearer " + expired}).status_code == 403
-    assert client.get(protected, headers={"Authorization": "Bearer " + revoked}).status_code == 403
+    assert client.get(protected, headers={"Authorization": "Bearer " + expired}).status_code == 401
+    assert client.get(protected, headers={"Authorization": "Bearer " + revoked}).status_code == 401
 
-    other_tenant = Principal(tenant="other", subject="researcher", role="researcher")
-    other_headers = {"Authorization": "Bearer " + store.issue(other_tenant)}
+    other_tenant = _AccessContext(tenant="other", subject="researcher", policy="trusted-local")
+    other_headers = {"Authorization": "Bearer " + bearer(store, other_tenant)}
     assert client.get(f"/v1/environments/{environment}", headers=other_headers).status_code == 403
 
     second = session.create(spec, researcher, environment_id="b" * 32)["id"]
@@ -248,7 +255,7 @@ def test_http_errors_share_one_traceable_envelope(tmp_path):
 
     responses = (
         (client.get("/v1/environments"), 401, "unauthorized"),
-        (client.get("/v1/environments", headers={"Authorization": "Bearer invalid"}), 403, "forbidden"),
+        (client.get("/v1/environments", headers={"Authorization": "Bearer invalid"}), 401, "unauthorized"),
         (client.get("/v1/environments?limit=0", headers=headers), 422, "invalid_request"),
         (
             client.get(
@@ -321,16 +328,21 @@ def test_openapi_is_a_public_authenticated_api_reference(tmp_path):
     assert document["info"]["title"] == "EnvironmentHarness HTTP API"
     assert document["components"]["securitySchemes"]["BearerAuth"] == {
         "type": "http",
-        "description": "Opaque EnvironmentHarness credential issued for a scoped principal.",
+        "description": (
+            "Opaque EnvironmentHarness credential. The server resolves it to an identity and "
+            "one of its fixed management, viewer, or participant access policies."
+        ),
         "scheme": "bearer",
         "bearerFormat": "opaque",
     }
     assert document["paths"]["/health"]["get"].get("security") is None
     assert document["paths"]["/v1/environments"]["get"]["security"] == [{"BearerAuth": []}]
-    assert document["paths"]["/v1/environments"]["get"]["x-roles"] == ["researcher"]
-    assert document["paths"]["/v1/environments/{environment}/actions"]["post"]["x-roles"] == ["agent"]
+    # OpenAPI uses only the standard HTTP bearer scheme: no custom role,
+    # permission, or principal-kind extension is published.
+    serialized = json.dumps(document)
+    assert "x-roles" not in serialized and "x-principal" not in serialized
+    assert "permissions" not in document.get("components", {}).get("schemas", {})
     commands = document["paths"]["/v1/environments/{environment}/commands"]["post"]
-    assert commands["x-roles"] == ["researcher", "worker", "agent"]
     assert "advance" in commands["x-command-operations"]
     command_schema = document["components"]["schemas"]["CommandOperation"]
     assert set(command_schema["enum"]) == set(commands["x-command-operations"])
@@ -421,7 +433,7 @@ def test_activity_openapi_records_json_response_contracts(tmp_path):
     ]["schema"] == {"$ref": "#/components/schemas/ActivityPage"}
     assert document["paths"]["/v1/activity/snapshot"]["get"]["responses"]["200"]["content"][
         "application/json"
-    ]["schema"] == {"$ref": "#/components/schemas/ActivitySnapshot"}
+    ]["schema"] == {"$ref": "#/components/schemas/ActivityHierarchy"}
 
 
 def test_http_boundaries_reject_oversize_invalid_and_unavailable_requests(tmp_path, monkeypatch):
@@ -592,7 +604,7 @@ def test_turn_series_ignores_non_numeric_signals_and_counts_blocked_attempts(mon
     monkeypatch.setattr(evaluation, "next_revision", lambda _turn: 1)
 
     projection = evaluation.turn_series(
-        Store(), "environment", Principal(tenant="tenant", subject="researcher", role="researcher")
+        Store(), "environment", _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     )
 
     assert (
@@ -737,9 +749,9 @@ def test_http_exports_comparison_viewer_and_invalid_requests(tmp_path):
     assert client.get("/viewer/private.txt").status_code == 404
 
     assert client.get("/v1/environments", headers={"Authorization": "Basic invalid"}).status_code == 401
-    assert client.get("/v1/environments", headers={"Authorization": "Bearer invalid"}).status_code == 403
-    other = Principal(tenant="other", subject="researcher", role="researcher")
-    other_headers = {"Authorization": "Bearer " + store.issue(other)}
+    assert client.get("/v1/environments", headers={"Authorization": "Bearer invalid"}).status_code == 401
+    other = _AccessContext(tenant="other", subject="researcher", policy="trusted-local")
+    other_headers = {"Authorization": "Bearer " + bearer(store, other)}
     assert client.get(f"/v1/environments/{environment}", headers=other_headers).status_code == 403
     assert (
         client.get("/health", headers={"Origin": "https://attacker.invalid"}).json()["error"]["code"]

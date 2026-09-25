@@ -13,7 +13,6 @@ from environment_harness import (
     EnvironmentHarness,
     EnvironmentOperation,
     OperationSpec,
-    Principal,
     Scenario,
 )
 from environment_harness.contracts import Finding, MetricDefinition, ScoreReport
@@ -86,13 +85,8 @@ def run_with_inspection(session, environment, researcher, agents, *, turns):
     """Interleave normal turns with an environment operation in every session."""
     result = run_turns(session, environment, researcher, agents, turns=1)
     observation = session.observe(environment, researcher, "alice")
-    agent = Principal(
-        tenant=researcher.tenant,
-        subject="alice",
-        role="agent",
-        environment=environment,
-        participant="alice",
-    )
+    # The runtime derives the participant scope; examples never build one.
+    agent = session.participant_context(environment, researcher, "alice")
     operations = Operations(session.store)
     operations.prepare(
         environment,
@@ -118,9 +112,9 @@ def run_with_inspection(session, environment, researcher, agents, *, turns):
     return result
 
 
-def score_session(store, researcher, environment):
+def score_session(session):
     """Turn recorded evidence into comparable metrics and one linked finding."""
-    evidence = list(store.replay(environment, researcher))
+    evidence = list(session.replay())
     executed = [event for event in evidence if event["kind"] == "action.executed"]
     operation_receipts = [event for event in evidence if event["kind"] == "operation.receipt"]
     inspection = operation_receipts[-1]["payload"]["receipt"]
@@ -183,7 +177,7 @@ def score_session(store, researcher, environment):
         uncertainty="All values come from a deterministic synthetic fixture.",
         provenance={"synthetic": True, "source": "examples/custom_environment_experiment.py"},
     )
-    stored = store.report(environment, researcher, report)
+    stored = session.report(report)
     return inspection, stored
 
 
@@ -221,7 +215,7 @@ def run_experiment(store, *, turns: int = 3):
     ).run()
     sessions = []
     for session in result.sessions:
-        inspection, report = score_session(harness.store, harness.researcher, session.id)
+        inspection, report = score_session(session)
         sessions.append(
             {
                 "id": session.id,

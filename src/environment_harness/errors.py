@@ -2,6 +2,12 @@ class HarnessError(Exception):
     code = "harness_error"
 
 
+class Unauthenticated(HarnessError):
+    """A credential is missing, malformed, expired, revoked, or otherwise invalid."""
+
+    code = "unauthorized"
+
+
 class Forbidden(HarnessError):
     code = "forbidden"
 

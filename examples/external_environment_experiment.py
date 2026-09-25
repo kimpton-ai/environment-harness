@@ -19,7 +19,6 @@ from environment_harness import (
     EnvironmentHarness,
     EnvironmentOperation,
     OperationSpec,
-    Principal,
     Scenario,
 )
 from environment_harness.contracts import Finding, MetricDefinition, RunPolicy, ScoreReport
@@ -143,13 +142,8 @@ def run_with_external_move(session, environment, researcher, agents, *, turns):
     result = run_turns(session, environment, researcher, agents, turns=1)
     observation = session.observe(environment, researcher, "alice")
     distance = max(1, abs(int(observation["payload"]["total"])))
-    agent = Principal(
-        tenant=researcher.tenant,
-        subject="alice",
-        role="agent",
-        environment=environment,
-        participant="alice",
-    )
+    # The runtime derives the participant scope; examples never build one.
+    agent = session.participant_context(environment, researcher, "alice")
     operations = Operations(session.store)
     operations.prepare(
         environment,
@@ -170,9 +164,9 @@ def run_with_external_move(session, environment, researcher, agents, *, turns):
     return result
 
 
-def score_session(store, researcher, environment):
+def score_session(session):
     """Score the recorded receipt and link a finding to ordinary turn evidence."""
-    evidence = list(store.replay(environment, researcher))
+    evidence = list(session.replay())
     executed = [event for event in evidence if event["kind"] == "action.executed"]
     receipt_events = [event for event in evidence if event["kind"] == "operation.receipt"]
     receipt = receipt_events[-1]["payload"]["receipt"]
@@ -224,7 +218,7 @@ def score_session(store, researcher, environment):
             "source": "examples/external_environment_experiment.py",
         },
     )
-    stored = store.report(environment, researcher, report)
+    stored = session.report(report)
     return receipt, stored
 
 
@@ -265,7 +259,7 @@ def run_experiment(store, *, turns: int = 3):
         ).run()
         sessions = []
         for session in result.sessions:
-            receipt, report = score_session(harness.store, harness.researcher, session.id)
+            receipt, report = score_session(session)
             sessions.append(
                 {
                     "id": session.id,

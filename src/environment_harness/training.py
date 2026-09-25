@@ -120,9 +120,8 @@ class TrainingRepository:
         self.store = store
         self.trajectories = TrajectoryRepository(store)
 
-    def freeze_dataset(self, name: str, trajectories: tuple[str, ...], who) -> TrajectoryDataset:
-        if who.role != "researcher":
-            raise Forbidden("researcher training authority required")
+    def freeze_dataset(self, name: str, trajectories: tuple[str, ...], access) -> TrajectoryDataset:
+        access.require("dataset.create")
         if not name or not trajectories:
             raise ValueError("dataset name and trajectories are required")
         members = []
@@ -130,7 +129,7 @@ class TrainingRepository:
         any_reward = False
         schema_version = None
         for identity in trajectories:
-            trajectory = self.trajectories.get(identity, who)
+            trajectory = self.trajectories.get(identity, access)
             manifest = trajectory.spec.manifest
             experiment = (manifest.model_extra or {}).get("experiment")
             source_registration = (manifest.model_extra or {}).get("sourceRegistration")
@@ -154,7 +153,7 @@ class TrainingRepository:
                 schema_version = manifest.source.schema_version
             elif schema_version != manifest.source.schema_version:
                 raise Conflict("dataset contains incompatible trajectory schemas")
-            snapshot = self.trajectories.freeze(identity, who)
+            snapshot = self.trajectories.freeze(identity, access)
             members.append(
                 {
                     "trajectoryId": trajectory.metadata.id,
@@ -190,7 +189,7 @@ class TrainingRepository:
         with self.store.transaction() as db:
             existing = db.execute(
                 "SELECT body FROM trajectory_datasets WHERE id=? AND tenant=?",
-                (dataset.metadata.id, who.tenant),
+                (dataset.metadata.id, access.tenant),
             ).fetchone()
             body = encode(dataset.model_dump(mode="json", by_alias=True))
             if existing is not None and existing["body"] != body:
@@ -200,7 +199,7 @@ class TrainingRepository:
                     "INSERT INTO trajectory_datasets VALUES (?,?,?,?,?)",
                     (
                         dataset.metadata.id,
-                        who.tenant,
+                        access.tenant,
                         body,
                         dataset.status.dataset_digest,
                         datetime.now(UTC).timestamp(),
@@ -254,40 +253,37 @@ class TrainingRepository:
                 ready = True
         return ready
 
-    def get_dataset(self, dataset: str, who) -> TrajectoryDataset:
-        if who.role not in ("researcher", "scorer"):
-            raise Forbidden("dataset authority required")
+    def get_dataset(self, dataset: str, access) -> TrajectoryDataset:
+        access.require("dataset.read")
         with self.store.transaction() as db:
             row = db.execute(
                 "SELECT body FROM trajectory_datasets WHERE id=? AND tenant=?",
-                (dataset, who.tenant),
+                (dataset, access.tenant),
             ).fetchone()
         if row is None:
             raise Forbidden("dataset unavailable")
         return TrajectoryDataset.model_validate_json(row["body"])
 
-    def list_datasets(self, who, *, limit=100) -> tuple[TrajectoryDataset, ...]:
-        if who.role not in ("researcher", "scorer"):
-            raise Forbidden("dataset authority required")
+    def list_datasets(self, access, *, limit=100) -> tuple[TrajectoryDataset, ...]:
+        access.require("dataset.read")
         if not 1 <= limit <= 1000:
             raise ValueError("invalid dataset page size")
         with self.store.transaction() as db:
             rows = db.execute(
                 "SELECT body FROM trajectory_datasets WHERE tenant=? ORDER BY created DESC LIMIT ?",
-                (who.tenant, limit),
+                (access.tenant, limit),
             ).fetchall()
         return tuple(TrajectoryDataset.model_validate_json(row["body"]) for row in rows)
 
-    def export_dataset(self, dataset: str, who):
-        selected = self.get_dataset(dataset, who)
+    def export_dataset(self, dataset: str, access):
+        selected = self.get_dataset(dataset, access)
         yield {"dataset": selected.model_dump(mode="json", by_alias=True)}
         for member in selected.spec.members:
-            yield from self.trajectories.export_snapshot(member.snapshot_id, who)
+            yield from self.trajectories.export_snapshot(member.snapshot_id, access)
 
-    def run(self, dataset: str, integration: TrainingIntegration, config: Json, who) -> TrainingRun:
-        if who.role != "researcher":
-            raise Forbidden("researcher training authority required")
-        selected = self.get_dataset(dataset, who)
+    def run(self, dataset: str, integration: TrainingIntegration, config: Json, access) -> TrainingRun:
+        access.require("training.execute")
+        selected = self.get_dataset(dataset, access)
         json.dumps(config, allow_nan=False)
         integration.validate(selected)
         output = integration.train(selected, config)
@@ -329,7 +325,7 @@ class TrainingRepository:
         with self.store.transaction() as db:
             existing = db.execute(
                 "SELECT body FROM training_runs WHERE id=? AND tenant=?",
-                (recorded.metadata.id, who.tenant),
+                (recorded.metadata.id, access.tenant),
             ).fetchone()
             if existing is not None and existing["body"] != body:
                 raise Conflict("training-run identity conflicts with stored content")
@@ -338,7 +334,7 @@ class TrainingRepository:
                     "INSERT INTO training_runs VALUES (?,?,?,?,?)",
                     (
                         recorded.metadata.id,
-                        who.tenant,
+                        access.tenant,
                         selected.metadata.id,
                         body,
                         datetime.now(UTC).timestamp(),
@@ -346,25 +342,23 @@ class TrainingRepository:
                 )
         return recorded
 
-    def get_run(self, training_run: str, who) -> TrainingRun:
-        if who.role not in ("researcher", "scorer"):
-            raise Forbidden("training-run authority required")
+    def get_run(self, training_run: str, access) -> TrainingRun:
+        access.require("training.read")
         with self.store.transaction() as db:
             row = db.execute(
                 "SELECT body FROM training_runs WHERE id=? AND tenant=?",
-                (training_run, who.tenant),
+                (training_run, access.tenant),
             ).fetchone()
         if row is None:
             raise Forbidden("training run unavailable")
         return TrainingRun.model_validate_json(row["body"])
 
-    def list_runs(self, who, *, dataset=None, limit=100) -> tuple[TrainingRun, ...]:
-        if who.role not in ("researcher", "scorer"):
-            raise Forbidden("training-run authority required")
+    def list_runs(self, access, *, dataset=None, limit=100) -> tuple[TrainingRun, ...]:
+        access.require("training.read")
         if not 1 <= limit <= 1000:
             raise ValueError("invalid training-run page size")
         query = "SELECT body FROM training_runs WHERE tenant=?"
-        values = [who.tenant]
+        values = [access.tenant]
         if dataset is not None:
             query += " AND dataset=?"
             values.append(dataset)

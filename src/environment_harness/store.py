@@ -13,8 +13,8 @@ from collections import Counter
 from contextlib import contextmanager
 from pathlib import Path
 
-from .contracts import Principal, ScoreReport
-from .errors import Conflict, Forbidden
+from .contracts import ScoreReport
+from .errors import Conflict, Forbidden, Unauthenticated
 
 
 def encode(value) -> str:
@@ -92,7 +92,11 @@ CREATE TABLE IF NOT EXISTS training_runs (
 CREATE TABLE IF NOT EXISTS artifact_aliases (
  environment TEXT NOT NULL, alias TEXT NOT NULL, artifact TEXT NOT NULL, PRIMARY KEY(environment,alias));
 CREATE TABLE IF NOT EXISTS credentials (
- hash TEXT PRIMARY KEY, principal TEXT NOT NULL, expires REAL NOT NULL, revoked INTEGER NOT NULL DEFAULT 0);
+ hash TEXT PRIMARY KEY, tenant TEXT NOT NULL, subject TEXT NOT NULL, policy TEXT NOT NULL,
+ session TEXT, participant TEXT, generation INTEGER NOT NULL DEFAULT 0,
+ expires REAL NOT NULL, revoked INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS schema_migrations (
+ version TEXT PRIMARY KEY, applied REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS splits (
  tenant TEXT NOT NULL, environment TEXT NOT NULL, scenario TEXT NOT NULL,
  time_boundary TEXT NOT NULL, split TEXT NOT NULL,
@@ -154,6 +158,13 @@ CREATE TRIGGER IF NOT EXISTS training_runs_no_delete BEFORE DELETE ON training_r
 """
 
 
+#: Numbered local schema corrections applied after ``SCHEMA`` is created.
+#: ``005_credential_policies`` is the breaking credential migration described in
+#: ``docs/AUTHENTICATION.md``: every pre-0.3.0rc1 row carried the discarded
+#: four-role principal, so the migration deletes all of them and forces reissue.
+LOCAL_MIGRATIONS = ("005_credential_policies",)
+
+
 class EvidenceStore:
     def __init__(self, root: str | Path):
         self.root = Path(root).resolve()
@@ -163,7 +174,33 @@ class EvidenceStore:
         with self.connect() as db:
             db.execute("PRAGMA journal_mode=WAL")
             db.executescript(SCHEMA)
+        self.migrate()
         os.chmod(self.db_path, 0o600)
+
+    def migrate(self):
+        """Apply numbered local corrections exactly once, transactionally."""
+
+        with self.transaction() as db:
+            applied = {
+                row["version"] for row in db.execute("SELECT version FROM schema_migrations").fetchall()
+            }
+            for version in LOCAL_MIGRATIONS:
+                if version in applied:
+                    continue
+                if version == "005_credential_policies":
+                    columns = {row["name"] for row in db.execute("PRAGMA table_info(credentials)").fetchall()}
+                    if "principal" in columns:
+                        # Legacy rows persist the removed four-role Principal and
+                        # cannot be reinterpreted as a server-owned policy.
+                        db.execute("DROP TABLE credentials")
+                        db.executescript(
+                            "CREATE TABLE credentials ("
+                            " hash TEXT PRIMARY KEY, tenant TEXT NOT NULL, subject TEXT NOT NULL,"
+                            " policy TEXT NOT NULL, session TEXT, participant TEXT,"
+                            " generation INTEGER NOT NULL DEFAULT 0, expires REAL NOT NULL,"
+                            " revoked INTEGER NOT NULL DEFAULT 0);"
+                        )
+                db.execute("INSERT INTO schema_migrations VALUES (?,?)", (version, time.time()))
 
     def connect(self):
         db = sqlite3.connect(self.db_path, timeout=30)
@@ -189,23 +226,24 @@ class EvidenceStore:
     def _environment_row(self, db, environment):
         return db.execute("SELECT * FROM environments WHERE id=?", (environment,)).fetchone()
 
-    def environment(self, db, environment: str, who: Principal, roles=None):
+    def environment(self, db, environment: str, access, action="session.read"):
+        """Resolve one session row for a private access context.
+
+        Missing and inaccessible sessions deliberately collapse into the same
+        error so an out-of-scope credential cannot enumerate resources.
+        """
+
+        access.require(action)
         row = self._environment_row(db, environment)
-        if (
-            not row
-            or row["tenant"] != who.tenant
-            or (who.environment is not None and who.environment != environment)
-        ):
+        if not row or row["tenant"] != access.tenant or not access.scoped_to(environment):
             raise Forbidden("environment unavailable")
-        if roles and who.role not in roles:
-            raise Forbidden("role cannot perform this operation")
-        if who.role == "agent":
-            p = json.loads(row["participants"]).get(who.participant)
+        if access.participant is not None:
+            p = json.loads(row["participants"]).get(access.participant)
             if (
                 not p
                 or not p["active"]
-                or p["generation"] != who.generation
-                or p["controller"] != who.subject
+                or p["generation"] != access.generation
+                or p["controller"] != access.subject
             ):
                 raise Forbidden("participant authority expired")
         return row
@@ -269,13 +307,18 @@ class EvidenceStore:
             )
         return event
 
-    def events(self, environment, who, after=0, limit=200):
+    def events(self, environment, access, after=0, limit=200):
         if after < 0 or not 1 <= limit <= 1000:
             raise ValueError("invalid event page")
         with self.transaction() as db:
-            self.environment(db, environment, who)
+            self.environment(
+                db,
+                environment,
+                access,
+                "evidence.read.full" if access.full_evidence else "evidence.read.scoped",
+            )
             # Filter in SQL before limiting. Cursors reveal ordering, never hidden payloads.
-            rows = self._event_page(db, environment, after, who, limit)
+            rows = self._event_page(db, environment, after, access, limit)
             events = [
                 dict(
                     environment=r["environment"],
@@ -301,35 +344,36 @@ class EvidenceStore:
                         event["event_time"] = int(timestamp)
             return events
 
-    def _event_page(self, db, environment, after, who, limit):
+    def _event_page(self, db, environment, after, access, limit):
         return db.execute(
             """SELECT * FROM events WHERE environment=? AND seq>? AND
-            (? IN ('researcher','scorer','worker') OR audience='["*"]' OR
+            (? = 1 OR audience='["*"]' OR
              EXISTS(SELECT 1 FROM json_each(audience) WHERE value=?)) ORDER BY seq LIMIT ?""",
-            (environment, after, who.role, who.participant, limit),
+            (environment, after, int(access.full_evidence), access.participant, limit),
         ).fetchall()
 
-    def replay(self, environment, who):
+    def replay(self, environment, access):
         cursor = 0
-        while page := self.events(environment, who, cursor, 1000):
+        while page := self.events(environment, access, cursor, 1000):
             yield from page
             cursor = page[-1]["seq"]
 
-    def activity(self, who, after=0, limit=200, *, experiment=None, environment=None):
+    def activity(self, access, after=0, limit=200, *, experiment=None, environment=None):
         from .activity import events
 
         return events(
             self,
-            who,
+            access,
             after,
             limit,
             experiment=experiment,
             environment=environment,
         )
 
-    def activity_snapshot(self, who):
-        if who.role not in ("researcher", "worker"):
-            raise Forbidden("researcher activity authority required")
+    def activity_hierarchy(self, access):
+        """Current ownership hierarchy used by Overview and reconnect recovery."""
+
+        access.require("activity.read")
 
         def session_record(row):
             participants = list(json.loads(row["participants_json"])) if row["participants_json"] else []
@@ -366,12 +410,12 @@ class EvidenceStore:
                 "SELECT r.*,e.revision,e.participants AS participants_json,e.manifest AS manifest_json "
                 "FROM session_runs r LEFT JOIN environments e ON e.id=r.environment "
                 "WHERE r.tenant=? ORDER BY r.created,r.scenario,r.trial",
-                (who.tenant,),
+                (access.tenant,),
             ).fetchall()
             records = {row["environment"]: session_record(row) for row in run_rows}
             experiments = []
             for experiment in db.execute(
-                "SELECT * FROM experiments WHERE tenant=? ORDER BY created DESC", (who.tenant,)
+                "SELECT * FROM experiments WHERE tenant=? ORDER BY created DESC", (access.tenant,)
             ):
                 children = [
                     records[row["environment"]] for row in run_rows if row["experiment"] == experiment["id"]
@@ -449,7 +493,7 @@ class EvidenceStore:
             for row in db.execute(
                 "SELECT * FROM environments e WHERE tenant=? AND NOT EXISTS "
                 "(SELECT 1 FROM session_runs r WHERE r.environment=e.id) ORDER BY id DESC",
-                (who.tenant,),
+                (access.tenant,),
             ):
                 manifest = json.loads(row["manifest"])
                 standalone.append(
@@ -476,7 +520,7 @@ class EvidenceStore:
                 "failed": sum(row["status"] == "failed" for row in records.values()),
             }
             cursor = db.execute(
-                "SELECT coalesce(max(id),0) FROM event_outbox WHERE tenant=?", (who.tenant,)
+                "SELECT coalesce(max(id),0) FROM event_outbox WHERE tenant=?", (access.tenant,)
             ).fetchone()[0]
             return {
                 "summary": summary,
@@ -485,12 +529,11 @@ class EvidenceStore:
                 "cursor": cursor,
             }
 
-    def verify(self, environment, who):
-        if who.role not in ("researcher", "scorer"):
-            raise Forbidden("full evidence authority required")
+    def verify(self, environment, access):
+        access.require("evidence.read.full")
         previous = "0" * 64
         count = 0
-        for event in self.replay(environment, who):
+        for event in self.replay(environment, access):
             claimed = event.pop("hash")
             if event["previous"] != previous or digest(event) != claimed:
                 raise Conflict("evidence integrity failure")
@@ -498,35 +541,95 @@ class EvidenceStore:
             count += 1
         return {"events": count, "head": previous}
 
-    def issue(self, principal: Principal, ttl=3600):
-        # Administrative embedding API only. Never exposed as an unauthenticated route.
+    def _issue(self, context, ttl):
+        """Persist one server-owned policy beside the hash of an opaque token.
+
+        Client-supplied permissions are never accepted; only the policy name and
+        its resource constraints are stored.
+        """
+
+        from .access import ISSUABLE_POLICIES
+
+        if context.policy not in ISSUABLE_POLICIES:
+            raise Forbidden("this access policy cannot be issued as a credential")
         if not 1 <= ttl <= 86400 * 365:
             raise ValueError("invalid token lifetime")
         token = secrets.token_urlsafe(32)
         with self.transaction() as db:
             db.execute(
-                "INSERT INTO credentials VALUES (?,?,?,0)",
-                (hashlib.sha256(token.encode()).hexdigest(), principal.model_dump_json(), time.time() + ttl),
+                "INSERT INTO credentials VALUES (?,?,?,?,?,?,?,?,0)",
+                (
+                    hashlib.sha256(token.encode()).hexdigest(),
+                    context.tenant,
+                    context.subject,
+                    context.policy,
+                    context.session,
+                    context.participant,
+                    context.generation,
+                    time.time() + ttl,
+                ),
             )
         return token
 
+    def issue_management(self, tenant, subject="management", *, ttl=3600):
+        """Trusted embedding API and ``environment-harness token`` only."""
+
+        from .access import _AccessContext
+
+        return self._issue(_AccessContext(tenant=tenant, subject=subject, policy="management"), ttl)
+
+    def issue_viewer(self, tenant, subject="loopback-viewer", *, ttl=3600):
+        """Read-only credential delivered to the loopback viewer page."""
+
+        from .access import _AccessContext
+
+        return self._issue(_AccessContext(tenant=tenant, subject=subject, policy="viewer"), ttl)
+
+    def issue_participant(self, tenant, subject, *, session, participant, generation, ttl=3600):
+        """Credential constrained to one session, participant, and generation."""
+
+        from .access import _AccessContext
+
+        return self._issue(
+            _AccessContext(
+                tenant=tenant,
+                subject=subject,
+                policy="participant",
+                session=session,
+                participant=participant,
+                generation=generation,
+            ),
+            ttl,
+        )
+
     def authenticate(self, token):
+        """Resolve an opaque bearer credential into a private access context."""
+
+        from .access import _AccessContext
+
         with self.transaction() as db:
             row = db.execute(
                 "SELECT * FROM credentials WHERE hash=?", (hashlib.sha256(token.encode()).hexdigest(),)
             ).fetchone()
             if not row or row["revoked"] or row["expires"] <= time.time():
-                raise Forbidden("credential expired or invalid")
-            return Principal.model_validate_json(row["principal"])
+                raise Unauthenticated("credential expired or invalid")
+            return _AccessContext(
+                tenant=row["tenant"],
+                subject=row["subject"],
+                policy=row["policy"],
+                session=row["session"],
+                participant=row["participant"],
+                generation=row["generation"],
+            )
 
-    def artifact(self, environment, who, data: bytes, audience=(), media_type="application/octet-stream"):
+    def artifact(self, environment, access, data: bytes, audience=(), media_type="application/octet-stream"):
         with self.transaction() as db:
-            row = self.environment(db, environment, who)
+            row = self.environment(db, environment, access, "artifact.write")
             if len(data) > json.loads(row["manifest"])["policy"]["max_artifact_bytes"]:
                 raise Conflict("artifact size limit exceeded")
             participants = json.loads(row["participants"])
-            if who.role == "agent":
-                audience = (who.participant,)
+            if access.participant is not None:
+                audience = (access.participant,)
             elif any(p not in participants and p != "*" for p in audience):
                 raise ValueError("unknown artifact audience")
             key = uid()
@@ -570,9 +673,9 @@ class EvidenceStore:
     def _read_artifact(self, environment, key):
         return (self.root / "artifacts" / environment / key).read_bytes()
 
-    def read_artifact(self, environment, who, key):
+    def read_artifact(self, environment, access, key):
         with self.transaction() as db:
-            self.environment(db, environment, who)
+            self.environment(db, environment, access, "artifact.read")
             row = db.execute(
                 "SELECT * FROM artifacts WHERE environment=? AND id=?", (environment, key)
             ).fetchone()
@@ -585,16 +688,16 @@ class EvidenceStore:
             if not row:
                 raise Forbidden("artifact unavailable")
             audience = json.loads(row["audience"])
-            if who.role == "agent" and "*" not in audience and who.participant not in audience:
+            if not access.full_evidence and "*" not in audience and access.participant not in audience:
                 raise Forbidden("artifact unavailable")
             data = self._read_artifact(environment, row["id"])
             if hashlib.sha256(data).hexdigest() != row["sha256"]:
                 raise Conflict("artifact integrity failure")
             return data, row["media_type"]
 
-    def report(self, environment, who, report: ScoreReport):
+    def report(self, environment, access, report: ScoreReport):
         with self.transaction() as db:
-            row = self.environment(db, environment, who, ("researcher", "scorer"))
+            row = self.environment(db, environment, access, "score.write")
             manifest = json.loads(row["manifest"])
             if f"{report.scorer}@{report.version}" not in manifest["scoring_versions"]:
                 raise Conflict("scorer version is not frozen in experiment")
@@ -685,9 +788,9 @@ class EvidenceStore:
             )
             return envelope | {"hash": digest(envelope)}
 
-    def reports(self, environment, who):
+    def reports(self, environment, access):
         with self.transaction() as db:
-            self.environment(db, environment, who, ("researcher", "scorer"))
+            self.environment(db, environment, access, "score.read")
             return [
                 dict(
                     environment=environment,

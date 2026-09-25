@@ -5,32 +5,30 @@ import json
 import sys
 from pathlib import Path
 
-from environment_harness import AgentSpec, EnvironmentSession, EvidenceStore, ExperimentSpec, Principal
+from environment_harness import EnvironmentHarness, EvidenceStore, Scenario
 from environment_harness.adapters.programs import CommandAgent
 from environment_harness.contracts import RunPolicy
 from environment_harness.fixtures import SyntheticEnvironment
-from environment_harness.runner import run
 
 
 def main(directory):
     program = Path(__file__).with_name("command_agent.py").resolve()
-    environment = SyntheticEnvironment()
-    session = EnvironmentSession(EvidenceStore(directory), environment)
-    who = Principal(tenant="local", subject="example", role="researcher")
-    spec = ExperimentSpec(
-        environment=environment.spec,
-        participants=(AgentSpec(id="custom", implementation="threshold-command@1", policy_version="1"),),
+    harness = EnvironmentHarness(
+        EvidenceStore(directory),
+        environment_factory=SyntheticEnvironment,
+        agent_factories={
+            "custom": lambda: CommandAgent([sys.executable, str(program)], "threshold-command@1")
+        },
         policy=RunPolicy(max_turns=4),
     )
-    environment = session.create(spec, who)["id"]
-    agent = CommandAgent([sys.executable, str(program)], "threshold-command@1")
-    result = run(session, environment, who, {"custom": agent}, turns=4)
+    session = harness.run(Scenario(id="command-agent", input={}), turns=4)
+    record = session.record()
     print(
         json.dumps(
             {
-                "environment": environment,
-                "revision": result["revision"],
-                "status": result["status"],
+                "environment": session.id,
+                "revision": record["revision"],
+                "status": record["status"],
                 "synthetic": True,
             },
             indent=2,

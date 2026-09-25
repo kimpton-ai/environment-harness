@@ -3,6 +3,9 @@ from uuid import uuid4
 
 import pytest
 
+from environment_harness.access import _AccessContext
+from environment_harness.runtime import _SessionRuntime
+
 
 @pytest.mark.skipif(
     not os.environ.get("ENVIRONMENT_HARNESS_POSTGRES_URL"),
@@ -44,7 +47,7 @@ def test_postgres_persists_and_lists_trajectory_snapshot_boundaries():
     import psycopg
     from psycopg import sql
 
-    from environment_harness import AgentSpec, EnvironmentSession, ExperimentSpec, Principal
+    from environment_harness import AgentSpec, ExperimentSpec
     from environment_harness.fixtures import SyntheticEnvironment
     from environment_harness.hosted import PostgresEvidenceStore
     from environment_harness.trajectories import TrajectoryRepository
@@ -61,9 +64,9 @@ def test_postgres_persists_and_lists_trajectory_snapshot_boundaries():
     store = PostgresEvidenceStore(dsn, Objects(), schema=schema)
     try:
         store.initialize()
-        who = Principal(tenant="tenant", subject="researcher", role="researcher")
+        who = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
         environment = SyntheticEnvironment()
-        session = EnvironmentSession(store, environment)
+        session = _SessionRuntime(store, environment)
         environment_id = session.create(
             ExperimentSpec(
                 environment=environment.spec,
@@ -91,11 +94,10 @@ def test_explicit_tenant_erasure_preserves_other_tenants_and_refuses_active_writ
     import psycopg
     from psycopg import sql
 
-    from environment_harness.contracts import AgentSpec, ExperimentSpec, Principal
+    from environment_harness.contracts import AgentSpec, ExperimentSpec
     from environment_harness.errors import Conflict
     from environment_harness.fixtures import SyntheticEnvironment
     from environment_harness.hosted import PostgresEvidenceStore
-    from environment_harness.runtime import EnvironmentSession
     from environment_harness.trajectories import SourceRegistration, TrajectoryRepository
 
     class Objects:
@@ -118,13 +120,13 @@ def test_explicit_tenant_erasure_preserves_other_tenants_and_refuses_active_writ
     try:
         store.initialize()
         env = SyntheticEnvironment()
-        session = EnvironmentSession(store, env)
+        session = _SessionRuntime(store, env)
         experiment = ExperimentSpec(
             environment=env.spec,
             participants=(AgentSpec(id="a", implementation="external", policy_version="1"),),
         )
-        first = Principal(tenant="first", subject="owner", role="researcher")
-        other = Principal(tenant="other", subject="owner", role="researcher")
+        first = _AccessContext(tenant="first", subject="owner", policy="trusted-local")
+        other = _AccessContext(tenant="other", subject="owner", policy="trusted-local")
         a, b = session.create(experiment, first)["id"], session.create(experiment, other)["id"]
         trajectories = TrajectoryRepository(store)
         trajectories.freeze(a, first)

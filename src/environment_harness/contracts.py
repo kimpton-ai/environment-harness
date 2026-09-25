@@ -237,8 +237,12 @@ class ActivitySummary(Record):
     failed: int = Field(ge=0)
 
 
-class ActivitySnapshot(Record):
-    """Authoritative recovery snapshot for the live activity hierarchy."""
+class ActivityHierarchy(Record):
+    """Authoritative recovery projection for the live ownership hierarchy.
+
+    "Snapshot" names the immutable ``TrajectorySnapshot`` resource, so the
+    activity projection uses "hierarchy" instead.
+    """
 
     summary: ActivitySummary
     experiments: tuple[ActivityExperiment, ...] = ()
@@ -246,13 +250,22 @@ class ActivitySnapshot(Record):
     cursor: int = Field(ge=0)
 
 
-class Principal(Record):
-    tenant: str
-    subject: str
-    role: Literal["researcher", "agent", "scorer", "worker"]
-    environment: str | None = None
-    participant: str | None = None
-    generation: int = 0
+class BranchRequest(Record):
+    """Strict command that creates one child Session from a Checkpoint.
+
+    There is no separate Branch resource: the child Session carries the parent
+    Session, Checkpoint, lineage, and intervention references.
+    """
+
+    checkpoint: str = Field(min_length=1, max_length=200)
+    interventions: Json = Field(default_factory=dict)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=200)
+    turns: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def serializable(self):
+        json.dumps(self.interventions, allow_nan=False)
+        return self
 
 
 class Action(Record):

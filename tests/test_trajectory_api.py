@@ -1,7 +1,10 @@
+from _credentials import bearer
 from fastapi.testclient import TestClient
 
-from environment_harness import AgentSpec, EnvironmentSession, EvidenceStore, ExperimentSpec, Principal
+from environment_harness import AgentSpec, EvidenceStore, ExperimentSpec
+from environment_harness.access import _AccessContext
 from environment_harness.fixtures import SyntheticEnvironment
+from environment_harness.runtime import _SessionRuntime
 from environment_harness.server import create_app
 from environment_harness.trajectories import SourceRecord, SourceRegistration, TrajectoryRepository
 
@@ -9,8 +12,8 @@ from environment_harness.trajectories import SourceRecord, SourceRegistration, T
 def test_authenticated_api_lists_and_reads_portable_trajectories(tmp_path):
     environment = SyntheticEnvironment()
     store = EvidenceStore(tmp_path)
-    session = EnvironmentSession(store, environment)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    session = _SessionRuntime(store, environment)
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     environment_id = session.create(
         ExperimentSpec(
             environment=environment.spec,
@@ -26,7 +29,7 @@ def test_authenticated_api_lists_and_reads_portable_trajectories(tmp_path):
         researcher,
     )["id"]
     client = TestClient(create_app(session), base_url="http://testserver")
-    headers = {"Authorization": "Bearer " + store.issue(researcher)}
+    headers = {"Authorization": "Bearer " + bearer(store, researcher)}
 
     listed = client.get("/v1/trajectories", headers=headers)
     paged = client.get("/v1/trajectories?limit=1", headers=headers)
@@ -44,8 +47,8 @@ def test_authenticated_api_lists_and_reads_portable_trajectories(tmp_path):
 def test_trajectory_records_are_cursor_paged_without_materializing_the_resource(tmp_path):
     environment = SyntheticEnvironment()
     store = EvidenceStore(tmp_path)
-    session = EnvironmentSession(store, environment)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    session = _SessionRuntime(store, environment)
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     environment_id = session.create(
         ExperimentSpec(
             environment=environment.spec,
@@ -55,7 +58,7 @@ def test_trajectory_records_are_cursor_paged_without_materializing_the_resource(
     )["id"]
     session.observe(environment_id, researcher, "alice")
     client = TestClient(create_app(session), base_url="http://testserver")
-    headers = {"Authorization": "Bearer " + store.issue(researcher)}
+    headers = {"Authorization": "Bearer " + bearer(store, researcher)}
 
     first = client.get(f"/v1/trajectories/{environment_id}/records?limit=1", headers=headers)
     second = client.get(
@@ -72,8 +75,8 @@ def test_trajectory_records_are_cursor_paged_without_materializing_the_resource(
 def test_trajectory_snapshot_boundaries_can_be_listed_for_the_viewer(tmp_path):
     environment = SyntheticEnvironment()
     store = EvidenceStore(tmp_path)
-    session = EnvironmentSession(store, environment)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    session = _SessionRuntime(store, environment)
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     environment_id = session.create(
         ExperimentSpec(
             environment=environment.spec,
@@ -84,7 +87,7 @@ def test_trajectory_snapshot_boundaries_can_be_listed_for_the_viewer(tmp_path):
     session.observe(environment_id, researcher, "alice")
     frozen = TrajectoryRepository(store).freeze(environment_id, researcher)
     client = TestClient(create_app(session), base_url="http://testserver")
-    headers = {"Authorization": "Bearer " + store.issue(researcher)}
+    headers = {"Authorization": "Bearer " + bearer(store, researcher)}
 
     response = client.get(f"/v1/trajectory-snapshots?trajectory={environment_id}", headers=headers)
 
@@ -96,9 +99,9 @@ def test_trajectory_snapshot_boundaries_can_be_listed_for_the_viewer(tmp_path):
 def test_source_registration_route_exists_only_in_explicit_ingestion_mode(tmp_path):
     environment = SyntheticEnvironment()
     store = EvidenceStore(tmp_path)
-    session = EnvironmentSession(store, environment)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
-    headers = {"Authorization": "Bearer " + store.issue(researcher)}
+    session = _SessionRuntime(store, environment)
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
+    headers = {"Authorization": "Bearer " + bearer(store, researcher)}
     registration = {
         "namespace": "com.example.simulator",
         "run_id": "run-api",
@@ -124,8 +127,8 @@ def test_source_registration_route_exists_only_in_explicit_ingestion_mode(tmp_pa
 def test_read_only_server_can_inspect_but_not_mutate_a_registered_source(tmp_path):
     environment = SyntheticEnvironment()
     store = EvidenceStore(tmp_path)
-    session = EnvironmentSession(store, environment)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    session = _SessionRuntime(store, environment)
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     receipt = TrajectoryRepository(store).register_source(
         SourceRegistration(
             namespace="com.example.simulator",
@@ -138,7 +141,7 @@ def test_read_only_server_can_inspect_but_not_mutate_a_registered_source(tmp_pat
         researcher,
     )
     client = TestClient(create_app(session), base_url="http://testserver")
-    headers = {"Authorization": "Bearer " + store.issue(researcher)}
+    headers = {"Authorization": "Bearer " + bearer(store, researcher)}
 
     inspected = client.get(f"/v1/trajectory-sources/{receipt.id}/status", headers=headers)
 
@@ -152,9 +155,9 @@ def test_read_only_server_can_inspect_but_not_mutate_a_registered_source(tmp_pat
 def test_configured_ingestion_api_records_and_finalizes_an_imported_trajectory(tmp_path):
     environment = SyntheticEnvironment()
     store = EvidenceStore(tmp_path)
-    session = EnvironmentSession(store, environment)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
-    headers = {"Authorization": "Bearer " + store.issue(researcher)}
+    session = _SessionRuntime(store, environment)
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
+    headers = {"Authorization": "Bearer " + bearer(store, researcher)}
     client = TestClient(
         create_app(session, trajectory_ingestion=True),
         base_url="http://testserver",
@@ -218,8 +221,8 @@ def test_configured_ingestion_api_records_and_finalizes_an_imported_trajectory(t
 def test_evaluation_session_can_freeze_and_export_snapshot_without_training_entitlement(tmp_path):
     environment = SyntheticEnvironment()
     store = EvidenceStore(tmp_path)
-    session = EnvironmentSession(store, environment)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    session = _SessionRuntime(store, environment)
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     environment_id = session.create(
         ExperimentSpec(
             environment=environment.spec,
@@ -229,7 +232,7 @@ def test_evaluation_session_can_freeze_and_export_snapshot_without_training_enti
         ),
         researcher,
     )["id"]
-    headers = {"Authorization": "Bearer " + store.issue(researcher)}
+    headers = {"Authorization": "Bearer " + bearer(store, researcher)}
     client = TestClient(create_app(session), base_url="http://testserver")
 
     frozen = client.post(f"/v1/trajectories/{environment_id}/snapshots", headers=headers)

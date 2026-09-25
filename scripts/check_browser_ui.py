@@ -12,7 +12,8 @@ import time
 import urllib.request
 from pathlib import Path
 
-from environment_harness import EnvironmentHarness, EvidenceStore, Principal, Scenario, TrajectoryRepository
+from environment_harness import EnvironmentHarness, EvidenceStore, Scenario
+from environment_harness.access import trusted_local
 from environment_harness.fixtures import SyntheticAgent, SyntheticEnvironment
 from environment_harness.showcase import create_synthetic_showcase
 
@@ -38,7 +39,7 @@ def wait_for(url: str, deadline: float) -> None:
 
 def create_sessions(root: Path) -> str:
     store = EvidenceStore(root)
-    who = Principal(tenant="local", subject="browser-test", role="researcher")
+    who = trusted_local("local", "browser-test")
     participants = (
         "alice",
         "bob",
@@ -58,12 +59,13 @@ def create_sessions(root: Path) -> str:
         created = create_synthetic_showcase(store, who, turns=turns, participants=participants)
         if not trajectory:
             trajectory = created["id"]
-    EnvironmentHarness(
+    harness = EnvironmentHarness(
         store,
         environment_factory=SyntheticEnvironment,
         agent_factories={"agent": SyntheticAgent},
         max_concurrency=2,
-    ).experiment(
+    )
+    harness.experiment(
         "Support response evaluation",
         [
             Scenario(id="easy-case", input={}, metadata={"name": "Routine request"}),
@@ -72,7 +74,7 @@ def create_sessions(root: Path) -> str:
         trials=2,
         turns=2,
     ).run()
-    TrajectoryRepository(store).freeze(trajectory, who)
+    harness.sources().freeze(trajectory)
     return trajectory
 
 

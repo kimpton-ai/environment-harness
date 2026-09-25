@@ -192,17 +192,15 @@ linked execution segments, while collection, execution, termination, and verifie
 independent states.
 
 ```python
-from environment_harness import EvidenceStore, Principal, TrajectoryRepository
-
-store = EvidenceStore(".local/my-environment")
-researcher = Principal(tenant="local", subject="researcher", role="researcher")
-trajectories = TrajectoryRepository(store)
-
-trajectory = trajectories.get(environment_session.id, researcher)
-snapshot = trajectories.freeze(environment_session.id, researcher)
-for row in trajectories.export_snapshot(snapshot.metadata.id, researcher):
+trajectory = environment_session.trajectory()
+snapshot = environment_session.snapshot()
+for row in harness.sources().export_snapshot(snapshot.metadata.id):
     print(row)
 ```
+
+The in-process SDK is a trusted local interface and needs no credential. Remote callers send only
+an opaque bearer credential; the server resolves it to one of its fixed management, viewer, or
+participant policies. See [Authentication](docs/AUTHENTICATION.md).
 
 The same interface accepts hash-chained historical records from a namespaced external source.
 Identical retries are idempotent, conflicting identities fail, and source health exposes the
@@ -226,6 +224,7 @@ the browser server never executes them. See [Frozen datasets and local training 
 | Understand checkpoints, branches, and coordinated sessions | [Coordinated sessions](https://github.com/kimpton-ai/environment-harness/blob/main/docs/coordinated-sessions.md) |
 | Branch and compare environment sessions | [Branch comparison example](https://github.com/kimpton-ai/environment-harness/blob/main/examples/branch_comparison.py) |
 | Run environments behind a trusted supervisor | [Remote workers and external agents](https://github.com/kimpton-ai/environment-harness/blob/main/docs/REMOTE-WORKERS.md) |
+| Authenticate the HTTP API and constrain credentials | [Authentication](https://github.com/kimpton-ai/environment-harness/blob/main/docs/AUTHENTICATION.md) |
 | Use the authenticated HTTP API | [API reference](https://github.com/kimpton-ai/environment-harness/blob/main/docs/API-REFERENCE.md) · [Protocol semantics](https://github.com/kimpton-ai/environment-harness/blob/main/docs/PROTOCOL.md) |
 | Use the TypeScript client | [TypeScript package](https://github.com/kimpton-ai/environment-harness/blob/main/packages/typescript/README.md) |
 | Check adapter and isolation boundaries | [Adapters](https://github.com/kimpton-ai/environment-harness/blob/main/docs/ADAPTERS.md) |

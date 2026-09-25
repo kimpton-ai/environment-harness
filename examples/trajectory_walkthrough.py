@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import argparse
 
-from environment_harness import AgentSpec, EnvironmentSession, EvidenceStore, ExperimentSpec, Principal
-from environment_harness.fixtures import SyntheticEnvironment
+from environment_harness import EnvironmentHarness, EvidenceStore, Scenario
+from environment_harness.fixtures import SyntheticAgent, SyntheticEnvironment
 from environment_harness.store import encode
 from environment_harness.trajectories import (
     SourceRecord,
     SourceRegistration,
     SourceStatusUpdate,
-    TrajectoryRepository,
 )
 
 
@@ -21,23 +20,15 @@ def main() -> None:
     args = parser.parse_args()
 
     store = EvidenceStore(args.store)
-    researcher = Principal(tenant="local", subject="local-researcher", role="researcher")
-    environment = SyntheticEnvironment()
-    session = EnvironmentSession(store, environment)
-    native = session.create(
-        ExperimentSpec(
-            environment=environment.spec,
-            participants=(AgentSpec(id="alice", implementation="synthetic", policy_version="1"),),
-        ),
-        researcher,
-    )["id"]
-    lease = session.lease(native, researcher, "trajectory-walkthrough")
-    session.control(native, researcher, lease, "pause")
-    session.resume(native, researcher, lease)
-    session.release(native, researcher, lease)
+    harness = EnvironmentHarness(
+        store,
+        environment_factory=SyntheticEnvironment,
+        agent_factories={"alice": SyntheticAgent},
+    )
+    native = harness.run(Scenario(id="walkthrough", input={}), turns=2)
 
-    trajectories = TrajectoryRepository(store)
-    source = trajectories.register_source(
+    sources = harness.sources()
+    source = sources.register(
         SourceRegistration(
             namespace="com.example.simulator",
             run_id="historical-run-1",
@@ -45,8 +36,7 @@ def main() -> None:
             environment={"id": "example-simulator", "version": "1"},
             participants=("alice",),
             purpose="evaluation",
-        ),
-        researcher,
+        )
     )
     record = SourceRecord.create(
         id="historical-outcome-1",
@@ -63,8 +53,8 @@ def main() -> None:
         data={"result": "success"},
         audience=("*",),
     )
-    trajectories.ingest(source.id, (record,), researcher)
-    trajectories.update_source_status(
+    sources.ingest(source.id, (record,))
+    sources.update_status(
         source.id,
         SourceStatusUpdate(
             collection_state="complete",
@@ -75,12 +65,11 @@ def main() -> None:
             terminal_hash=record.source_hash,
             backlog=0,
         ),
-        researcher,
     )
 
-    native_resource = trajectories.get(native, researcher)
-    imported_resource = trajectories.get(source.id, researcher)
-    snapshot = trajectories.freeze(source.id, researcher)
+    native_resource = native.trajectory()
+    imported_resource = sources.trajectory(source.id)
+    snapshot = sources.freeze(source.id)
     print(
         encode(
             {
@@ -92,7 +81,7 @@ def main() -> None:
             }
         )
     )
-    for row in trajectories.export_snapshot(snapshot.metadata.id, researcher):
+    for row in sources.export_snapshot(snapshot.metadata.id):
         print(encode(row))
 
 
