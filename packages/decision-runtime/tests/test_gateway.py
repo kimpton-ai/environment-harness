@@ -262,3 +262,135 @@ def test_generation_cancellation_happens_before_transport():
     with pytest.raises(ProviderFailure) as caught:
         client({"messages": []}, operation_id="gen-4", maximum_charge_micros=5, cancel=cancel)
     assert not caught.value.submitted and caught.value.uncharged and calls == []
+
+
+def _generation_client(transport):
+    return EvalRouterGenerationClient(
+        endpoint="https://gateway.example.test/v1/generate",
+        run_id="run-1",
+        episode_id="episode-1",
+        model="astra-v1",
+        workspace_id="workspace-1",
+        unit_id="unit-1",
+        generation=1,
+        gateway_token="gateway-secret",
+        transport=transport,
+    )
+
+
+def test_unbilled_generation_rejection_stays_retryable_instead_of_reading_as_an_overcharge():
+    """A proven-unsubmitted, unbilled rejection must keep its retry classification.
+
+    The charge bound was checked before the status branch, so a rejection with
+    no charge at all surfaced as a non-retryable "charge exceeded bound".
+    """
+
+    def transport(endpoint, headers, body, timeout):
+        return {
+            "protocol_version": "evalrouter.generation.v1",
+            "operation_id": "generation-1",
+            "status": "rejected",
+            "error": {
+                "code": "upstream_unavailable",
+                "message": "provider refused before submission",
+                "submitted": False,
+                "charged": False,
+            },
+        }
+
+    with pytest.raises(JevProviderFailure) as raised:
+        _generation_client(transport)(
+            {"messages": [{"role": "user", "content": "hello"}]},
+            operation_id="generation-1",
+            maximum_charge_micros=10,
+        )
+
+    assert str(raised.value) == "provider refused before submission"
+    assert raised.value.submitted is False
+    assert raised.value.uncharged is True
+    assert raised.value.retryable is True
+
+
+def test_generation_overcharge_is_still_refused_before_the_result_is_used():
+    def transport(endpoint, headers, body, timeout):
+        return {
+            "protocol_version": "evalrouter.generation.v1",
+            "operation_id": "generation-2",
+            "status": "completed",
+            "charged_micros": 11,
+            "result": {"model": "astra-v1", "content": "hi"},
+        }
+
+    with pytest.raises(ProviderFailure) as raised:
+        _generation_client(transport)(
+            {"messages": [{"role": "user", "content": "hello"}]},
+            operation_id="generation-2",
+            maximum_charge_micros=10,
+        )
+
+    assert "charge exceeded bound" in str(raised.value)
+
+
+def test_completed_generation_without_a_charge_fails_closed():
+    def transport(endpoint, headers, body, timeout):
+        return {
+            "protocol_version": "evalrouter.generation.v1",
+            "operation_id": "generation-3",
+            "status": "completed",
+            "result": {"model": "astra-v1", "content": "hi"},
+        }
+
+    with pytest.raises(ProviderFailure) as raised:
+        _generation_client(transport)(
+            {"messages": [{"role": "user", "content": "hello"}]},
+            operation_id="generation-3",
+            maximum_charge_micros=10,
+        )
+
+    assert "omitted charge" in str(raised.value)
+
+
+def test_abstention_records_the_gateway_charge_rather_than_the_local_estimate():
+    """An abstention after submission was billed, so the charge is authoritative.
+
+    The abstention path returned early and kept the locally computed token-price
+    estimate, so the ledger recorded a cost the gateway never charged.
+    """
+    cancel = threading.Event()
+
+    def transport(endpoint, headers, body, timeout):
+        # Cancelling after submission is what drives the post-request abstention.
+        cancel.set()
+        return {
+            "protocol_version": "evalrouter.decision.v1",
+            "operation_id": "selection-abstain",
+            "status": "completed",
+            "charged_micros": 4,
+            "result": _response(),
+        }
+
+    selector = EvalRouterGatewaySelector(
+        endpoint="https://gateway.example.test/v1/decisions",
+        run_id="run-1",
+        episode_id="episode-1",
+        workspace_id="workspace-1",
+        unit_id="unit-1",
+        generation=1,
+        gateway_token="gateway-secret",
+        transport=transport,
+        token_bound=lambda body: 100,
+        token_bound_source="fixture-tokenizer.v1",
+    )
+    result = selector.select(
+        "selection-abstain",
+        None,
+        Observation(revision="obs-1", model_input={"state": "fixture"}),
+        _decisions(),
+        cancel=cancel,
+        deadline=time.monotonic() + 2,
+    )
+
+    assert result.abstention == "cancelled"
+    # The local token-price estimate for this fixture is 1 micro, so a passing
+    # assertion here means the authoritative gateway charge was adopted.
+    assert result.cost_micros == 4

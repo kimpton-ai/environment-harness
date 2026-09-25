@@ -548,7 +548,7 @@ class LegacySuccessorLedger:
         return admission
 
     # Short generic names make adapters usable by schedulers that do not know
-    # the Minecraft-specific terminology.
+    # one integration's specific terminology.
     prepare = prepare_successor
     admit = admit_successor
 

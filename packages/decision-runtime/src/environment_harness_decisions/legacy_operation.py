@@ -1,7 +1,7 @@
 """Compatibility facade for the version-one motor operation.
 
-The facade keeps the historical request and receipt shapes for Civ and
-Minecraft, while ordinary execution is owned by :class:`DecisionOperation`.
+The facade keeps the historical version-one request and receipt shapes, while
+ordinary execution is owned by :class:`DecisionOperation`.
 Prepared successor methods remain supplied by ``LegacySuccessorLedger``.
 """
 
@@ -39,6 +39,7 @@ from .contracts import (
 from .contracts import (
     OutcomeUncertain as _OutcomeUncertain,
 )
+from .ledger import Ledger
 from .legacy_contracts import (
     MotorAdapter,
     MotorCandidate,
@@ -385,6 +386,24 @@ class LegacyMotorOperation(EnvironmentOperation, LegacySuccessorLedger):
             raise Forbidden("motor profile differs from frozen manifest")
         return payload
 
+    def _decision_journal(self) -> Path:
+        """The decision ledger this facade shares across operations."""
+
+        return self.journal.with_name(self.journal.stem + ".decision.sqlite")
+
+    def _decision_stop_epoch(self) -> int:
+        """The decision ledger's stop epoch, which is what fences the binding.
+
+        The caller's ``MotorRequest.stop_epoch`` is the legacy counter in the
+        legacy journal, and ``LegacySuccessorLedger`` already fences against it.
+        Feeding it into the binding compared two independent counters in two
+        files for equality, so the first ``stop()`` on either side fenced every
+        later request with "cancelled by stop epoch" and the adapter was never
+        dispatched again.
+        """
+
+        return Ledger(self._decision_journal()).stop_epoch
+
     def _invocation(self, request: MotorRequest, operation_id: str, existing=None, maximum_cost_micros=0):
         directive = request.goal_context.revision if request.goal_context else request.goal_revision
         objective = Objective(
@@ -408,7 +427,7 @@ class LegacyMotorOperation(EnvironmentOperation, LegacySuccessorLedger):
             observation_revision=request.observation_revision,
             recovery_generation=0,
             owner="legacy",
-            stop_epoch=request.stop_epoch,
+            stop_epoch=self._decision_stop_epoch(),
         )
         expires = datetime.now(timezone.utc) + timedelta(milliseconds=request.timeout_ms)
         invocation = existing or BoundedInvocation(objective=objective, binding=binding, expires_at=expires)
@@ -452,10 +471,7 @@ class LegacyMotorOperation(EnvironmentOperation, LegacySuccessorLedger):
             db.close()
         selector = _LegacySelector(self.selector, self.profile, self.adapter, payload)
         decision = DecisionOperation(
-            control,
-            selector,
-            journal=self.journal.with_name(self.journal.stem + ".decision.sqlite"),
-            policy=self.decision_policy,
+            control, selector, journal=self._decision_journal(), policy=self.decision_policy
         )
         self._decision_ops[operation_id] = decision
         self._legacy_requests[operation_id] = payload

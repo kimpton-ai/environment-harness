@@ -257,10 +257,14 @@ class EvalRouterGenerationClient:
             raise ProviderFailure(
                 "gateway generation response identity mismatch", submitted=True, uncharged=False
             )
-        if response.charged_micros is None or response.charged_micros > maximum_charge_micros:
-            raise ProviderFailure("gateway generation charge exceeded bound", submitted=True, uncharged=False)
         self._local.last_charge_micros = response.charged_micros
         self._local.last_response = response.model_dump(mode="json")
+        if response.charged_micros is not None and response.charged_micros > maximum_charge_micros:
+            raise ProviderFailure("gateway generation charge exceeded bound", submitted=True, uncharged=False)
+        # A rejection carries its own submitted/charged truth. Testing the charge
+        # bound first turned a proven-unsubmitted, unbilled rejection into a
+        # non-retryable "charge exceeded" failure, which is the one thing the
+        # retry rule in the README depends on being accurate.
         if response.status != "completed" or not response.result:
             error = response.error
             raise JevProviderFailure(
@@ -268,6 +272,8 @@ class EvalRouterGenerationClient:
                 submitted=True if error is None else error.submitted,
                 uncharged=False if error is None else not error.charged,
             )
+        if response.charged_micros is None:
+            raise ProviderFailure("gateway generation omitted charge", submitted=True, uncharged=False)
         response_model = response.result.get("model")
         if response_model is not None and response_model != self.model:
             raise ProviderFailure("gateway generation model mismatch", submitted=True, uncharged=False)
@@ -427,7 +433,7 @@ class EvalRouterGatewaySelector:
         deadline: float,
         operation_id: str | None = None,
     ):
-        """Compatibility boundary for the Minecraft Jev command interpreter."""
+        """Compatibility boundary for the version-one Jev command interpreter."""
         self._local.operation_id = operation_id or f"jev:{__import__('uuid').uuid4().hex}"
         self._local.maximum_charge_micros = maximum_charge_micros
         response, _estimated, evidence = self._jev.request_encoded(
@@ -446,7 +452,13 @@ class EvalRouterGatewaySelector:
             selection_id, objective, observation, decisions, cancel=cancel, deadline=deadline
         )
         if result.abstention:
-            return result.model_copy(update={"versions": {**result.versions, **self.evidence.as_dict()}})
+            # An abstention that reached the gateway was still billed, so the
+            # ledger records the authoritative charge rather than the local
+            # estimate. An abstention before submission has no charge to adopt.
+            update: dict[str, Any] = {"versions": {**result.versions, **self.evidence.as_dict()}}
+            if self._local.charged_micros is not None:
+                update["cost_micros"] = self._local.charged_micros
+            return result.model_copy(update=update)
         if self._local.charged_micros is None:
             raise ProviderFailure(
                 "gateway response omitted authoritative charge", submitted=True, uncharged=False

@@ -194,3 +194,34 @@ def test_legacy_stop_advances_legacy_epoch(tmp_path):
     assert operation.stop_epoch == 0
     operation.stop()
     assert operation.stop_epoch == 1
+
+
+def test_motor_execution_survives_a_stop_that_left_no_cached_decision_operation(tmp_path):
+    """A caller that honours the legacy stop epoch must not be fenced forever.
+
+    `MotorRequest.stop_epoch` is the legacy counter in the legacy journal;
+    `DecisionOperation` fences against its own counter in the decision journal.
+    Feeding the former into the binding compared two unrelated counters, so the
+    first `stop()` with nothing cached to propagate into -- a stop before any
+    execute, or any process restart -- fenced every later request as "cancelled
+    by stop epoch" and the adapter was never dispatched again.
+    """
+    operation, adapter = make_operation(tmp_path)
+
+    operation.stop()
+    assert operation.stop_epoch == 1
+
+    receipt = operation.execute(
+        "motor:1",
+        {
+            "endpoint": "motor",
+            "operation": "motor.execute",
+            "payload": request().model_copy(update={"stop_epoch": operation.stop_epoch}),
+            "write": True,
+        },
+        10,
+        authority=lambda _: None,
+    )
+
+    assert receipt["status"] == "completed"
+    assert adapter.submissions == ["motor:1:execution:0"]
