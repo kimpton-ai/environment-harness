@@ -1,0 +1,51 @@
+{
+  "$id": "urn:environment-harness:v1:BranchRequest",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Strict command that creates one child Session from a Checkpoint.\n\nThere is no separate Branch resource: the child Session carries the parent\nSession, Checkpoint, lineage, and intervention references.",
+  "properties": {
+    "checkpoint": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Checkpoint",
+      "type": "string"
+    },
+    "idempotency_key": {
+      "anyOf": [
+        {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Idempotency Key"
+    },
+    "interventions": {
+      "additionalProperties": true,
+      "title": "Interventions",
+      "type": "object"
+    },
+    "turns": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Turns"
+    }
+  },
+  "required": [
+    "checkpoint"
+  ],
+  "title": "BranchRequest",
+  "type": "object"
+}

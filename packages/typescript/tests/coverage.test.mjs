@@ -52,41 +52,61 @@ test('client validates endpoints, request limits, errors and every public reques
     const client = new EnvironmentClient('https://supplier.example/', 'old-token');
     client.setToken('new-token');
     await client.request('POST', '/direct', {value: 1}, 'operation');
-    await client.list({limit: 25, cursor: 'a'.repeat(32)});
-    await client.get('a/b');
-    await client.create({synthetic: true}, 'create-operation');
-    await client.observe('environment');
+    await client.sessions({limit: 25, cursor: 'a'.repeat(32)});
+    await client.session('a/b');
+    await client.createExperiment({synthetic: true}, 'create-operation');
+    await client.observe('environment', 'alice');
     await client.observe('environment', 'a/b');
-    await client.submit('environment', {value: 1});
+    await client.submit('environment', 'alice', {value: 1});
     await client.command('environment', 'lease', {owner: 'test'});
-    await client.events('environment', 7);
-    await client.activitySnapshot();
+    await client.evidence('environment', 7);
+    await client.activityHierarchy();
     await client.activity(9);
     await client.experimentActivity('experiment/a', 10);
     await client.sessionActivity('environment/a', 11);
     await client.activityStream(12);
-    await client.agentWork('environment');
+    await client.invocations('environment');
     await client.cancel('environment');
     await client.advance('environment');
     await client.credentials('environment', 'alice', 30);
-    await client.reports('environment');
+    await client.scores('environment');
     await client.compare(['one', 'two']);
+    await client.capabilities();
+    await client.experiments({limit: 5});
+    await client.experiment('a/b');
+    await client.experimentSessions('a/b');
+    await client.scenarioSets();
+    await client.scenarioSet('a/b');
+    await client.policies();
+    await client.policy('a/b');
+    await client.checkpoints('environment');
+    await client.createCheckpoint('environment', true);
+    await client.checkpoint('environment', 'cp');
+    await client.branch('environment', {checkpoint: 'cp'});
+    await client.snapshots({trajectory: 'a/b'});
+    await client.snapshotRecords('a/b');
+    await client.datasetRecords('a/b');
+    await client.sources();
+    await client.source('a/b');
+    await client.sourceRecords('a/b');
+    await client.trajectoryScores('a/b');
     await client.turnSeries('environment/a', {startTurn: 5, endTurn: 10, maxPoints: 200});
     assert.equal(calls[0].options.headers.Authorization, 'Bearer new-token');
     assert.equal(calls[0].options.headers['X-Operation-ID'], 'operation');
     assert.match(calls[1].url, /limit=25&cursor=a{32}$/);
-    assert.equal(calls[2].url, 'https://supplier.example/v1/environments/a%2Fb');
-    assert.match(calls[5].url, /participant=a%2Fb/);
+    assert.equal(calls[2].url, 'https://supplier.example/v1/sessions/a%2Fb');
+    assert.match(calls[5].url, /participants\/a%2Fb\/observation/);
     assert.equal(calls[8].options.body, undefined);
-    assert.equal(calls[9].url, 'https://supplier.example/v1/activity/snapshot');
+    assert.equal(calls[9].url, 'https://supplier.example/v1/activity/hierarchy');
     assert.match(calls[10].url, /after=9/);
-    assert.match(calls[11].url, /experiments\/experiment%2Fa\/events\?after=10/);
-    assert.match(calls[12].url, /environments\/environment%2Fa\/activity\?after=11/);
+    assert.match(calls[11].url, /experiments\/experiment%2Fa\/activity\?after=10/);
+    assert.match(calls[12].url, /sessions\/environment%2Fa\/activity\?after=11/);
     assert.equal(calls[13].options.headers['Last-Event-ID'], '12');
     assert.ok(calls.some(call => JSON.parse(call.options.body ?? '{}').operation === 'advance'));
-    assert.ok(calls.some(call => call.url.endsWith('/credentials') &&
-      call.options.body === JSON.stringify({participant: 'alice', ttl: 30})));
-    assert.match(calls.at(-1).url, /environments\/environment%2Fa\/turn-series\?start_turn=5&max_points=200&end_turn=10/);
+    // The participant is named by the route, never by the request body.
+    assert.ok(calls.some(call => call.url.endsWith('/participants/alice/credentials') &&
+      call.options.body === JSON.stringify({ttl: 30})));
+    assert.match(calls.at(-1).url, /sessions\/environment%2Fa\/turn-series\?start_turn=5&max_points=200&end_turn=10/);
   } finally { globalThis.fetch = original; }
 
   const client = new EnvironmentClient('https://supplier.example', 'token');
@@ -97,16 +117,16 @@ test('client validates endpoints, request limits, errors and every public reques
   }}), {
     status: 403, headers: {'Content-Type': 'application/json'},
   });
-  await assert.rejects(client.list(), error => error instanceof ServiceError &&
+  await assert.rejects(client.sessions(), error => error instanceof ServiceError &&
     error.message === 'Environment service returned HTTP 403: Environment unavailable' &&
     error.code === 'forbidden' && error.status === 403 && error.requestId === 'a'.repeat(32) &&
     error.details[0].field === 'environment');
   globalThis.fetch = async () => new Response('private upstream detail', {status: 403});
-  await assert.rejects(client.list(), error => error.message === 'Environment service returned HTTP 403');
+  await assert.rejects(client.sessions(), error => error.message === 'Environment service returned HTTP 403');
   globalThis.fetch = async () => new Response('{', {status: 403, headers: {'Content-Type': 'application/json'}});
-  await assert.rejects(client.list(), error => error.message === 'Environment service returned HTTP 403');
+  await assert.rejects(client.sessions(), error => error.message === 'Environment service returned HTTP 403');
   globalThis.fetch = async () => new Response('x'.repeat(16777217), {status: 200});
-  await assert.rejects(client.list(), /size limit/);
+  await assert.rejects(client.sessions(), /size limit/);
   globalThis.fetch = original;
 });
 
@@ -117,13 +137,13 @@ test('client replay and follow have explicit cursor and abort behavior', async (
     {events: [event(2, 0, 'two')], cursor: 2},
     {events: [], cursor: 2},
   ];
-  client.events = async () => pages.shift();
+  client.evidence = async () => pages.shift();
   const replayed = [];
   for await (const item of client.replay('environment')) replayed.push(item.seq);
   assert.deepEqual(replayed, [1, 2]);
 
   const controller = new AbortController();
-  client.events = async () => {
+  client.evidence = async () => {
     controller.abort();
     return {events: [event(3, 0, 'followed')], cursor: 3};
   };
@@ -132,7 +152,7 @@ test('client replay and follow have explicit cursor and abort behavior', async (
   assert.deepEqual(followed, [3]);
 
   const waiting = new AbortController();
-  client.events = async () => ({events: [], cursor: 0});
+  client.evidence = async () => ({events: [], cursor: 0});
   setTimeout(() => waiting.abort(), 5);
   assert.deepEqual(await Array.fromAsync(client.follow('environment', waiting.signal)), []);
 });

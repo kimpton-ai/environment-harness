@@ -9,31 +9,32 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from _credentials import bearer
 from fastapi.testclient import TestClient
 
 import environment_harness.runner as runner_module
 from environment_harness import (
     AgentSpec,
-    EnvironmentSession,
     EvidenceStore,
     ExperimentSpec,
     OperationSpec,
-    Principal,
 )
+from environment_harness.access import _AccessContext
 from environment_harness.conformance import check
 from environment_harness.contracts import Capabilities, RunPolicy
 from environment_harness.errors import Conflict, Forbidden, Unsupported
 from environment_harness.fixtures import SyntheticAgent, SyntheticEnvironment
 from environment_harness.operations import Operations
 from environment_harness.runner import _invoke, _prepare, run
+from environment_harness.runtime import _SessionRuntime
 from environment_harness.server import create_app
 
 
 def setup(path, *, participants=("a",), policy=None, checkpoint=True):
     env = SyntheticEnvironment()
     store = EvidenceStore(path)
-    session = EnvironmentSession(store, env)
-    who = Principal(tenant="local", subject="local-researcher", role="researcher")
+    session = _SessionRuntime(store, env)
+    who = _AccessContext(tenant="local", subject="local-researcher", policy="trusted-local")
     spec = ExperimentSpec(
         environment=env.spec,
         participants=tuple(
@@ -45,7 +46,9 @@ def setup(path, *, participants=("a",), policy=None, checkpoint=True):
         policy=policy or RunPolicy(),
     )
     environment = session.create(spec, who)["id"]
-    agent = Principal(tenant="local", subject="a", role="agent", environment=environment, participant="a")
+    agent = _AccessContext(
+        tenant="local", subject="a", policy="participant", session=environment, participant="a"
+    )
     return session, who, environment, agent, spec
 
 
@@ -198,7 +201,7 @@ def test_cancel_is_atomic_idempotent_and_preserves_unknown_reservations(tmp_path
     with pytest.raises(Forbidden):
         session.cancel(environment, agent)
     with pytest.raises(Forbidden):
-        session.cancel(environment, who.model_copy(update={"tenant": "other"}))
+        session.cancel(environment, who.replace(tenant="other"))
     first = session.cancel(environment, who)
     assert first == session.control(environment, who, lease, "cancel")
     assert first["unresolved_operations"] == ["unknown"]
@@ -255,15 +258,15 @@ def test_cancel_active_command_stops_parent_and_child(tmp_path, transport):
                 assert result.returncode == 0, result.stderr
                 result = json.loads(result.stdout)
             else:
-                token = session.store.issue(who)
+                token = bearer(session.store, who)
                 client = TestClient(create_app(session))
                 response = client.post(
-                    f"/v1/environments/{environment}/commands",
+                    f"/v1/sessions/{environment}/commands",
                     json={"operation": "cancel", "arguments": {}},
                     headers={"Authorization": "Bearer " + token},
                 )
-                assert response.status_code == 200
-                result = response.json()
+                assert response.status_code == 202
+                result = response.json()["result"]
             assert result["status"] == "cancelled"
             assert result["unresolved_agent_work"]
             with pytest.raises(Conflict):

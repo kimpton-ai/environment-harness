@@ -1,0 +1,243 @@
+{
+  "$defs": {
+    "MetricDeclaration": {
+      "additionalProperties": true,
+      "description": "A declared aggregate metric. Executable scoring code stays installed.",
+      "properties": {
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "unit": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Unit",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "unit"
+      ],
+      "title": "MetricDeclaration",
+      "type": "object"
+    },
+    "ResourceFeatures": {
+      "additionalProperties": true,
+      "properties": {
+        "optional": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Optional",
+          "type": "array"
+        },
+        "required": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Required",
+          "type": "array"
+        }
+      },
+      "required": [
+        "required",
+        "optional"
+      ],
+      "title": "ResourceFeatures",
+      "type": "object"
+    },
+    "ResourceMetadata": {
+      "additionalProperties": true,
+      "properties": {
+        "createdAt": {
+          "minLength": 1,
+          "title": "Createdat",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Labels",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "createdAt",
+        "labels"
+      ],
+      "title": "ResourceMetadata",
+      "type": "object"
+    },
+    "ScenarioReference": {
+      "additionalProperties": true,
+      "description": "One immutable scenario selected into a scenario set.",
+      "properties": {
+        "digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Digest",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Labels",
+          "type": "object"
+        },
+        "split": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Split"
+        }
+      },
+      "required": [
+        "id",
+        "digest"
+      ],
+      "title": "ScenarioReference",
+      "type": "object"
+    },
+    "ScenarioSetSpec": {
+      "additionalProperties": true,
+      "properties": {
+        "metrics": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/MetricDeclaration"
+          },
+          "title": "Metrics",
+          "type": "array"
+        },
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "provenance": {
+          "additionalProperties": true,
+          "title": "Provenance",
+          "type": "object"
+        },
+        "scenarios": {
+          "items": {
+            "$ref": "#/$defs/ScenarioReference"
+          },
+          "minItems": 1,
+          "title": "Scenarios",
+          "type": "array"
+        },
+        "schemaVersion": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Schemaversion",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "scenarios",
+        "schemaVersion"
+      ],
+      "title": "ScenarioSetSpec",
+      "type": "object"
+    },
+    "ScenarioSetStatus": {
+      "additionalProperties": true,
+      "properties": {
+        "scenarioCount": {
+          "minimum": 1,
+          "title": "Scenariocount",
+          "type": "integer"
+        },
+        "setDigest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Setdigest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scenarioCount",
+        "setDigest"
+      ],
+      "title": "ScenarioSetStatus",
+      "type": "object"
+    }
+  },
+  "$id": "urn:environment-harness:v1:ScenarioSet",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "An ordered, digest-bound collection of scenarios used as experiment input.\n\n`ScenarioSet` names the *input* collection. `TrajectoryDataset` keeps its own\nmeaning as a dataset of completed trajectory snapshots; the two are\ndeliberately different types.",
+  "properties": {
+    "apiVersion": {
+      "const": "environmentharness.dev/v1alpha1",
+      "title": "Apiversion",
+      "type": "string"
+    },
+    "extensions": {
+      "additionalProperties": true,
+      "title": "Extensions",
+      "type": "object"
+    },
+    "features": {
+      "$ref": "#/$defs/ResourceFeatures"
+    },
+    "kind": {
+      "const": "ScenarioSet",
+      "title": "Kind",
+      "type": "string"
+    },
+    "metadata": {
+      "$ref": "#/$defs/ResourceMetadata"
+    },
+    "spec": {
+      "$ref": "#/$defs/ScenarioSetSpec"
+    },
+    "status": {
+      "$ref": "#/$defs/ScenarioSetStatus"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "features",
+    "spec",
+    "status",
+    "extensions"
+  ],
+  "title": "ScenarioSet",
+  "type": "object"
+}

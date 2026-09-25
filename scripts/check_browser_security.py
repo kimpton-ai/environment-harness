@@ -17,8 +17,8 @@ from pathlib import Path
 
 import uvicorn
 
-from environment_harness import EnvironmentSession, EvidenceStore
-from environment_harness.fixtures import SyntheticEnvironment
+from environment_harness import EnvironmentHarness, EvidenceStore
+from environment_harness.fixtures import SyntheticAgent, SyntheticEnvironment
 from environment_harness.server import create_app
 
 
@@ -49,10 +49,16 @@ def main() -> None:
         root = Path(directory)
         port = 18765
         origin = f"http://127.0.0.1:{port}"
-        session = EnvironmentSession(EvidenceStore(root / "evidence"), SyntheticEnvironment())
+        # A supplier deployment: no local viewer access and no ingestion capability.
+        harness = EnvironmentHarness(
+            EvidenceStore(root / "evidence"),
+            environment=SyntheticEnvironment,
+            agents={"alice": SyntheticAgent},
+            reconcile=False,
+        )
         server = uvicorn.Server(
             uvicorn.Config(
-                create_app(session),
+                create_app(harness),
                 host="127.0.0.1",
                 port=port,
                 access_log=False,

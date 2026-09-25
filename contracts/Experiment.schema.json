@@ -1,0 +1,543 @@
+{
+  "$defs": {
+    "CredentialRequirement": {
+      "additionalProperties": true,
+      "description": "A named credential requirement. Values never appear in portable JSON.",
+      "properties": {
+        "consumer": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Consumer",
+          "type": "string"
+        },
+        "injection": {
+          "default": "process-local",
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Injection",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "preflight": {
+          "default": false,
+          "title": "Preflight",
+          "type": "boolean"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "consumer"
+      ],
+      "title": "CredentialRequirement",
+      "type": "object"
+    },
+    "EnvironmentReferenceModel": {
+      "additionalProperties": true,
+      "description": "The portable environment identity that is serialized in every resource.\n\nExecutable code is resolved from typed factories supplied to one harness;\nno resource carries an import path, callable, or provider object.",
+      "properties": {
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "specDigest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Specdigest",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "specDigest"
+      ],
+      "title": "EnvironmentReferenceModel",
+      "type": "object"
+    },
+    "ExperimentPlan": {
+      "additionalProperties": true,
+      "description": "The frozen plan. ``EnvironmentSpec`` is embedded, not a separate resource.",
+      "properties": {
+        "credentials": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CredentialRequirement"
+          },
+          "title": "Credentials",
+          "type": "array"
+        },
+        "environment": {
+          "additionalProperties": true,
+          "title": "Environment",
+          "type": "object"
+        },
+        "environmentReference": {
+          "$ref": "#/$defs/EnvironmentReferenceModel"
+        },
+        "limits": {
+          "additionalProperties": true,
+          "title": "Limits",
+          "type": "object"
+        },
+        "name": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "participants": {
+          "items": {
+            "$ref": "#/$defs/ParticipantBinding"
+          },
+          "minItems": 1,
+          "title": "Participants",
+          "type": "array"
+        },
+        "purpose": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Purpose",
+          "type": "string"
+        },
+        "scenarioSet": {
+          "$ref": "#/$defs/ResourceReference"
+        },
+        "scorers": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ScorerReference"
+          },
+          "title": "Scorers",
+          "type": "array"
+        },
+        "seed": {
+          "title": "Seed",
+          "type": "integer"
+        },
+        "split": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Split",
+          "type": "string"
+        },
+        "trials": {
+          "minimum": 1,
+          "title": "Trials",
+          "type": "integer"
+        },
+        "turns": {
+          "minimum": 1,
+          "title": "Turns",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "environment",
+        "environmentReference",
+        "scenarioSet",
+        "participants",
+        "trials",
+        "seed",
+        "turns",
+        "purpose",
+        "split"
+      ],
+      "title": "ExperimentPlan",
+      "type": "object"
+    },
+    "ExperimentProgress": {
+      "additionalProperties": true,
+      "properties": {
+        "cancelled": {
+          "minimum": 0,
+          "title": "Cancelled",
+          "type": "integer"
+        },
+        "completed": {
+          "minimum": 0,
+          "title": "Completed",
+          "type": "integer"
+        },
+        "created": {
+          "minimum": 0,
+          "title": "Created",
+          "type": "integer"
+        },
+        "failed": {
+          "minimum": 0,
+          "title": "Failed",
+          "type": "integer"
+        },
+        "pending": {
+          "minimum": 0,
+          "title": "Pending",
+          "type": "integer"
+        },
+        "planned": {
+          "minimum": 0,
+          "title": "Planned",
+          "type": "integer"
+        },
+        "running": {
+          "minimum": 0,
+          "title": "Running",
+          "type": "integer"
+        },
+        "uncertain": {
+          "minimum": 0,
+          "title": "Uncertain",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "planned",
+        "created",
+        "pending",
+        "running",
+        "completed",
+        "failed",
+        "cancelled",
+        "uncertain"
+      ],
+      "title": "ExperimentProgress",
+      "type": "object"
+    },
+    "ExperimentStatus": {
+      "additionalProperties": true,
+      "description": "A derived aggregate projection, never an execution authority.",
+      "properties": {
+        "lastActivityAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lastactivityat"
+        },
+        "limitations": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Limitations",
+          "type": "array"
+        },
+        "lockDigest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Lockdigest",
+          "type": "string"
+        },
+        "progress": {
+          "$ref": "#/$defs/ExperimentProgress"
+        },
+        "scores": {
+          "additionalProperties": true,
+          "title": "Scores",
+          "type": "object"
+        },
+        "startedAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Startedat"
+        },
+        "state": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "progress",
+        "lockDigest"
+      ],
+      "title": "ExperimentStatus",
+      "type": "object"
+    },
+    "ParticipantBinding": {
+      "additionalProperties": true,
+      "description": "One actor in an experiment, bound to a policy or adapter reference.",
+      "properties": {
+        "checkpoint": {
+          "default": false,
+          "title": "Checkpoint",
+          "type": "boolean"
+        },
+        "configDigest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Configdigest",
+          "type": "string"
+        },
+        "credentials": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CredentialRequirement"
+          },
+          "title": "Credentials",
+          "type": "array"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "implementation": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Implementation",
+          "type": "string"
+        },
+        "policyVersion": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Policyversion",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "implementation",
+        "policyVersion",
+        "configDigest"
+      ],
+      "title": "ParticipantBinding",
+      "type": "object"
+    },
+    "ResourceFeatures": {
+      "additionalProperties": true,
+      "properties": {
+        "optional": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Optional",
+          "type": "array"
+        },
+        "required": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Required",
+          "type": "array"
+        }
+      },
+      "required": [
+        "required",
+        "optional"
+      ],
+      "title": "ResourceFeatures",
+      "type": "object"
+    },
+    "ResourceMetadata": {
+      "additionalProperties": true,
+      "properties": {
+        "createdAt": {
+          "minLength": 1,
+          "title": "Createdat",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Labels",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "createdAt",
+        "labels"
+      ],
+      "title": "ResourceMetadata",
+      "type": "object"
+    },
+    "ResourceReference": {
+      "additionalProperties": true,
+      "description": "Enough identity to avoid mutable-name ambiguity across resources.",
+      "properties": {
+        "apiVersion": {
+          "default": "environmentharness.dev/v1alpha1",
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Apiversion",
+          "type": "string"
+        },
+        "digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Digest"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Revision"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "title": "ResourceReference",
+      "type": "object"
+    },
+    "ScorerReference": {
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "version"
+      ],
+      "title": "ScorerReference",
+      "type": "object"
+    }
+  },
+  "$id": "urn:environment-harness:v1:Experiment",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A frozen plan spanning an environment, scenarios, participants, and trials.\n\nThis is the portable read resource. The local execution builder returned by\n``EnvironmentHarness.experiment(...)`` is a different object.",
+  "properties": {
+    "apiVersion": {
+      "const": "environmentharness.dev/v1alpha1",
+      "title": "Apiversion",
+      "type": "string"
+    },
+    "extensions": {
+      "additionalProperties": true,
+      "title": "Extensions",
+      "type": "object"
+    },
+    "features": {
+      "$ref": "#/$defs/ResourceFeatures"
+    },
+    "kind": {
+      "const": "Experiment",
+      "title": "Kind",
+      "type": "string"
+    },
+    "metadata": {
+      "$ref": "#/$defs/ResourceMetadata"
+    },
+    "spec": {
+      "$ref": "#/$defs/ExperimentPlan"
+    },
+    "status": {
+      "$ref": "#/$defs/ExperimentStatus"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "features",
+    "spec",
+    "status",
+    "extensions"
+  ],
+  "title": "Experiment",
+  "type": "object"
+}

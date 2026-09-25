@@ -70,35 +70,89 @@ export class EnvironmentClient {
             throw new Error('Response size limit exceeded');
         return JSON.parse(text);
     }
-    list(options = {}) {
+    async *streamJsonl(path) {
+        const response = await fetch(this.endpoint + path, { method: 'GET', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(30000),
+            headers: { Authorization: `Bearer ${this.token}`, Accept: 'application/x-ndjson' } });
+        if (!response.ok)
+            throw await serviceError(response);
+        if (!response.body)
+            throw new Error('Environment service returned no stream');
+        const reader = response.body.getReader(), decoder = new TextDecoder();
+        let buffered = '';
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                buffered += decoder.decode(value, { stream: !done });
+                if (buffered.length > 16777216 && !buffered.includes('\n'))
+                    throw new Error('Stream record size limit exceeded');
+                const lines = buffered.split('\n');
+                buffered = lines.pop() ?? '';
+                for (const line of lines) {
+                    if (!line.trim())
+                        continue;
+                    if (line.length > 16777216)
+                        throw new Error('Stream record size limit exceeded');
+                    const parsed = JSON.parse(line);
+                    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed))
+                        throw new Error('Environment service returned malformed JSONL');
+                    yield parsed;
+                }
+                if (done)
+                    break;
+            }
+            if (buffered.trim()) {
+                const parsed = JSON.parse(buffered);
+                if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed))
+                    throw new Error('Environment service returned malformed JSONL');
+                yield parsed;
+            }
+        }
+        finally {
+            reader.releaseLock();
+        }
+    }
+    query(values) {
         const query = new URLSearchParams();
-        if (options.limit !== undefined)
-            query.set('limit', String(options.limit));
-        if (options.cursor !== undefined)
-            query.set('cursor', options.cursor);
-        return this.request('GET', `/v1/environments${query.size ? '?' + query : ''}`);
+        for (const [key, value] of Object.entries(values))
+            if (value !== undefined)
+                query.set(key, String(value));
+        return query.size ? '?' + query : '';
     }
-    get(environment) { return this.request('GET', `/v1/environments/${encodeURIComponent(environment)}`); }
-    create(experiment, operationId) { return this.request('POST', '/v1/environments', experiment, operationId); }
-    observe(environment, participant) { return this.request('GET', `/v1/environments/${encodeURIComponent(environment)}/observation${participant ? '?participant=' + encodeURIComponent(participant) : ''}`); }
-    submit(environment, action) { return this.request('POST', `/v1/environments/${encodeURIComponent(environment)}/actions`, action); }
-    command(environment, operation, args = {}) { return this.request('POST', `/v1/environments/${encodeURIComponent(environment)}/commands`, { operation, arguments: args }); }
-    events(environment, after = 0) { return this.request('GET', `/v1/environments/${encodeURIComponent(environment)}/events?after=${after}`); }
-    turnSeries(environment, options = {}) {
-        const query = new URLSearchParams({
-            start_turn: String(options.startTurn ?? 1),
-            max_points: String(options.maxPoints ?? 300),
-        });
-        if (options.endTurn !== undefined)
-            query.set('end_turn', String(options.endTurn));
-        return this.request('GET', `/v1/environments/${encodeURIComponent(environment)}/turn-series?${query}`);
+    key(value) { return encodeURIComponent(value); }
+    // -- Service ---------------------------------------------------------------
+    capabilities() { return this.request('GET', '/v1/capabilities'); }
+    // -- Experiments and sessions ---------------------------------------------
+    createExperiment(experiment, operationId) { return this.request('POST', '/v1/experiments', experiment, operationId); }
+    experiments(options = {}) { return this.request('GET', `/v1/experiments${this.query(options)}`); }
+    experiment(experiment) { return this.request('GET', `/v1/experiments/${this.key(experiment)}`); }
+    experimentSessions(experiment, options = {}) { return this.request('GET', `/v1/experiments/${this.key(experiment)}/sessions${this.query(options)}`); }
+    scenarioSets(options = {}) { return this.request('GET', `/v1/scenario-sets${this.query(options)}`); }
+    scenarioSet(scenarioSet) { return this.request('GET', `/v1/scenario-sets/${this.key(scenarioSet)}`); }
+    sessions(options = {}) { return this.request('GET', `/v1/sessions${this.query(options)}`); }
+    session(session) { return this.request('GET', `/v1/sessions/${this.key(session)}`); }
+    observe(session, participant) { return this.request('GET', `/v1/sessions/${this.key(session)}/participants/${this.key(participant)}/observation`); }
+    submit(session, participant, action) { return this.request('POST', `/v1/sessions/${this.key(session)}/participants/${this.key(participant)}/actions`, action); }
+    credentials(session, participant, ttl = 3600) { return this.request('POST', `/v1/sessions/${this.key(session)}/participants/${this.key(participant)}/credentials`, { ttl }); }
+    command(session, operation, args = {}) { return this.request('POST', `/v1/sessions/${this.key(session)}/commands`, { operation, arguments: args }); }
+    invocations(session) { return this.request('GET', `/v1/sessions/${this.key(session)}/invocations`); }
+    checkpoints(session, options = {}) { return this.request('GET', `/v1/sessions/${this.key(session)}/checkpoints${this.query(options)}`); }
+    createCheckpoint(session, exactAgents = false) { return this.request('POST', `/v1/sessions/${this.key(session)}/checkpoints`, { exact_agents: exactAgents }); }
+    checkpoint(session, checkpoint) { return this.request('GET', `/v1/sessions/${this.key(session)}/checkpoints/${this.key(checkpoint)}`); }
+    branch(session, request) { return this.request('POST', `/v1/sessions/${this.key(session)}/branches`, request); }
+    evidence(session, after = 0) { return this.request('GET', `/v1/sessions/${this.key(session)}/evidence?after=${after}`); }
+    scores(session) { return this.request('GET', `/v1/sessions/${this.key(session)}/scores`); }
+    turnSeries(session, options = {}) {
+        return this.request('GET', `/v1/sessions/${this.key(session)}/turn-series${this.query({ start_turn: options.startTurn ?? 1, max_points: options.maxPoints ?? 300, end_turn: options.endTurn })}`);
     }
-    activitySnapshot() { return this.request('GET', '/v1/activity/snapshot'); }
-    activity(after = 0) { return this.request('GET', `/v1/activity/events?after=${after}`); }
-    experimentActivity(experiment, after = 0) { return this.request('GET', `/v1/experiments/${encodeURIComponent(experiment)}/events?after=${after}`); }
-    sessionActivity(environment, after = 0) { return this.request('GET', `/v1/environments/${encodeURIComponent(environment)}/activity?after=${after}`); }
+    async cancel(session) { return (await this.command(session, 'cancel')).result; }
+    async advance(session) { return (await this.command(session, 'advance')).result; }
+    // -- Activity --------------------------------------------------------------
+    activityHierarchy() { return this.request('GET', '/v1/activity/hierarchy'); }
+    activity(after = 0) { return this.request('GET', `/v1/activity?after=${after}`); }
+    experimentActivity(experiment, after = 0) { return this.request('GET', `/v1/experiments/${this.key(experiment)}/activity?after=${after}`); }
+    sessionActivity(session, after = 0) { return this.request('GET', `/v1/sessions/${this.key(session)}/activity?after=${after}`); }
     async activityStream(after = 0) {
-        const response = await fetch(this.endpoint + '/v1/activity/events', { redirect: 'error', cache: 'no-store',
+        const response = await fetch(this.endpoint + '/v1/activity', { redirect: 'error', cache: 'no-store',
             headers: { Authorization: `Bearer ${this.token}`, Accept: 'text/event-stream', 'Last-Event-ID': String(after) } });
         if (!response.ok)
             throw await serviceError(response);
@@ -111,26 +165,61 @@ export class EnvironmentClient {
         });
         return { events, cursor: events.length ? events[events.length - 1].id : after };
     }
-    agentWork(environment) { return this.request('GET', `/v1/environments/${encodeURIComponent(environment)}/agent-work`); }
-    cancel(environment) { return this.command(environment, 'cancel'); }
-    advance(environment) { return this.command(environment, 'advance'); }
-    credentials(environment, participant, ttl = 3600) { return this.request('POST', `/v1/environments/${encodeURIComponent(environment)}/credentials`, { participant, ttl }); }
-    reports(environment) { return this.request('GET', `/v1/environments/${encodeURIComponent(environment)}/reports`); }
-    compare(environments) { return this.request('POST', '/v1/compare', { environments }); }
-    async *replay(environment) {
+    // -- Evaluation ------------------------------------------------------------
+    compare(sessions) { return this.request('POST', '/v1/comparisons', { sessions }); }
+    // -- Policies, trajectories, snapshots, datasets ---------------------------
+    policies(options = {}) { return this.request('GET', `/v1/policies${this.query(options)}`); }
+    policy(policy) { return this.request('GET', `/v1/policies/${this.key(policy)}`); }
+    trajectories(options = {}) { return this.request('GET', `/v1/trajectories${this.query(options)}`); }
+    trajectory(trajectory) { return this.request('GET', `/v1/trajectories/${this.key(trajectory)}`); }
+    trajectoryRecords(trajectory, options = {}) {
+        return this.request('GET', `/v1/trajectories/${this.key(trajectory)}/records${this.query({ after: options.after ?? 0, limit: options.limit ?? 200 })}`);
+    }
+    trajectoryScores(trajectory) { return this.request('GET', `/v1/trajectories/${this.key(trajectory)}/scores`); }
+    freezeTrajectory(trajectory) { return this.request('POST', `/v1/trajectories/${this.key(trajectory)}/snapshots`); }
+    trajectorySnapshots(trajectory, options = {}) {
+        return this.request('GET', `/v1/trajectories/${this.key(trajectory)}/snapshots${this.query(options)}`);
+    }
+    snapshots(options = {}) { return this.request('GET', `/v1/snapshots${this.query(options)}`); }
+    snapshot(snapshot) { return this.request('GET', `/v1/snapshots/${this.key(snapshot)}`); }
+    snapshotRecords(snapshot, options = {}) {
+        return this.request('GET', `/v1/snapshots/${this.key(snapshot)}/records${this.query({ after: options.after ?? 0, limit: options.limit ?? 200 })}`);
+    }
+    /** NDJSON streaming stays a hand-written iterator outside generated decoding. */
+    streamSnapshotRecords(snapshot) { return this.streamJsonl(`/v1/snapshots/${this.key(snapshot)}/records`); }
+    freezeDataset(name, trajectories) { return this.request('POST', '/v1/datasets', { name, trajectories }); }
+    datasets(options = {}) { return this.request('GET', `/v1/datasets${this.query(options)}`); }
+    dataset(dataset) { return this.request('GET', `/v1/datasets/${this.key(dataset)}`); }
+    datasetRecords(dataset, options = {}) {
+        return this.request('GET', `/v1/datasets/${this.key(dataset)}/records${this.query({ after: options.after ?? 0, limit: options.limit ?? 200 })}`);
+    }
+    streamDatasetRecords(dataset) { return this.streamJsonl(`/v1/datasets/${this.key(dataset)}/records`); }
+    trainingRun(trainingRun) { return this.request('GET', `/v1/training-runs/${this.key(trainingRun)}`); }
+    trainingRuns(options = {}) { return this.request('GET', `/v1/training-runs${this.query(options)}`); }
+    // -- Sources ---------------------------------------------------------------
+    registerSource(registration) { return this.request('POST', '/v1/sources', registration); }
+    sources(options = {}) { return this.request('GET', `/v1/sources${this.query(options)}`); }
+    source(source) { return this.request('GET', `/v1/sources/${this.key(source)}`); }
+    ingestSource(source, batch) { return this.request('POST', `/v1/sources/${this.key(source)}/records`, batch); }
+    sourceRecords(source, options = {}) {
+        return this.request('GET', `/v1/sources/${this.key(source)}/records${this.query({ after: options.after ?? 0, limit: options.limit ?? 200 })}`);
+    }
+    reportSourceStatus(source, status) { return this.request('POST', `/v1/sources/${this.key(source)}/status-reports`, status); }
+    sourceStatus(source) { return this.request('GET', `/v1/sources/${this.key(source)}/status`); }
+    async *replay(session) {
         let cursor = 0;
         while (true) {
-            const page = await this.events(environment, cursor);
+            const page = await this.evidence(session, cursor);
             if (!page.events.length)
                 return;
             yield* page.events;
             cursor = page.cursor;
         }
     }
-    async *follow(environment, signal) {
+    async *follow(session, signal) {
         let cursor = 0;
         while (!signal.aborted) {
-            const page = await this.events(environment, cursor);
+            const page = await this.evidence(session, cursor);
             yield* page.events;
             cursor = page.cursor;
             if (!page.events.length)

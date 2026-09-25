@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .contracts import Capabilities, EnvironmentSpec, EventInput, Mode, Transition
+from .contracts import Capabilities, EnvironmentSpec, EventInput, Mode, Scenario, Transition
 from .errors import Unsupported
 
 
@@ -42,7 +42,7 @@ class SyntheticEnvironment:
         return {
             "total": scenario.starting_total,
             "turn": 0,
-            "private": {p.id: "synthetic-secret-" + p.id for p in experiment.participants},
+            "private": {p.id: "synthetic-briefing-" + p.id for p in experiment.participants},
         }
 
     def observe(self, state, participant):
@@ -108,3 +108,47 @@ class SyntheticShowcaseAgent:
     def restore(self, state):
         if state not in ({}, {"offset": self.offset}):
             raise ValueError("unknown synthetic showcase state")
+
+
+def shared_experiment(store, *, turns: int = 2, tenant: str = "fixture"):
+    """Build the shared experiment fixture consumed by contract gates.
+
+    One store receives an experiment-of-one and a multi-scenario,
+    multi-session experiment so every workstream asserts against the same
+    frozen Experiment, ScenarioSet, Session, Checkpoint, and Trajectory
+    identities. It is deterministic: the same call produces the same digests.
+    """
+
+    from .harness import EnvironmentHarness
+
+    harness = EnvironmentHarness(
+        store,
+        environment=(SyntheticEnvironment,),
+        agents={"alice": SyntheticAgent, "bob": SyntheticAgent},
+        scoring_versions=("shared-fixture@1",),
+        max_concurrency=1,
+        tenant=tenant,
+    )
+    solo = harness.run(
+        Scenario(id="experiment-of-one", input=SyntheticScenarioInput(starting_total=0)),
+        turns=turns,
+    )
+    grouped = harness.experiment(
+        "shared fixture",
+        (
+            Scenario(id="low", input=SyntheticScenarioInput(starting_total=-2)),
+            Scenario(id="high", input=SyntheticScenarioInput(starting_total=2)),
+        ),
+        trials=2,
+        seed=7,
+        turns=turns,
+    )
+    result = grouped.run()
+    checkpoint = solo.checkpoint(exact_agents=True)
+    return {
+        "harness": harness,
+        "solo": solo,
+        "experiment": grouped,
+        "result": result,
+        "checkpoint": checkpoint["id"],
+    }

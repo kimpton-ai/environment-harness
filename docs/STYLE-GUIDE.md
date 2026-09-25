@@ -6,4 +6,8 @@ Use sentence case or natural title case for user-facing headings, labels, naviga
 
 ## Page canvas
 
-Use the subtle gray canvas for the Home inventory. Focused experiment and environment-session pages use the white canvas so their Overview tabs and supporting navigation have the same visual weight.
+Use the subtle gray canvas for collection destinations. Selected experiment, scenario, environment-session and trajectory pages use the white canvas so their contextual navigation and Overview tab have the same visual weight.
+
+## Navigation
+
+The four global destinations are `Overview | Experiments | Sessions | Trajectories`. A selected resource adds exactly one contextual left navigation; never a second permanent drawer. Breadcrumbs carry ownership ancestry and stop at the parent, because the page heading owns the current resource name. The breadcrumb bar keeps a reserved height and renders a same-height skeleton while ancestry loads.

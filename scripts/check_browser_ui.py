@@ -12,9 +12,15 @@ import time
 import urllib.request
 from pathlib import Path
 
-from environment_harness import EnvironmentHarness, EvidenceStore, Principal, Scenario
+from environment_harness import EnvironmentHarness, EvidenceStore, Scenario
+from environment_harness.access import trusted_local
 from environment_harness.fixtures import SyntheticAgent, SyntheticEnvironment
 from environment_harness.showcase import create_synthetic_showcase
+from environment_harness.trajectories import (
+    SourceRecord,
+    SourceRegistration,
+    SourceStatusUpdate,
+)
 
 
 def available_port() -> int:
@@ -36,9 +42,9 @@ def wait_for(url: str, deadline: float) -> None:
         time.sleep(0.05)
 
 
-def create_sessions(root: Path) -> None:
+def create_sessions(root: Path) -> tuple[str, str]:
     store = EvidenceStore(root)
-    who = Principal(tenant="local", subject="browser-test", role="researcher")
+    who = trusted_local("local", "browser-test")
     participants = (
         "alice",
         "bob",
@@ -53,14 +59,18 @@ def create_sessions(root: Path) -> None:
         "mallory",
         "oscar",
     )
+    trajectory = ""
     for turns in (24, 18, 12):
-        create_synthetic_showcase(store, who, turns=turns, participants=participants)
-    EnvironmentHarness(
+        created = create_synthetic_showcase(store, who, turns=turns, participants=participants)
+        if not trajectory:
+            trajectory = created["id"]
+    harness = EnvironmentHarness(
         store,
-        environment_factory=SyntheticEnvironment,
-        agent_factories={"agent": SyntheticAgent},
+        environment=SyntheticEnvironment,
+        agents={"agent": SyntheticAgent},
         max_concurrency=2,
-    ).experiment(
+    )
+    harness.experiment(
         "Support response evaluation",
         [
             Scenario(id="easy-case", input={}, metadata={"name": "Routine request"}),
@@ -69,6 +79,52 @@ def create_sessions(root: Path) -> None:
         trials=2,
         turns=2,
     ).run()
+    sources = harness.sources()
+    sources.freeze(trajectory)
+    return trajectory, _import_historical_trajectory(sources)
+
+
+def _import_historical_trajectory(sources) -> str:
+    """Give the viewer an imported Trajectory alongside the native ones."""
+    source = sources.register(
+        SourceRegistration(
+            namespace="com.example.simulator",
+            run_id="external-run-104",
+            schema_version="example.trace.v1",
+            environment={"id": "example-simulator", "version": "1"},
+            participants=("alice",),
+            purpose="evaluation",
+        )
+    )
+    record = SourceRecord.create(
+        id="historical-outcome-1",
+        position="frame-1",
+        previous_hash="0" * 64,
+        type="com.example.simulator.outcome",
+        segment="segment-1",
+        participant="alice",
+        revision=1,
+        time={
+            "wallTime": "2026-09-22T15:00:00Z",
+            "native": ({"clock": "simulator.frame", "value": 1},),
+        },
+        data={"result": "success"},
+        audience=("*",),
+    )
+    sources.ingest(source.id, (record,))
+    sources.update_status(
+        source.id,
+        SourceStatusUpdate(
+            collection_state="complete",
+            execution_state="completed",
+            termination={"terminated": True, "truncated": False, "reason": "goal"},
+            verified_outcome={"state": "success", "evidence": (record.id,)},
+            terminal_position=record.position,
+            terminal_hash=record.source_hash,
+            backlog=0,
+        ),
+    )
+    return source.id
 
 
 def main() -> None:
@@ -92,7 +148,7 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="environment-browser-ui-") as directory:
         root = Path(directory)
         store = root / "evidence"
-        create_sessions(store)
+        trajectory, imported = create_sessions(store)
         server_port = available_port()
         debug_port = available_port()
         origin = f"http://127.0.0.1:{server_port}"
@@ -140,6 +196,8 @@ def main() -> None:
                     "scripts/browser_ui_test.mjs",
                     origin,
                     str(debug_port),
+                    trajectory,
+                    imported,
                 ],
                 check=True,
                 env=os.environ.copy(),

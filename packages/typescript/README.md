@@ -1,22 +1,67 @@
 # EnvironmentHarness client
 
-Typed HTTP client for an EnvironmentHarness supplier service. This package uses the same versioned contracts as the Python SDK.
+Typed HTTP client for an EnvironmentHarness service, built on the same versioned contracts as the
+Python SDK.
 
-Install the `environment-harness-client-0.2.4-rc.2.tgz` asset from the GitHub release with `npm install ./environment-harness-client-0.2.4-rc.2.tgz`. A registry publication is not required.
+## Install
+
+Download the `environment-harness-client-0.2.4-rc.2.tgz` asset from the GitHub release, then:
+
+```sh
+npm install ./environment-harness-client-0.2.4-rc.2.tgz
+```
+
+There is no registry publication.
+
+## Use
 
 ```ts
 import { EnvironmentClient } from '@environment-harness/client';
 
-const client = new EnvironmentClient('http://127.0.0.1:8765', process.env.ENVIRONMENT_HARNESS_TOKEN!, true);
-const environments = await client.list({limit: 100});
+const client = new EnvironmentClient(
+  'http://127.0.0.1:8765',
+  process.env.ENVIRONMENT_HARNESS_TOKEN!,
+  true,                       // explicitly permit a loopback HTTP endpoint
+);
+
+const sessions = await client.sessions({ limit: 100 });
+const session = await client.session(sessions.items[0].metadata.id);
 ```
 
-The third argument explicitly permits a local HTTP endpoint. Use HTTPS for remote services. Keep credentials outside source control and public browser bundles. The service enforces credential scope. The client does not restore arbitrary agent processes or qualify hosted execution.
+Use HTTPS for anything remote. Keep credentials out of source control and browser bundles; the
+server enforces credential scope regardless.
 
-Source and documentation: https://github.com/kimpton-ai/environment-harness
+## Surface
 
-MIT licensed. See LICENSE.
+| Area | Methods |
+| --- | --- |
+| Resources | `experiments()`, `experiment()`, `scenarioSets()`, `sessions()`, `session()`, `policies()` |
+| Participants | `observe()`, `submit()`, `credentials()` — issues a credential scoped to one session, participant, and generation |
+| Lifecycle | `advance()` resolves at most one ready phase and returns `waiting` while required actions or events are missing; `cancel()` cancels without holding the writer lease and reports unresolved agent work and operations; `createCheckpoint()`, `branch()` |
+| Evidence | `evidence()`, `scores()`, `turnSeries()`, `invocations()`, `activity()`, `activityHierarchy()` |
+| Trajectories | `trajectories()`, `trajectory()`, cursor-paged `trajectoryRecords()`, `trajectorySnapshots()`, `freezeTrajectory()` |
+| Sources | `sourceStatus()` in any deployment; registration, ingestion, and status mutation need a server with ingestion explicitly enabled |
+| Comparison | `compare()` returns typed `metric_groups` with selected report revisions; incompatible units or definitions stay in separate groups |
 
-`client.advance(environmentId)` resolves at most one ready externally controlled phase and returns `waiting` while required actions or events are missing. `client.credentials(environmentId, participant, ttl)` issues a scoped participant credential. `client.cancel(environmentId)` cancels a running session without its writer lease and returns unresolved agent work and external operations. `client.compare(ids)` retains the existing response fields and adds typed `metric_groups`, `warnings` and selected report revisions. Incompatible units or definitions appear in separate groups. Legacy reports without definitions remain visible as raw values. Every method rejects with a typed `ServiceError` only after validating the service's bounded standard error envelope; malformed or non-JSON upstream errors remain generic.
+Collections return `{ items, nextCursor, links }` with an opaque cursor. Snapshot and dataset
+exports are incremental async generators:
 
-Run `npm test` to compile and exercise client request shapes and inherited-record reconstruction. See [SDK compatibility](../../docs/COMPATIBILITY.md) for details.
+```ts
+for await (const row of client.streamSnapshotRecords(snapshotId)) {
+  process(row);
+}
+```
+
+## Contract notes
+
+- Digests are server-authoritative and opaque here; the client never recomputes them.
+- Every method rejects with a typed `ServiceError` only after validating the service's bounded
+  error envelope. Malformed or non-JSON upstream errors stay generic.
+- There is no trainer-execution method. The server reads training receipts and does not run
+  integrations.
+- The client does not restore agent processes or qualify hosted execution.
+
+`npm test` compiles the package and exercises request shapes and inherited-record reconstruction.
+
+Source and documentation: https://github.com/kimpton-ai/environment-harness ·
+[Compatibility](../../docs/COMPATIBILITY.md) · MIT licensed, see LICENSE.

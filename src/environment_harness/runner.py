@@ -5,24 +5,43 @@ import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import contextmanager, suppress
+from contextvars import ContextVar
 
-from .contracts import Action, Principal
+from .contracts import Action
 from .errors import Conflict
 from .store import digest, encode, uid
 
+#: Writer-lease heartbeat interval. Named so tests can drive the loop.
+_HEARTBEAT_SECONDS = 20
+
 _monotonic = time.monotonic
+_inference_context: ContextVar[dict | None] = ContextVar("environment_harness_inference", default=None)
+
+
+def current_inference_context():
+    value = _inference_context.get()
+    return dict(value) if value is not None else None
 
 
 @contextmanager
-def writer(session, environment, researcher, owner):
-    lease = session.lease(environment, researcher, owner, ttl=90)
+def inference_context(value):
+    token = _inference_context.set(value)
+    try:
+        yield
+    finally:
+        _inference_context.reset(token)
+
+
+@contextmanager
+def writer(session, environment, access, owner):
+    lease = session.lease(environment, access, owner, ttl=90)
     stop = threading.Event()
     failures = []
 
     def renew():
-        while not stop.wait(20):
+        while not stop.wait(_HEARTBEAT_SECONDS):
             try:
-                renewed = session.renew(environment, researcher, lease, ttl=90)
+                renewed = session.renew(environment, access, lease, ttl=90)
                 if renewed["epoch"] != lease["epoch"]:
                     raise Conflict("writer lost its lease")
             except Exception as exc:
@@ -37,13 +56,13 @@ def writer(session, environment, researcher, owner):
         stop.set()
         heartbeat.join(timeout=2)
         with suppress(Conflict):
-            session.release(environment, researcher, lease)
+            session.release(environment, access, lease)
 
 
-def _prepare(session, environment, principal, observation, lease):
-    key = (environment, observation["revision"], principal.participant, principal.generation)
+def _prepare(session, environment, access, observation, lease):
+    key = (environment, observation["revision"], access.participant, access.generation)
     with session.store.transaction() as db:
-        row = session.store.environment(db, environment, principal, ("agent",))
+        row = session.store.environment(db, environment, access, "participant.act")
         session._fence(row, lease)
         if row["status"] != "running":
             raise Conflict("session is not running")
@@ -63,11 +82,11 @@ def _prepare(session, environment, principal, observation, lease):
         return work
 
 
-def _invoke(session, environment, principal, observation, agent, work, lease, cancel_event=None):
+def _invoke(session, environment, access, observation, agent, work, lease, cancel_event=None):
     cancel_event = cancel_event or threading.Event()
-    key = (environment, observation["revision"], principal.participant, principal.generation)
+    key = (environment, observation["revision"], access.participant, access.generation)
     with session.store.transaction() as db:
-        row = session.store.environment(db, environment, principal, ("agent",))
+        row = session.store.environment(db, environment, access, "participant.act")
         session._fence(row, lease)
         current = db.execute(
             "SELECT * FROM agent_work WHERE environment=? AND revision=? AND participant=? AND generation=?",
@@ -82,10 +101,10 @@ def _invoke(session, environment, principal, observation, agent, work, lease, ca
             or cancel_event.is_set()
         ):
             raise Conflict("agent work already dispatched or phase changed")
-        member = json.loads(row["participants"])[principal.participant]
+        member = json.loads(row["participants"])[access.participant]
         _validate_agent(agent, member)
         registration = next(
-            p for p in json.loads(row["manifest"])["participants"] if p["id"] == principal.participant
+            p for p in json.loads(row["manifest"])["participants"] if p["id"] == access.participant
         )
         session.store.append(
             db,
@@ -94,13 +113,13 @@ def _invoke(session, environment, principal, observation, agent, work, lease, ca
             "agent.dispatched",
             {
                 "operation_id": work["id"],
-                "participant": principal.participant,
-                "generation": principal.generation,
+                "participant": access.participant,
+                "generation": access.generation,
                 "implementation": agent.implementation,
                 "config_hash": digest(registration["config"]),
                 "policy_version": member["policy_version"],
             },
-            (principal.participant,),
+            (access.participant,),
         )
         db.execute(
             "UPDATE agent_work SET status='dispatching' "
@@ -113,13 +132,23 @@ def _invoke(session, environment, principal, observation, agent, work, lease, ca
         if cancel_event.is_set():
             raise Conflict("agent execution cancelled")
         cancellable = getattr(agent, "act_cancellable", None)
-        payload = cancellable(observation, cancel_event) if callable(cancellable) else agent.act(observation)
+        correlation = {
+            "agent_operation_id": work["id"],
+            "observation_id": observation["id"],
+            "participant": access.participant,
+            "generation": access.generation,
+            "revision": observation["revision"],
+        }
+        with inference_context(correlation):
+            payload = (
+                cancellable(observation, cancel_event) if callable(cancellable) else agent.act(observation)
+            )
         if not isinstance(payload, dict):
             raise ValueError("agent returned a non-object action")
         state = agent.checkpoint() if member["agent_state"] is not None else None
         response = encode(payload)
         with session.store.transaction() as db:
-            row = session.store.environment(db, environment, principal, ("agent",))
+            row = session.store.environment(db, environment, access, "participant.act")
             session._fence(row, lease)
             current = db.execute(
                 "SELECT id,status FROM agent_work WHERE environment=? AND revision=? AND participant=? AND generation=?",
@@ -135,7 +164,7 @@ def _invoke(session, environment, principal, observation, agent, work, lease, ca
             ):
                 raise Conflict("agent response no longer owns its dispatch")
             members = json.loads(row["participants"])
-            members[principal.participant]["agent_state"] = state
+            members[access.participant]["agent_state"] = state
             limit = json.loads(row["manifest"])["policy"]["max_state_bytes"]
             if len(response) > limit or len(encode(members)) > limit:
                 raise Conflict("agent response or continuation exceeds state limit")
@@ -169,7 +198,7 @@ def _validate_agent(agent, member):
 
 
 @contextmanager
-def phase_guard(session, environment, researcher, lease, failures, signals, deadline):
+def phase_guard(session, environment, access, lease, failures, signals, deadline):
     stop = threading.Event()
 
     def monitor():
@@ -180,7 +209,7 @@ def phase_guard(session, environment, researcher, lease, failures, signals, dead
                         "agent phase deadline exceeded; unresolved work requires reconciliation"
                     )
                 with session.store.transaction() as db:
-                    row = session.store.environment(db, environment, researcher)
+                    row = session.store.environment(db, environment, access, "session.write")
                     session._fence(row, lease)
                     if row["status"] != "running":
                         raise Conflict("environment stopped during agent work")
@@ -201,17 +230,17 @@ def phase_guard(session, environment, researcher, lease, failures, signals, dead
         thread.join(timeout=2)
 
 
-def run(session, environment, researcher, agents, *, turns=10, owner=None, phase_timeout=300):
+def run(session, environment, access, agents, *, turns=10, owner=None, phase_timeout=300):
     if not 0 < phase_timeout <= 86400:
         raise ValueError("phase_timeout must be between zero and one day")
     owner = owner or uid()
     for _ in range(turns):
-        status = session.get(environment, researcher)
+        status = session.get(environment, access)
         if status["status"] != "running":
             break
-        with writer(session, environment, researcher, owner) as (lease, failures):
+        with writer(session, environment, access, owner) as (lease, failures):
             with session.store.transaction() as db:
-                row = session.store.environment(db, environment, researcher)
+                row = session.store.environment(db, environment, access, "session.write")
                 members = json.loads(row["participants"])
                 accepted = {
                     r["participant"]
@@ -222,7 +251,7 @@ def run(session, environment, researcher, agents, *, turns=10, owner=None, phase
                 }
             signals = {p: threading.Event() for p in members}
             deadline = _monotonic() + phase_timeout
-            with phase_guard(session, environment, researcher, lease, failures, signals, deadline):
+            with phase_guard(session, environment, access, lease, failures, signals, deadline):
                 pool = ThreadPoolExecutor(max_workers=min(32, len(members)))
                 pending = {}
                 try:
@@ -231,22 +260,18 @@ def run(session, environment, researcher, agents, *, turns=10, owner=None, phase
                     for participant, member in members.items():
                         if not member["active"] or participant in accepted:
                             continue
-                        principal = Principal(
-                            tenant=researcher.tenant,
-                            subject=member["controller"],
-                            role="agent",
-                            environment=environment,
-                            participant=participant,
-                            generation=member["generation"],
-                        )
-                        observation = session.observe(environment, principal)
+                        # The runner uses the same participant-scoped context a
+                        # remote participant credential would resolve to, so
+                        # local and HTTP isolation cannot drift.
+                        scoped = session.participant_context(environment, access, participant)
+                        observation = session.observe(environment, scoped)
                         if not observation["may_act"]:
                             continue
-                        work = _prepare(session, environment, principal, observation, lease)
+                        work = _prepare(session, environment, scoped, observation, lease)
                         if work["response"] is None:
                             _validate_agent(agents.get(participant), member)
-                        dispatches.append((principal, observation, work))
-                    for principal, observation, work in dispatches:
+                        dispatches.append((scoped, observation, work))
+                    for scoped, observation, work in dispatches:
                         if failures:
                             raise failures[0]
                         if work["response"] is not None:
@@ -256,14 +281,14 @@ def run(session, environment, researcher, agents, *, turns=10, owner=None, phase
                                 _invoke,
                                 session,
                                 environment,
-                                principal,
+                                scoped,
                                 observation,
-                                agents[principal.participant],
+                                agents[scoped.participant],
                                 work,
                                 lease,
-                                signals[principal.participant],
+                                signals[scoped.participant],
                             )
-                        pending[future] = (principal, observation, work)
+                        pending[future] = (scoped, observation, work)
                     while pending:
                         if failures:
                             raise failures[0]
@@ -271,7 +296,7 @@ def run(session, environment, researcher, agents, *, turns=10, owner=None, phase
                             raise TimeoutError(
                                 "agent phase deadline exceeded; unresolved work requires reconciliation"
                             )
-                        if session.get(environment, researcher)["status"] != "running":
+                        if session.get(environment, access)["status"] != "running":
                             raise Conflict("environment stopped during agent work")
                         done, _ = wait(pending, timeout=0.2, return_when=FIRST_COMPLETED)
                         if _monotonic() >= deadline:
@@ -279,14 +304,14 @@ def run(session, environment, researcher, agents, *, turns=10, owner=None, phase
                                 "agent phase deadline exceeded; unresolved work requires reconciliation"
                             )
                         for future in done:
-                            principal, observation, work = pending.pop(future)
+                            scoped, observation, work = pending.pop(future)
                             payload = json.loads(future.result())
                             receipt = session.submit(
                                 environment,
-                                principal,
+                                scoped,
                                 Action(
                                     operation_id=work["id"],
-                                    participant=principal.participant,
+                                    participant=scoped.participant,
                                     observation_id=observation["id"],
                                     revision=observation["revision"],
                                     payload=payload,
@@ -297,8 +322,8 @@ def run(session, environment, researcher, agents, *, turns=10, owner=None, phase
                     if failures:
                         raise failures[0]
                     if session.environment.spec.phase_deadline == "coordinator":
-                        session.close_phase(environment, researcher, lease, revision=status["revision"])
-                    session.resolve(environment, researcher, lease)
+                        session.close_phase(environment, access, lease, revision=status["revision"])
+                    session.resolve(environment, access, lease)
                 finally:
                     for signal in signals.values():
                         signal.set()
@@ -311,4 +336,4 @@ def run(session, environment, researcher, agents, *, turns=10, owner=None, phase
                     if managed:
                         wait(managed, timeout=3)
                     pool.shutdown(wait=False, cancel_futures=True)
-    return session.get(environment, researcher)
+    return session.get(environment, access)

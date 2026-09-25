@@ -1,15 +1,17 @@
 import json
 
 import pytest
+from _credentials import bearer
 from fastapi.testclient import TestClient
 
-from environment_harness.contracts import Action, AgentSpec, ExperimentSpec, Principal, RunPolicy, ScoreReport
+from environment_harness.access import _AccessContext
+from environment_harness.contracts import Action, AgentSpec, ExperimentSpec, RunPolicy, ScoreReport
 from environment_harness.errors import Conflict, Forbidden, Unsupported
 from environment_harness.evaluation import rollouts
 from environment_harness.fixtures import SyntheticAgent, SyntheticEnvironment
 from environment_harness.operations import Operations
 from environment_harness.runner import run
-from environment_harness.runtime import EnvironmentSession
+from environment_harness.runtime import _SessionRuntime
 from environment_harness.server import create_app
 from environment_harness.store import EvidenceStore, uid
 
@@ -18,8 +20,8 @@ from environment_harness.store import EvidenceStore, uid
 def setup(tmp_path):
     store = EvidenceStore(tmp_path)
     env = SyntheticEnvironment()
-    session = EnvironmentSession(store, env)
-    researcher = Principal(tenant="test", subject="researcher", role="researcher")
+    session = _SessionRuntime(store, env)
+    researcher = _AccessContext(tenant="test", subject="researcher", policy="trusted-local")
     spec = ExperimentSpec(
         environment=env.spec,
         participants=tuple(
@@ -31,7 +33,7 @@ def setup(tmp_path):
     )
     environment = session.create(spec, researcher)["id"]
     agents = {
-        p: Principal(tenant="test", subject=p, role="agent", environment=environment, participant=p)
+        p: _AccessContext(tenant="test", subject=p, policy="participant", session=environment, participant=p)
         for p in ("alice", "bob")
     }
     return store, session, researcher, spec, environment, agents
@@ -85,18 +87,20 @@ def test_isolation_artifacts_and_authority(setup):
     with pytest.raises(Forbidden):
         session.observe(environment, agents["alice"], "bob")
     with pytest.raises(Forbidden):
-        session.get(environment, who.model_copy(update={"tenant": "other"}))
+        session.get(environment, who.replace(tenant="other"))
     artifact = store.artifact(environment, agents["alice"], b"private")
     with pytest.raises(Forbidden):
         store.read_artifact(environment, agents["bob"], artifact["id"])
     assert store.read_artifact(environment, agents["alice"], artifact["id"])[0] == b"private"
     lease = session.lease(environment, who, "test")
-    replacement = session.transfer(environment, who, lease, "alice", "replacement")
+    transferred = session.transfer(environment, who, lease, "alice", "replacement")
+    assert transferred["controller"] == "replacement" and transferred["generation"] == 1
     with pytest.raises(Forbidden):
         session.observe(environment, agents["alice"])
+    replacement = session.participant_context(environment, who, "alice")
     assert session.observe(environment, replacement)["generation"] == 1
     private = json.dumps(list(store.replay(environment, agents["bob"])))
-    assert "synthetic-secret-alice" not in private
+    assert "synthetic-briefing-alice" not in private
 
 
 def test_fencing_and_resume_preserve_state(setup):
@@ -110,7 +114,7 @@ def test_fencing_and_resume_preserve_state(setup):
         session.checkpoint(environment, who, old)
     for principal in agents.values():
         decide(session, environment, principal)
-    restored = EnvironmentSession(EvidenceStore(store.root), SyntheticEnvironment())
+    restored = _SessionRuntime(EvidenceStore(store.root), SyntheticEnvironment())
     restored.resume(environment, who, new)
     restored.resolve(environment, who, new)
     assert restored.observe(environment, agents["alice"])["payload"]["total"] == 2
@@ -122,8 +126,8 @@ def test_ambiguous_external_write_is_not_repeated(setup):
         max_cost_micros=10, allowed_endpoints=("https://example.invalid",), allowed_operations=("read",)
     )
     environment = session.create(spec.model_copy(update={"policy": policy}), who)["id"]
-    agent = Principal(
-        tenant=who.tenant, subject="alice", role="agent", environment=environment, participant="alice"
+    agent = _AccessContext(
+        tenant=who.tenant, subject="alice", policy="participant", session=environment, participant="alice"
     )
     ops = Operations(store)
     ops.prepare(
@@ -165,39 +169,41 @@ def test_ambiguous_external_write_is_not_repeated(setup):
 
 def test_api_and_viewer(setup):
     store, session, who, spec, environment, agents = setup
-    token = store.issue(who)
+    token = bearer(store, who)
     client = TestClient(create_app(session))
     headers = {"Authorization": "Bearer " + token}
     assert client.get("/").status_code == 200
-    assert client.get("/home").status_code == 200
-    assert client.get(f"/session/{environment}/overview").status_code == 200
-    assert client.get(f"/session/{environment}/turns").status_code == 200
-    assert client.get(f"/session/{environment}/progression").status_code == 200
-    assert client.get(f"/session/{environment}/reports").status_code == 200
-    assert client.get(f"/session/{environment}/compare-turns").status_code == 404
-    assert client.get(f"/session/{environment}/unknown").status_code == 404
+    assert client.get("/overview").status_code == 200
+    assert client.get(f"/sessions/{environment}/overview").status_code == 200
+    assert client.get(f"/sessions/{environment}/turns").status_code == 200
+    assert client.get(f"/sessions/{environment}/progression").status_code == 200
+    assert client.get(f"/sessions/{environment}/trajectory").status_code == 200
+    assert client.get(f"/sessions/{environment}/configuration").status_code == 200
+    assert client.get(f"/sessions/{environment}/reports").status_code == 404
+    assert client.get(f"/sessions/{environment}/unknown").status_code == 404
     assert client.get("/viewer/app.js").status_code == 200
     assert client.get("/viewer/timeline.js").status_code == 200
     page = client.get("/").text
     # The viewer reads evidence. Checkpoint, resume, cancel and branch stay command-line and SDK operations.
     assert 'id="checkpoint"' not in page and "branch-dialog" not in page
-    assert client.get("/v1/environments").status_code == 401
-    assert client.get("/v1/environments", headers=headers).json()[0]["id"] == environment
+    assert client.get("/v1/sessions").status_code == 401
+    assert client.get("/v1/sessions", headers=headers).json()["items"][0]["metadata"]["id"] == environment
     response = client.get(
-        f"/v1/environments/{environment}/events", headers=headers | {"Accept": "text/event-stream"}
+        f"/v1/sessions/{environment}/evidence", headers=headers | {"Accept": "text/event-stream"}
     )
     assert "event: evidence" in response.text
-    agent_token = store.issue(agents["alice"])
+    agent_token = bearer(store, agents["alice"])
     agent_headers = {"Authorization": "Bearer " + agent_token}
     assert (
         client.get(
-            f"/v1/environments/{environment}/observation?participant=bob", headers=agent_headers
+            f"/v1/sessions/{environment}/participants/bob/observation",
+            headers=agent_headers,
         ).status_code
         == 403
     )
     assert (
         client.post(
-            f"/v1/environments/{environment}/commands",
+            f"/v1/sessions/{environment}/commands",
             headers=agent_headers,
             json={"operation": "lease", "arguments": {"owner": "bad"}},
         ).status_code
@@ -237,8 +243,8 @@ def test_separate_environment_process(tmp_path):
 
     env = ProcessEnvironment([sys.executable, "-m", "environment_harness.worker"])
     try:
-        session = EnvironmentSession(EvidenceStore(tmp_path), env)
-        who = Principal(tenant="process", subject="researcher", role="researcher")
+        session = _SessionRuntime(EvidenceStore(tmp_path), env)
+        who = _AccessContext(tenant="process", subject="researcher", policy="trusted-local")
         spec = ExperimentSpec(
             environment=env.spec,
             participants=(AgentSpec(id="alice", implementation="synthetic-agent@1", policy_version="1"),),
@@ -260,8 +266,8 @@ def test_delayed_outcomes_require_a_report(tmp_path):
 
     env = Delayed()
     store = EvidenceStore(tmp_path)
-    session = EnvironmentSession(store, env)
-    who = Principal(tenant="delayed", subject="researcher", role="researcher")
+    session = _SessionRuntime(store, env)
+    who = _AccessContext(tenant="delayed", subject="researcher", policy="trusted-local")
     spec = ExperimentSpec(
         environment=env.spec,
         participants=(AgentSpec(id="alice", implementation="synthetic-agent@1", policy_version="1"),),

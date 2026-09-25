@@ -1,4 +1,100 @@
 export type Json = null | boolean | number | string | Json[] | {[key: string]: Json};
+export interface ResourceMetadata {id:string;createdAt:string;labels:Record<string,string>;}
+export interface ResourceFeatures {required:string[];optional:string[];}
+/** Clocks are preserved independently; sequence and causes order the stream. */
+export interface RecordTime {
+  wallTime?:string;monotonicOffsetNs?:number;monotonicOrigin?:string;
+  native?:{clock:string;value:Json}[];
+}
+/** The one typed envelope every management collection page uses. */
+export interface CollectionPage<Item> {items:Item[];nextCursor:string|null;links:{self:string;next:string|null};}
+export interface EnvironmentReference {id:string;version:string;specDigest:string;}
+export interface ResourceReference {kind:string;id:string;apiVersion?:string;digest?:string|null;revision?:number|null;label?:string|null;}
+export interface ScenarioSet {
+  apiVersion:'environmentharness.dev/v1alpha1';kind:'ScenarioSet';metadata:ResourceMetadata;
+  features:ResourceFeatures;spec:{name:string;scenarios:{id:string;digest:string;split?:string|null;labels?:Record<string,string>}[];schemaVersion:string;provenance:Record<string,Json>;metrics:{id:string;version:string;unit:string}[]};
+  status:{scenarioCount:number;setDigest:string};extensions:Record<string,Json>;
+}
+export interface ParticipantBinding {id:string;implementation:string;policyVersion:string;configDigest:string;checkpoint:boolean;}
+export interface Experiment {
+  apiVersion:'environmentharness.dev/v1alpha1';kind:'Experiment';metadata:ResourceMetadata;
+  features:ResourceFeatures;
+  spec:{name:string;environment:Record<string,Json>;environmentReference:EnvironmentReference;scenarioSet:ResourceReference;participants:ParticipantBinding[];scorers:{id:string;version:string}[];trials:number;seed:number;turns:number;purpose:string;split:string;limits:Record<string,Json>};
+  status:{state:string;progress:{planned:number;created:number;pending:number;running:number;completed:number;failed:number;cancelled:number;uncertain:number};startedAt?:string|null;lastActivityAt?:string|null;lockDigest:string;scores:Record<string,Json>;limitations:string[]};
+  extensions:Record<string,Json>;
+}
+export interface Session {
+  apiVersion:'environmentharness.dev/v1alpha1';kind:'Session';metadata:ResourceMetadata;
+  features:ResourceFeatures;
+  spec:{experiment:ResourceReference;scenario:{id:string;digest:string};trial:number;seed:number;turns:number;environment:Record<string,Json>;environmentReference:EnvironmentReference;participants:ParticipantBinding[];lineage:{root:string;parent?:string|null;checkpoint?:string|null;interventions:Record<string,Json>};purpose:string;split:string};
+  status:{collection:SourceCollection;execution:LifecycleStatus;termination:{terminated:boolean;truncated:boolean;reason:string|null};verifiedOutcome:{state:string;evidence:string[]};revision:number;evidenceSequence:number;evidenceHead?:string|null;scoreReadiness:string;reports:ResourceReference[];artifacts:ResourceReference[];trajectory?:ResourceReference|null;reconciliation?:string|null};
+  extensions:Record<string,Json>;
+}
+export interface CheckpointResource {
+  apiVersion:'environmentharness.dev/v1alpha1';kind:'Checkpoint';metadata:ResourceMetadata;
+  features:ResourceFeatures;
+  spec:{session:ResourceReference;revision:number;environmentReference:EnvironmentReference;participants:{id:string;implementation:string;policyVersion:string;exact:boolean;unavailable:string[]}[];stateReference:string;artifacts:ResourceReference[];evidenceSequence:number;evidenceHead?:string|null};
+  status:{exact:boolean;resumable:boolean;branchable:boolean;limitations:string[];unavailable:string[];checkpointDigest:string};
+  extensions:Record<string,Json>;
+}
+export interface Policy {
+  apiVersion:'environmentharness.dev/v1alpha1';kind:'Policy';metadata:ResourceMetadata;
+  features:ResourceFeatures;spec:{implementation:string;version:string|null;lineage:string[];artifact:Json};
+  status:{digest:string};extensions:Record<string,Json>;
+}
+export interface Capability {name:string;enabled:boolean;reason:string|null;}
+export interface CapabilityDocument {protocol:string;capabilities:Capability[];}
+export interface BranchRequest {checkpoint:string;interventions?:Record<string,Json>;idempotency_key?:string|null;turns?:number|null;}
+export interface LifecycleStatus {state:string;[key:string]:Json;}
+export interface TrajectoryRecord {
+  type:string;id:string;sequence:number;segment:string;participant:string|null;revision:number;
+  causes:string[];time:RecordTime;data:Record<string,Json>;
+  extensions:Record<string,Json>;
+}
+export interface TrajectorySegment {
+  id:string;kind:string;sequenceStart:number;sequenceEnd:number;
+  collection:SourceCollection;execution:LifecycleStatus;
+  continues?:string|null;interruption?:string|null;
+  nativeStart?:{clock:string;value:Json}[];nativeEnd?:{clock:string;value:Json}[];
+}
+export interface SourceCollection {
+  state:string;acknowledgedPosition?:string|null;acknowledgedHash?:string|null;
+  backlog?:number|null;gaps?:string[];captureFailures?:string[];[key:string]:Json|undefined;
+}
+/** Records are a separately paged stream: `status` never materializes them. */
+export interface Trajectory {
+  apiVersion:'environmentharness.dev/v1alpha1';kind:'Trajectory';metadata:ResourceMetadata;
+  features:ResourceFeatures;spec:{manifest:Record<string,Json>};status:{segments:TrajectorySegment[];
+    recordCount:number;sequenceStart:number;sequenceEnd:number;
+    collection:SourceCollection;execution:LifecycleStatus;
+    termination:{terminated:boolean;truncated:boolean;reason:string};
+    verifiedOutcome:{state:string;evidence:string[]};evidenceHead:string;trajectoryDigest:string};
+  extensions:Record<string,Json>;
+}
+export interface TrajectorySnapshot {
+  apiVersion:'environmentharness.dev/v1alpha1';kind:'TrajectorySnapshot';metadata:ResourceMetadata;
+  features:ResourceFeatures;spec:Record<string,Json>;status:{recordCount:number;artifactCount:number;
+    manifestDigest:string;recordsDigest:string;snapshotDigest:string;complete:boolean};extensions:Record<string,Json>;
+}
+export interface TrajectorySummary {id:string;trajectory_id:string;origin:'native'|'imported';collection_state:string;execution_state:string;namespace:string;run_id:string;}
+export interface TrajectoryRecordPage {records:TrajectoryRecord[];cursor:number;has_more:boolean;}
+export interface DatasetMember {trajectoryId:string;snapshotId:string;trajectoryDigest:string;snapshotDigest:string;schemaVersion:string;purpose:string;}
+export interface TrajectoryDataset {
+  apiVersion:'environmentharness.dev/v1alpha1';kind:'TrajectoryDataset';metadata:ResourceMetadata;
+  features:ResourceFeatures;spec:{name:string;members:DatasetMember[]};
+  status:{recordCount:number;datasetDigest:string;rewardState:string};extensions:Record<string,Json>;
+}
+export interface TrainingRun {
+  apiVersion:'environmentharness.dev/v1alpha1';kind:'TrainingRun';metadata:ResourceMetadata;
+  features:ResourceFeatures;spec:{datasetId:string;datasetDigest:string;integration:string;integrationVersion:string;configDigest:string};
+  status:{state:string;policy:Record<string,Json>;metrics:Json;artifacts:Json[];limitations:string[];completedAt:string};extensions:Record<string,Json>;
+}
+export interface SourceRegistration {namespace:string;run_id:string;schema_version:string;environment:Record<string,Json>;participants:string[];purpose:'evaluation'|'training';split?:'training'|'heldout';}
+export interface SourceRegistrationReceipt {id:string;namespace:string;run_id:string;registration_hash:string;collection_state:string;}
+export interface SourceRecord {id:string;position:string;previous_hash:string;source_hash:string;type:string;segment:string;participant:string|null;revision:number;time:{wallTime:string;native:{clock:string;value:Json}[]};data:Record<string,Json>;audience:string[];}
+export interface SourceAcknowledgement {source:string;accepted:number;position:string;hash:string;collection_state:string;}
+export interface SourceStatus {source:string;namespace:string;run_id:string;registration_hash:string;collection_state:string;execution_state:string;acknowledged_position:string|null;acknowledged_hash:string|null;backlog:number|null;gaps:string[];capture_failures:string[];termination:{terminated:boolean;truncated:boolean;reason:string};verified_outcome:{state:string;evidence:string[]};}
+export interface SourceStatusUpdate {collection_state:string;execution_state:string;termination:{terminated:boolean;truncated:boolean;reason:string};verified_outcome:{state:string;evidence:string[]};terminal_position:string;terminal_hash:string;backlog:number|null;gaps:string[];capture_failures:string[];}
 export type CommandOperation = 'advance'|'lease'|'release'|'cancel'|'resolve'|'close_phase'|'checkpoint'|'reconcile_agent'|'resume'|'branch'|'control'|'memory'|'transfer'|'external_event'|'finalize_outcomes';
 export interface AdvanceResponse {status:string;revision:number;deadline_exceeded?:boolean;event?:number;}
 export interface Scenario<Input extends Json = Json> {id:string;input:Input;reference:Json;metadata:Record<string,Json>;}
@@ -7,7 +103,7 @@ export interface Environment {id: string; revision: number; status: string; part
 export interface Action {operation_id: string; participant: string; observation_id: string; revision: number; payload: Record<string, Json>;}
 export interface Observation {id: string; environment: string; participant: string; generation: number; revision: number; payload: Record<string, Json>; memory: Record<string, Json>; may_act: boolean; deadline: number;}
 export interface Lease {owner: string; epoch: number; expires: number;}
-export interface Checkpoint {id: string; revision: number; hash: string; exact_agents: boolean;}
+export interface CheckpointReceipt {id: string; revision: number; hash: string; exact_agents: boolean;}
 export interface Capabilities {replay: boolean; checkpoint: boolean; resume: boolean; branch: boolean; agent_checkpoint: boolean; rendered_requests: boolean; token_ids: boolean; logprobs: boolean; live_reads: boolean; external_writes: boolean;}
 export interface OperationSpec {name:string; version:string; config:Record<string,Json>;}
 export interface EnvironmentSpec {protocol: 'environment-session.v1'; id: string; version: string; implementation: string; observation_schema: Record<string,Json>; action_schema: Record<string,Json>; scenario_schema: Record<string,Json>; scheduling: 'sequential'|'simultaneous'|'event'; modalities: string[]; operations:OperationSpec[]; capabilities: Capabilities; purposes: ('evaluation'|'training')[]; stale_action: 'reject'; missing_action: 'reject'|'noop'; phase_seconds: number; phase_deadline: 'wall'|'coordinator';}
@@ -22,7 +118,8 @@ export interface ActivityEvent {id:number; topic:string; experiment:string|null;
 export interface ActivitySession {kind:'session'; id:string; scenario_id:string; trial:number; status:string; current_turn:number; target_turns:number|null; participants:string[]; latest_activity:string|null; failure:string|null; environment:Record<string,Json>; frozen:Record<string,Json>; updated:number;}
 export interface ActivityScenario {kind:'scenario'; id:string; input:Json; reference:Json; metadata:Record<string,Json>; status:string; completed:number; total:number; running:number; queued:number; failed:number; latest_activity:string|null; sessions:ActivitySession[]; updated:number;}
 export interface ActivityExperiment {kind:'experiment'; id:string; name:string; status:string; progress:{completed:number;total:number}; running:number; queued:number; failed:number; latest_activity:string|null; score_summary:Record<string,number>; frozen:Record<string,Json>; scenarios:ActivityScenario[]; sessions:ActivitySession[]; updated:number;}
-export interface ActivitySnapshot {summary:{running:number;queued:number;failed:number}; experiments:ActivityExperiment[]; standalone:ActivitySession[]; cursor:number;}
+/** "Snapshot" names the immutable TrajectorySnapshot, so this is the hierarchy. */
+export interface ActivityHierarchy {summary:{running:number;queued:number;failed:number}; experiments:ActivityExperiment[]; standalone:ActivitySession[]; cursor:number;}
 export interface ActivityPage {events:ActivityEvent[];cursor:number;}
 export interface TurnSeriesPoint {turn:number;revision:number;value:number;}
 export interface TurnSeriesRecord {

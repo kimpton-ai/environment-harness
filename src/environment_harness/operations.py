@@ -67,7 +67,7 @@ class Operations:
     def prepare(
         self,
         environment,
-        who,
+        access,
         operation_id,
         *,
         endpoint,
@@ -80,7 +80,7 @@ class Operations:
             raise ValueError("invalid operation")
         request = {"endpoint": endpoint, "operation": operation, "payload": payload, "write": write}
         with self.store.transaction() as db:
-            row = self.store.environment(db, environment, who, ("agent",))
+            row = self.store.environment(db, environment, access, "operation.prepare")
             policy = json.loads(row["manifest"])["policy"]
             if row["status"] != "running":
                 raise Conflict("session is not running")
@@ -94,7 +94,7 @@ class Operations:
             if prior:
                 if (
                     prior["request"] != encode(request)
-                    or prior["participant"] != who.participant
+                    or prior["participant"] != access.participant
                     or prior["reservation"] != maximum_cost_micros
                 ):
                     raise Conflict("operation identifier reused")
@@ -106,8 +106,8 @@ class Operations:
                 (
                     environment,
                     operation_id,
-                    who.participant,
-                    who.generation,
+                    access.participant,
+                    access.generation,
                     encode(request),
                     maximum_cost_micros,
                 ),
@@ -122,17 +122,17 @@ class Operations:
                 "operation.intent",
                 {
                     "id": operation_id,
-                    "participant": who.participant,
+                    "participant": access.participant,
                     "request": request,
                     "maximum_cost_micros": maximum_cost_micros,
                 },
-                (who.participant,),
+                (access.participant,),
             )
             return {"id": operation_id, "status": "prepared"}
 
-    def dispatch(self, session, environment, who, lease, operation_id, provider=None):
+    def dispatch(self, session, environment, access, lease, operation_id, provider=None):
         with self.store.transaction() as db:
-            row = self.store.environment(db, environment, who, ("worker", "researcher"))
+            row = self.store.environment(db, environment, access, "session.write")
             session._fence(row, lease)
             op = db.execute(
                 "SELECT * FROM operations WHERE environment=? AND id=?", (environment, operation_id)
@@ -186,7 +186,7 @@ class Operations:
 
                 def authority(validated):
                     with self.store.transaction() as db:
-                        current = self.store.environment(db, environment, who, ("worker", "researcher"))
+                        current = self.store.environment(db, environment, access, "session.write")
                         session._fence(current, lease)
                         actor = json.loads(current["participants"])[op["participant"]]
                         revision = getattr(validated, "goal_revision", None)
@@ -210,9 +210,9 @@ class Operations:
                     (environment, operation_id),
                 )
             raise
-        return self.settle(environment, who, operation_id, receipt)
+        return self.settle(environment, access, operation_id, receipt)
 
-    def settle(self, environment, who, operation_id, receipt):
+    def settle(self, environment, access, operation_id, receipt):
         if (
             not isinstance(receipt, dict)
             or not isinstance(receipt.get("cost_micros"), int)
@@ -222,7 +222,7 @@ class Operations:
         if receipt.get("operation_id") != f"{environment}:{operation_id}":
             raise Conflict("receipt operation identity mismatch")
         with self.store.transaction() as db:
-            row = self.store.environment(db, environment, who, ("worker", "researcher"))
+            row = self.store.environment(db, environment, access, "session.write")
             op = db.execute(
                 "SELECT * FROM operations WHERE environment=? AND id=?", (environment, operation_id)
             ).fetchone()
@@ -254,9 +254,9 @@ class Operations:
             )
             return receipt
 
-    def reconcile(self, environment, who, operation_id, provider):
+    def reconcile(self, environment, access, operation_id, provider):
         with self.store.transaction() as db:
-            self.store.environment(db, environment, who, ("worker", "researcher"))
+            self.store.environment(db, environment, access, "session.write")
             op = db.execute(
                 "SELECT * FROM operations WHERE environment=? AND id=?", (environment, operation_id)
             ).fetchone()
@@ -271,11 +271,11 @@ class Operations:
         receipt = provider.lookup(f"{environment}:{operation_id}")
         if receipt is None:
             raise Unsupported("provider cannot prove outcome; dispatch stays blocked")
-        return self.settle(environment, who, operation_id, receipt)
+        return self.settle(environment, access, operation_id, receipt)
 
-    def cancel_prepared(self, environment, who):
+    def cancel_prepared(self, environment, access):
         with self.store.transaction() as db:
-            row = self.store.environment(db, environment, who, ("researcher", "worker"))
+            row = self.store.environment(db, environment, access, "session.write")
             return self._cancel_prepared(db, environment, row)
 
     def _cancel_prepared(self, db, environment, row):

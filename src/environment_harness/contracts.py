@@ -110,6 +110,14 @@ class RunPolicy(Record):
     allowed_endpoints: tuple[str, ...] = ()
     allowed_operations: tuple[str, ...] = ()
     external_writes: bool = False
+    #: How much inference evidence `InstrumentedModel` records. `summary` keeps
+    #: identities, usage, timing, counts, finish reason, and validation state
+    #: without rendered content, token IDs, or log probabilities. `training` is
+    #: opt-in, requires training entitlement, and needs a bounded cumulative
+    #: artifact budget. See docs/TRAINING.md for storage estimates.
+    inference_capture: Literal["none", "summary", "training"] = "summary"
+    #: Cumulative per-Session budget for inference-detail artifacts, in bytes.
+    max_inference_artifact_bytes: int = Field(default=67108864, ge=0)
 
 
 class ExperimentSpec(Record):
@@ -139,6 +147,12 @@ class ExperimentSpec(Record):
             raise ValueError("heldout environments cannot be used for training")
         if self.policy.external_writes and not self.environment.capabilities.external_writes:
             raise ValueError("external writes unsupported")
+        if self.policy.inference_capture == "training":
+            if self.purpose != "training" or self.split != "training":
+                raise ValueError("token-faithful inference capture requires training entitlement")
+            if not self.policy.max_inference_artifact_bytes:
+                # Reject an unbounded token-faithful budget before execution.
+                raise ValueError("training inference capture requires a bounded artifact budget")
         available = {operation.name: operation for operation in self.environment.operations}
         selected = [operation.name for operation in self.operations]
         if len(selected) != len(set(selected)):
@@ -167,6 +181,28 @@ class ActivityPage(Record):
     """A resumable JSON page from an activity feed."""
 
     events: tuple[ActivityEvent, ...] = ()
+    cursor: int = Field(ge=0)
+
+
+class EvidenceEvent(Record):
+    """One hash-chained row from a session's append-only evidence journal."""
+
+    environment: str
+    seq: int = Field(ge=1)
+    revision: int = Field(ge=0)
+    kind: str
+    payload: Json = Field(default_factory=dict)
+    audience: tuple[str, ...] = ()
+    event_time: float | None = None
+    ingested: float
+    previous: str = Field(pattern=r"^[0-9a-f]{64}$")
+    hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class EvidencePage(Record):
+    """A resumable JSON page of session evidence."""
+
+    events: tuple[EvidenceEvent, ...] = ()
     cursor: int = Field(ge=0)
 
 
@@ -237,8 +273,12 @@ class ActivitySummary(Record):
     failed: int = Field(ge=0)
 
 
-class ActivitySnapshot(Record):
-    """Authoritative recovery snapshot for the live activity hierarchy."""
+class ActivityHierarchy(Record):
+    """Authoritative recovery projection for the live ownership hierarchy.
+
+    "Snapshot" names the immutable ``TrajectorySnapshot`` resource, so the
+    activity projection uses "hierarchy" instead.
+    """
 
     summary: ActivitySummary
     experiments: tuple[ActivityExperiment, ...] = ()
@@ -246,13 +286,22 @@ class ActivitySnapshot(Record):
     cursor: int = Field(ge=0)
 
 
-class Principal(Record):
-    tenant: str
-    subject: str
-    role: Literal["researcher", "agent", "scorer", "worker"]
-    environment: str | None = None
-    participant: str | None = None
-    generation: int = 0
+class BranchRequest(Record):
+    """Strict command that creates one child Session from a Checkpoint.
+
+    There is no separate Branch resource: the child Session carries the parent
+    Session, Checkpoint, lineage, and intervention references.
+    """
+
+    checkpoint: str = Field(min_length=1, max_length=200)
+    interventions: Json = Field(default_factory=dict)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=200)
+    turns: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def serializable(self):
+        json.dumps(self.interventions, allow_nan=False)
+        return self
 
 
 class Action(Record):

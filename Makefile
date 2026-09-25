@@ -3,15 +3,18 @@ setup:
 	uv sync --extra server
 	npm ci --ignore-scripts --prefix packages/typescript
 check:
-	uv run --no-sync pytest --cov --cov-branch --cov-report=term-missing --cov-report=json
+	uv run --no-sync pytest --cov --cov-branch --cov-report=term-missing --cov-report=json --cov-report=xml
 	uv run --no-sync python scripts/check_coverage.py
+	uv run --no-sync diff-cover coverage.xml --compare-branch=origin/main --fail-under=100
 	uv run --no-sync ruff format --check src tests scripts examples
 	uv run --no-sync ruff check src tests scripts examples
 	uv run --no-sync pyright
 	uv run --no-sync python scripts/build_contracts.py --check
 	uv run --no-sync python scripts/build_openapi.py --check
+	uv run --no-sync python scripts/build_http_migration.py --check
 	uv run --no-sync python scripts/build_viewer.py --check
 	uv run --no-sync python scripts/check_browser_ui.py
+	uv run --no-sync python scripts/check_browser_security.py
 	npm run typecheck --prefix packages/typescript
 	npm test --prefix packages/typescript
 	uv run --no-sync python scripts/check_repository.py

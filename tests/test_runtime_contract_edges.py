@@ -3,11 +3,13 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from environment_harness import AgentSpec, EnvironmentSession, EvidenceStore, ExperimentSpec, Principal
+from environment_harness import AgentSpec, EvidenceStore, ExperimentSpec
+from environment_harness.access import _AccessContext
 from environment_harness.contracts import Action, Capabilities, OperationSpec, RunPolicy
 from environment_harness.errors import Conflict, Forbidden, Unsupported
 from environment_harness.fixtures import SyntheticEnvironment
 from environment_harness.operations import Operations
+from environment_harness.runtime import _SessionRuntime
 from environment_harness.store import uid
 
 
@@ -64,15 +66,21 @@ def test_operation_contracts_reject_ambiguous_or_unserializable_configuration():
 def test_session_creation_is_scoped_idempotent_and_split_safe(tmp_path):
     environment = SyntheticEnvironment()
     store = EvidenceStore(tmp_path)
-    session = EnvironmentSession(store, environment)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
-    agent = Principal(tenant="tenant", subject="a", role="agent", participant="a")
+    session = _SessionRuntime(store, environment)
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
+    agent = _AccessContext(
+        tenant="tenant",
+        subject="a",
+        policy="participant",
+        session="0" * 32,
+        participant="a",
+    )
     spec = specification(environment)
 
-    with pytest.raises(Forbidden, match="unscoped researcher"):
+    with pytest.raises(Forbidden, match="policy denies|cannot create sessions"):
         session.create(spec, agent)
-    with pytest.raises(Forbidden, match="unscoped researcher"):
-        session.create(spec, researcher.model_copy(update={"environment": "a" * 32}))
+    with pytest.raises(Forbidden, match="policy denies|cannot create sessions"):
+        session.create(spec, researcher.replace(session="a" * 32))
 
     changed_environment = SyntheticEnvironment()
     changed_environment.spec = changed_environment.spec.model_copy(update={"version": "2"})
@@ -87,8 +95,9 @@ def test_session_creation_is_scoped_idempotent_and_split_safe(tmp_path):
     assert session.create(spec, researcher, environment_id=identifier) == first
     with pytest.raises(Conflict, match="reused with different experiment"):
         session.create(spec.model_copy(update={"seed": 2}), researcher, environment_id=identifier)
-    with pytest.raises(Forbidden, match="researcher required"):
-        session.list(agent)
+    # A participant credential sees only the session it is bound to.
+    assert session.list(agent) == []
+    assert [item["id"] for item in session.list(agent.replace(session=identifier))] == [identifier]
     for invalid_limit in (0, 1001):
         with pytest.raises(ValueError, match="page size"):
             session.list_page(researcher, invalid_limit)
@@ -103,30 +112,30 @@ def test_session_creation_is_scoped_idempotent_and_split_safe(tmp_path):
     final_page, final_cursor = session.list_page(researcher, limit=2, cursor=cursor)
     assert [row["id"] for row in final_page] == [identifier]
     assert final_cursor is None
-    scoped_agent = agent.model_copy(update={"environment": identifier})
+    scoped_agent = agent.replace(session=identifier)
     assert "experiment" not in session.get(identifier, scoped_agent)
 
     incompatible = SyntheticEnvironment()
     incompatible.spec = incompatible.spec.model_copy(update={"version": "2"})
     with pytest.raises(Conflict, match="version changed"):
-        EnvironmentSession(store, incompatible).observe(identifier, researcher, "a")
+        _SessionRuntime(store, incompatible).observe(identifier, researcher, "a")
 
 
 def test_state_size_split_lease_and_participant_edges(tmp_path):
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
 
     class Large(SyntheticEnvironment):
         def initialize(self, experiment):
             return {"state": "x" * 2000}
 
     large = Large()
-    session = EnvironmentSession(EvidenceStore(tmp_path / "large"), large)
+    session = _SessionRuntime(EvidenceStore(tmp_path / "large"), large)
     with pytest.raises(Conflict, match="state limit"):
         session.create(specification(large, policy=RunPolicy(max_state_bytes=1024)), researcher)
 
     environment = SyntheticEnvironment()
     store = EvidenceStore(tmp_path / "normal")
-    session = EnvironmentSession(store, environment)
+    session = _SessionRuntime(store, environment)
     spec = specification(environment)
     identifier = session.create(spec, researcher)["id"]
     with pytest.raises(ValueError, match="invalid lease"):
@@ -161,11 +170,13 @@ def test_state_size_split_lease_and_participant_edges(tmp_path):
 def test_action_submission_distinguishes_authorization_and_phase_failures(tmp_path):
     environment_impl = SyntheticEnvironment()
     store = EvidenceStore(tmp_path)
-    session = EnvironmentSession(store, environment_impl)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    session = _SessionRuntime(store, environment_impl)
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     spec = specification(environment_impl)
     environment = session.create(spec, researcher)["id"]
-    agent = Principal(tenant="tenant", subject="a", role="agent", environment=environment, participant="a")
+    agent = _AccessContext(
+        tenant="tenant", subject="a", policy="participant", session=environment, participant="a"
+    )
     observation = session.observe(environment, agent)
 
     def action(**changes):
@@ -195,8 +206,8 @@ def test_action_submission_distinguishes_authorization_and_phase_failures(tmp_pa
 def test_memory_transfer_and_external_event_limits(tmp_path):
     implementation = SyntheticEnvironment("event")
     store = EvidenceStore(tmp_path)
-    session = EnvironmentSession(store, implementation)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    session = _SessionRuntime(store, implementation)
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     spec = specification(
         implementation,
         participants=(
@@ -206,7 +217,9 @@ def test_memory_transfer_and_external_event_limits(tmp_path):
         policy=RunPolicy(max_state_bytes=1024),
     )
     environment = session.create(spec, researcher)["id"]
-    agent = Principal(tenant="tenant", subject="a", role="agent", environment=environment, participant="a")
+    agent = _AccessContext(
+        tenant="tenant", subject="a", policy="participant", session=environment, participant="a"
+    )
     with pytest.raises(Unsupported, match="checkpoint hook"):
         session.memory(environment, agent, {}, agent_state={})
     with pytest.raises(Conflict, match="context limit"):
@@ -246,14 +259,14 @@ def test_memory_transfer_and_external_event_limits(tmp_path):
     with store.transaction() as db:
         db.execute("UPDATE actions SET status='failed' WHERE environment=?", (environment,))
     replacement = session.transfer(environment, researcher, lease, "a", "replacement", active=False)
-    assert replacement.generation == 1
+    assert replacement["generation"] == 1
 
 
 def test_checkpoint_resume_branch_and_terminal_guards(tmp_path):
     implementation = SyntheticEnvironment()
     store = EvidenceStore(tmp_path)
-    session = EnvironmentSession(store, implementation)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    session = _SessionRuntime(store, implementation)
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     spec = specification(implementation)
     environment = session.create(spec, researcher)["id"]
     lease = session.lease(environment, researcher, "worker")
@@ -281,11 +294,11 @@ def test_checkpoint_resume_branch_and_terminal_guards(tmp_path):
 
 
 def test_checkpoint_and_phase_guards_cover_unsupported_modes(tmp_path):
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
 
     unsupported = SyntheticEnvironment()
     unsupported.spec = unsupported.spec.model_copy(update={"capabilities": Capabilities()})
-    session = EnvironmentSession(EvidenceStore(tmp_path / "unsupported"), unsupported)
+    session = _SessionRuntime(EvidenceStore(tmp_path / "unsupported"), unsupported)
     environment = session.create(specification(unsupported), researcher)["id"]
     lease = session.lease(environment, researcher, "worker")
     with pytest.raises(Unsupported, match="checkpoints"):
@@ -299,14 +312,16 @@ def test_checkpoint_and_phase_guards_cover_unsupported_modes(tmp_path):
 
     coordinator = SyntheticEnvironment()
     coordinator.spec = coordinator.spec.model_copy(update={"phase_deadline": "coordinator"})
-    coordinated = EnvironmentSession(EvidenceStore(tmp_path / "coordinator"), coordinator)
+    coordinated = _SessionRuntime(EvidenceStore(tmp_path / "coordinator"), coordinator)
     identifier = coordinated.create(specification(coordinator), researcher)["id"]
     coordinated_lease = coordinated.lease(identifier, researcher, "worker")
     with pytest.raises(Conflict, match="phase no longer active"):
         coordinated.close_phase(identifier, researcher, coordinated_lease, revision=1)
 
     operations = Operations(coordinated.store)
-    agent = Principal(tenant="tenant", subject="a", role="agent", environment=identifier, participant="a")
+    agent = _AccessContext(
+        tenant="tenant", subject="a", policy="participant", session=identifier, participant="a"
+    )
     with coordinated.store.transaction() as db:
         row = coordinated.store.environment(db, identifier, agent)
         manifest = json.loads(row["manifest"])
@@ -328,9 +343,9 @@ def test_checkpoint_and_phase_guards_cover_unsupported_modes(tmp_path):
 
 
 def test_split_and_resolve_phase_guards(tmp_path):
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     implementation = SyntheticEnvironment()
-    session = EnvironmentSession(EvidenceStore(tmp_path / "split"), implementation)
+    session = _SessionRuntime(EvidenceStore(tmp_path / "split"), implementation)
     session.create(specification(implementation), researcher)
     training = specification(
         implementation,
@@ -349,7 +364,7 @@ def test_split_and_resolve_phase_guards(tmp_path):
         session.resolve(identifier, researcher, lease)
 
     event_impl = SyntheticEnvironment("event")
-    event_session = EnvironmentSession(EvidenceStore(tmp_path / "event"), event_impl)
+    event_session = _SessionRuntime(EvidenceStore(tmp_path / "event"), event_impl)
     event_id = event_session.create(specification(event_impl), researcher)["id"]
     event_lease = event_session.lease(event_id, researcher, "worker")
     with pytest.raises(Conflict, match="awaits an event"):

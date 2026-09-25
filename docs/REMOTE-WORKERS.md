@@ -1,5 +1,26 @@
 # Remote workers and external agents
 
+Distributed decision workers and remote training execution are deferred. The trajectory contracts
+do not require one process or one physical database, but a future transport must preserve source
+namespace/run identity, source position and hash, trajectory/segment/record identity, causal links,
+participant generation, agent-work operation ID, observation ID, policy identity, audience, and
+receipt identity. A queue acknowledgement is not evidence that a domain action or training job
+succeeded.
+
+Historical import is not a remote-worker protocol. It reads an existing journal and never launches
+models, restores simulators, or dispatches effects. The separately owned **Pluggable
+Decision-Selection Seam** may define an optional *local* decision runtime, but its providers do not
+become remote EnvironmentHarness workers through that fact alone. See
+[Decision runtime](DECISION-RUNTIME.md).
+
+To be explicit about what is deferred rather than merely unfinished: there is no distributed
+decision-worker protocol, no remote training execution, no managed job queue, and no scheduler that
+spans processes. Local scheduling is restart-safe because the database is the durable queue and the
+thread pool is a disposable executor; that design deliberately does not generalize to a second
+process claiming the same store. `reconcile()` assumes no other live process is executing the same
+store. A future distributed implementation must preserve the durable identities listed above before
+it can claim equivalence, and it must not reinterpret a queue acknowledgement as a receipt.
+
 `python -m environment_harness.worker_server PLUGIN` runs the serializable native
 environment contract on port 8080. Supply a distinct `ENVIRONMENT_WORKER_TOKEN`
 of at least 32 characters and put the service behind authenticated HTTPS. The

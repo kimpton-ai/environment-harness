@@ -19,7 +19,6 @@ from environment_harness import (
     EnvironmentHarness,
     EnvironmentOperation,
     OperationSpec,
-    Principal,
     Scenario,
 )
 from environment_harness.contracts import Finding, MetricDefinition, RunPolicy, ScoreReport
@@ -28,8 +27,6 @@ from environment_harness.fixtures import (
     SyntheticScenarioInput,
     SyntheticShowcaseAgent,
 )
-from environment_harness.operations import Operations
-from environment_harness.runner import run as run_turns
 
 SCORER = "external-simulator-review"
 SCORER_VERSION = "1"
@@ -138,41 +135,33 @@ class ExternalReviewEnvironment(SyntheticEnvironment):
         )
 
 
-def run_with_external_move(session, environment, researcher, agents, *, turns):
+def run_with_external_move(control, agents, *, turns):
     """Run ordinary turns and one fenced external operation per session."""
-    result = run_turns(session, environment, researcher, agents, turns=1)
-    observation = session.observe(environment, researcher, "alice")
+    result = control.advance(agents, turns=1)
+    observation = control.observation("alice")
     distance = max(1, abs(int(observation["payload"]["total"])))
-    agent = Principal(
-        tenant=researcher.tenant,
-        subject="alice",
-        role="agent",
-        environment=environment,
-        participant="alice",
-    )
-    operations = Operations(session.store)
-    operations.prepare(
-        environment,
-        agent,
+    # The control derives the participant scope; examples never build one.
+    control.prepare_operation(
         "move-after-turn-1",
+        participant="alice",
         endpoint="external-simulator",
         operation="example.move-entity",
-        payload={"entity": environment, "delta": [distance, 0, 0]},
+        payload={"entity": control.id, "delta": [distance, 0, 0]},
         write=True,
     )
-    lease = session.lease(environment, researcher, "external-simulator-example")
+    lease = control.lease("external-simulator-example")
     try:
-        operations.dispatch(session, environment, researcher, lease, "move-after-turn-1")
+        control.dispatch_operation(lease, "move-after-turn-1")
     finally:
-        session.release(environment, researcher, lease)
+        control.release(lease)
     if turns > 1:
-        result = run_turns(session, environment, researcher, agents, turns=turns - 1)
+        result = control.advance(agents, turns=turns - 1)
     return result
 
 
-def score_session(store, researcher, environment):
+def score_session(session):
     """Score the recorded receipt and link a finding to ordinary turn evidence."""
-    evidence = list(store.replay(environment, researcher))
+    evidence = list(session.replay())
     executed = [event for event in evidence if event["kind"] == "action.executed"]
     receipt_events = [event for event in evidence if event["kind"] == "operation.receipt"]
     receipt = receipt_events[-1]["payload"]["receipt"]
@@ -224,7 +213,7 @@ def score_session(store, researcher, environment):
             "source": "examples/external_environment_experiment.py",
         },
     )
-    stored = store.report(environment, researcher, report)
+    stored = session.report(report)
     return receipt, stored
 
 
@@ -235,8 +224,8 @@ def run_experiment(store, *, turns: int = 3):
     try:
         harness = EnvironmentHarness(
             store,
-            environment_factory=lambda: ExternalReviewEnvironment(client),
-            agent_factories={
+            environment=lambda: ExternalReviewEnvironment(client),
+            agents={
                 "alice": lambda: SyntheticShowcaseAgent(0),
                 "bob": lambda: SyntheticShowcaseAgent(1),
             },
@@ -265,7 +254,7 @@ def run_experiment(store, *, turns: int = 3):
         ).run()
         sessions = []
         for session in result.sessions:
-            receipt, report = score_session(harness.store, harness.researcher, session.id)
+            receipt, report = score_session(session)
             sessions.append(
                 {
                     "id": session.id,
@@ -290,7 +279,7 @@ def run_experiment(store, *, turns: int = 3):
             "sessions": sessions,
             "review": {
                 "command": ["environment-harness", "--store", str(store), "serve", "--open"],
-                "path": f"/experiment/{result.id}",
+                "path": f"/experiments/{result.id}",
             },
         }
     finally:

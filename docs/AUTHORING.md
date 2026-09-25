@@ -1,5 +1,25 @@
 # Implement an environment
 
+## Design for portable trajectories
+
+Keep environment-native action semantics, state, rewards, and verification in the environment.
+EnvironmentHarness projects the frozen manifest and recorded evidence into a trajectory; authors do
+not write a second journal. Give policy implementations stable identifiers and increment
+`policy_version` when resuming with different behavior would be incompatible.
+
+Domain evidence that has no core record type uses a reverse-domain namespace such as
+`com.example.unreal.frame` or `com.example.drone.telemetry`. Extension payloads must be JSON,
+bounded, and observational. They cannot grant authority, choose credentials, relax limits, or alter
+core reward semantics. Put large binary or random-access detail in an artifact and record its digest.
+
+For delayed rewards, emit stable reward identities and use `supersedes` to replace provisional
+values. Do not mutate old evidence. Training datasets reject missing, cyclic, ambiguous, retracted,
+or non-finite reward chains. Keep `terminated`, `truncated`, and verified outcome distinct.
+
+The separately owned **Pluggable Decision-Selection Seam** defines candidate selection records. An
+environment still owns candidate-to-action meaning and every externally visible operation remains
+individually authorized, receipted, and reconcilable.
+
 An environment owns its rules and serializable environment state. EnvironmentHarness owns the session journal, participant delivery, checkpoint storage and execution coordination. The included [SyntheticEnvironment](../src/environment_harness/fixtures.py) is a complete, small reference implementation.
 
 Implement these members (`operations` is optional):
@@ -64,7 +84,37 @@ class UnrealEnvironment:
 
 The operation name is the portable capability identity; `config` is a JSON snapshot, not a live client or credential. Keep engine handles, Java bridges, sockets and secrets on the class instance. `Operations.prepare` records intent and reserves cost before dispatch. `Operations.dispatch` finds the class through the environment mapping and supplies a fenced authority callback. Implement `lookup` when the external system can prove an ambiguous result; otherwise the operation remains blocked for explicit recovery.
 
-For a standalone session, call `Operations.prepare` and `dispatch` while the session is running. For a grouped experiment, implement the public `SessionRunner` protocol and pass the callable as `session_runner` to `EnvironmentHarness`. The runner receives the runtime session, environment-session ID, researcher principal, agent instances and turn budget, so it can interleave the standard `environment_harness.runner.run` function with environment operations without replacing experiment scheduling or persistence. It must return the current record from `session.get(environment, researcher)`; the harness rejects stale, partial or unrelated results. The default runner remains unchanged when this argument is omitted.
+For a standalone session, call `Operations.prepare` and `dispatch` while the session is running. For a grouped experiment, implement the public `SessionRunner` protocol and pass the callable as `session_runner` to `EnvironmentHarness`.
+
+The harness calls the runner with a typed `SessionControl`, the agent instances, and the turn budget. The control carries the private session runtime and the trusted local access context internally, so a custom runner never receives, constructs, or forwards an authorization value:
+
+```python
+def run_with_inspection(control, agents, *, turns):
+    result = control.advance(agents, turns=1)
+    observation = control.observation("alice")
+    # The control derives the participant scope; a caller never builds one.
+    control.prepare_operation(
+        "inspect-after-turn-1",
+        participant="alice",
+        endpoint="synthetic",
+        operation="synthetic.inspect-total",
+        payload={"total": observation["payload"]["total"]},
+    )
+    lease = control.lease("synthetic-inspection")
+    try:
+        control.dispatch_operation(lease, "inspect-after-turn-1")
+    finally:
+        control.release(lease)
+    if turns > 1:
+        result = control.advance(agents, turns=turns - 1)
+    return result
+```
+
+`SessionControl` exposes exactly `id`, `status`, `advance`, `observation`, `lease`, `release`, `prepare_operation`, and `dispatch_operation`. `advance` runs the standard turn loop, so a runner interleaves environment operations without replacing experiment scheduling or persistence. The runner must return the current record — `control.advance(...)` or `control.status()`; the harness rejects stale, partial or unrelated results. The default runner, `run_session`, advances the whole budget and remains in place when this argument is omitted.
+
+A decision that authorizes an operation is recorded as trajectory evidence with zero, one, or many
+operation links. The environment owns execution and reward behavior; the selector runtime that chose
+the decision is separately owned. See [Decision runtime](DECISION-RUNTIME.md).
 
 Scoring stays separate from execution. Freeze scorer IDs through `scoring_versions`, replay the authorized evidence after a session, create a `ScoreReport`, and save it with `EvidenceStore.report`. Metrics appear in Progression and Reports. A `Finding` must link to its supporting observation, action and outcome evidence; operation receipts can contribute metrics and provenance, but they do not bypass the finding evidence contract. The complete example applies the same scorer to every session in the experiment so compatible metrics can be aggregated.
 

@@ -96,79 +96,259 @@ class EnvironmentClient:
         except urllib.error.URLError:
             raise HarnessError("environment service unavailable; reconcile before retrying a write") from None
 
-    def create(self, experiment, operation_id=None):
+    def stream_jsonl(self, path):
+        request = urllib.request.Request(
+            self.endpoint + path,
+            headers={
+                "Authorization": "Bearer " + self.token,
+                "Accept": "application/x-ndjson",
+            },
+            method="GET",
+        )
+        try:
+            with self.opener.open(request, timeout=self.timeout) as response:
+                for raw in response:
+                    if len(raw) > 16777216:
+                        raise HarnessError("stream record size limit exceeded")
+                    if not raw.strip():
+                        continue
+                    try:
+                        value = json.loads(raw)
+                    except (UnicodeDecodeError, json.JSONDecodeError):
+                        raise HarnessError("environment service returned malformed JSONL") from None
+                    if not isinstance(value, dict):
+                        raise HarnessError("environment service returned malformed JSONL")
+                    yield value
+        except urllib.error.HTTPError as error:
+            raise _service_error(error) from None
+        except urllib.error.URLError:
+            raise HarnessError("environment service unavailable; reconcile before retrying a write") from None
+
+    # -- Experiments and sessions -------------------------------------------
+    def create_experiment(self, experiment, operation_id=None):
+        """Create the implicit experiment-of-one and its single Session."""
+
         body = experiment.model_dump(mode="json") if hasattr(experiment, "model_dump") else experiment
-        return self.request("POST", "/v1/environments", body, operation_id=operation_id or uid())
+        return self.request("POST", "/v1/experiments", body, operation_id=operation_id or uid())
 
-    def list(self, *, limit=100, cursor=None):
-        query = {"limit": limit}
-        if cursor is not None:
-            query["cursor"] = cursor
-        return self.request("GET", "/v1/environments?" + urllib.parse.urlencode(query))
+    def experiments(self, *, limit=100, cursor=None):
+        return self.request("GET", "/v1/experiments?" + self._query(limit=limit, cursor=cursor))
 
-    def get(self, environment):
-        return self.request("GET", "/v1/environments/" + urllib.parse.quote(environment, safe=""))
+    def experiment(self, experiment):
+        return self.request("GET", f"/v1/experiments/{self._key(experiment)}")
 
-    def observe(self, environment, participant=None):
-        path = f"/v1/environments/{urllib.parse.quote(environment, safe='')}/observation"
-        if participant is not None:
-            path += "?" + urllib.parse.urlencode({"participant": participant})
-        return self.request("GET", path)
-
-    def submit(self, environment, action):
+    def experiment_sessions(self, experiment, *, limit=100, cursor=None):
         return self.request(
-            "POST", f"/v1/environments/{urllib.parse.quote(environment, safe='')}/actions", action
+            "GET",
+            f"/v1/experiments/{self._key(experiment)}/sessions?" + self._query(limit=limit, cursor=cursor),
         )
 
-    def command(self, environment, operation, **arguments):
+    def scenario_sets(self, *, limit=100, cursor=None):
+        return self.request("GET", "/v1/scenario-sets?" + self._query(limit=limit, cursor=cursor))
+
+    def scenario_set(self, scenario_set):
+        return self.request("GET", f"/v1/scenario-sets/{self._key(scenario_set)}")
+
+    def sessions(self, *, experiment=None, limit=100, cursor=None):
+        return self.request(
+            "GET", "/v1/sessions?" + self._query(experiment=experiment, limit=limit, cursor=cursor)
+        )
+
+    def session(self, session):
+        return self.request("GET", f"/v1/sessions/{self._key(session)}")
+
+    def observe(self, session, participant):
+        return self.request(
+            "GET", f"/v1/sessions/{self._key(session)}/participants/{self._key(participant)}/observation"
+        )
+
+    def submit(self, session, participant, action):
         return self.request(
             "POST",
-            f"/v1/environments/{urllib.parse.quote(environment, safe='')}/commands",
+            f"/v1/sessions/{self._key(session)}/participants/{self._key(participant)}/actions",
+            action,
+        )
+
+    def credentials(self, session, participant, *, ttl=3600):
+        return self.request(
+            "POST",
+            f"/v1/sessions/{self._key(session)}/participants/{self._key(participant)}/credentials",
+            {"ttl": ttl},
+        )
+
+    def command(self, session, operation, **arguments):
+        return self.request(
+            "POST",
+            f"/v1/sessions/{self._key(session)}/commands",
             {"operation": operation, "arguments": arguments},
         )
 
-    def agent_work(self, environment):
-        return self.request("GET", f"/v1/environments/{urllib.parse.quote(environment, safe='')}/agent-work")
+    def cancel(self, session):
+        return self.command(session, "cancel")
 
-    def cancel(self, environment):
-        return self.command(environment, "cancel")
+    def advance(self, session):
+        return self.command(session, "advance")
 
-    def advance(self, environment):
-        return self.command(environment, "advance")
+    def invocations(self, session):
+        return self.request("GET", f"/v1/sessions/{self._key(session)}/invocations")
 
-    def credentials(self, environment, participant, *, ttl=3600):
+    def checkpoints(self, session, *, limit=100, cursor=None):
         return self.request(
-            "POST",
-            f"/v1/environments/{urllib.parse.quote(environment, safe='')}/credentials",
-            {"participant": participant, "ttl": ttl},
+            "GET", f"/v1/sessions/{self._key(session)}/checkpoints?" + self._query(limit=limit, cursor=cursor)
         )
 
-    def reports(self, environment):
-        return self.request("GET", f"/v1/environments/{urllib.parse.quote(environment, safe='')}/reports")
-
-    def events(self, environment, after=0):
+    def create_checkpoint(self, session, *, exact_agents=False):
         return self.request(
-            "GET", f"/v1/environments/{urllib.parse.quote(environment, safe='')}/events?after={after}"
+            "POST", f"/v1/sessions/{self._key(session)}/checkpoints", {"exact_agents": exact_agents}
         )
 
-    def activity_snapshot(self):
-        return self.request("GET", "/v1/activity/snapshot")
+    def checkpoint(self, session, checkpoint):
+        return self.request("GET", f"/v1/sessions/{self._key(session)}/checkpoints/{self._key(checkpoint)}")
+
+    def branch(self, session, request):
+        body = request.model_dump(mode="json") if hasattr(request, "model_dump") else request
+        return self.request("POST", f"/v1/sessions/{self._key(session)}/branches", body)
+
+    def scores(self, session):
+        return self.request("GET", f"/v1/sessions/{self._key(session)}/scores")
+
+    def publish_score(self, session, report):
+        body = report.model_dump(mode="json") if hasattr(report, "model_dump") else report
+        return self.request("POST", f"/v1/sessions/{self._key(session)}/scores", body)
+
+    def evidence(self, session, after=0):
+        return self.request("GET", f"/v1/sessions/{self._key(session)}/evidence?after={after}")
+
+    # -- Activity -----------------------------------------------------------
+    def activity_hierarchy(self):
+        return self.request("GET", "/v1/activity/hierarchy")
 
     def activity(self, after=0):
-        return self.request("GET", f"/v1/activity/events?after={after}")
+        return self.request("GET", f"/v1/activity?after={after}")
 
     def experiment_activity(self, experiment, after=0):
-        key = urllib.parse.quote(experiment, safe="")
-        return self.request("GET", f"/v1/experiments/{key}/events?after={after}")
+        return self.request("GET", f"/v1/experiments/{self._key(experiment)}/activity?after={after}")
 
-    def session_activity(self, environment, after=0):
-        key = urllib.parse.quote(environment, safe="")
-        return self.request("GET", f"/v1/environments/{key}/activity?after={after}")
+    def session_activity(self, session, after=0):
+        return self.request("GET", f"/v1/sessions/{self._key(session)}/activity?after={after}")
 
-    def replay(self, environment):
+    # -- Trajectories, snapshots, and datasets --------------------------------
+    def capabilities(self):
+        return self.request("GET", "/v1/capabilities")
+
+    def policies(self, *, limit=100, cursor=None):
+        return self.request("GET", "/v1/policies?" + self._query(limit=limit, cursor=cursor))
+
+    def policy(self, policy):
+        return self.request("GET", f"/v1/policies/{self._key(policy)}")
+
+    def trajectories(self, *, limit=100, cursor=None):
+        return self.request("GET", "/v1/trajectories?" + self._query(limit=limit, cursor=cursor))
+
+    def trajectory(self, trajectory):
+        return self.request("GET", f"/v1/trajectories/{self._key(trajectory)}")
+
+    def trajectory_records(self, trajectory, *, after=0, limit=200):
+        return self.request(
+            "GET",
+            f"/v1/trajectories/{self._key(trajectory)}/records?" + self._query(after=after, limit=limit),
+        )
+
+    def freeze_trajectory(self, trajectory):
+        return self.request("POST", f"/v1/trajectories/{self._key(trajectory)}/snapshots")
+
+    def trajectory_snapshots(self, trajectory, *, limit=100, cursor=None):
+        return self.request(
+            "GET",
+            f"/v1/trajectories/{self._key(trajectory)}/snapshots?" + self._query(limit=limit, cursor=cursor),
+        )
+
+    def snapshots(self, *, trajectory=None, limit=100, cursor=None):
+        return self.request(
+            "GET", "/v1/snapshots?" + self._query(trajectory=trajectory, limit=limit, cursor=cursor)
+        )
+
+    def snapshot(self, snapshot):
+        return self.request("GET", f"/v1/snapshots/{self._key(snapshot)}")
+
+    def snapshot_records(self, snapshot, *, after=0, limit=200):
+        return self.request(
+            "GET", f"/v1/snapshots/{self._key(snapshot)}/records?" + self._query(after=after, limit=limit)
+        )
+
+    def stream_snapshot_records(self, snapshot):
+        """Stream NDJSON through a hand-written iterator, not generated decoding."""
+
+        yield from self.stream_jsonl(f"/v1/snapshots/{self._key(snapshot)}/records")
+
+    def freeze_dataset(self, name, trajectories):
+        return self.request("POST", "/v1/datasets", {"name": name, "trajectories": trajectories})
+
+    def datasets(self, *, limit=100, cursor=None):
+        return self.request("GET", "/v1/datasets?" + self._query(limit=limit, cursor=cursor))
+
+    def dataset(self, dataset):
+        return self.request("GET", f"/v1/datasets/{self._key(dataset)}")
+
+    def dataset_records(self, dataset, *, after=0, limit=200):
+        return self.request(
+            "GET", f"/v1/datasets/{self._key(dataset)}/records?" + self._query(after=after, limit=limit)
+        )
+
+    def stream_dataset_records(self, dataset):
+        yield from self.stream_jsonl(f"/v1/datasets/{self._key(dataset)}/records")
+
+    def training_run(self, training_run):
+        return self.request("GET", f"/v1/training-runs/{self._key(training_run)}")
+
+    def training_runs(self, *, dataset=None, limit=100, cursor=None):
+        return self.request(
+            "GET", "/v1/training-runs?" + self._query(dataset=dataset, limit=limit, cursor=cursor)
+        )
+
+    # -- Sources --------------------------------------------------------------
+    def register_source(self, registration):
+        body = registration.model_dump(mode="json") if hasattr(registration, "model_dump") else registration
+        return self.request("POST", "/v1/sources", body)
+
+    def sources(self, *, limit=100, cursor=None):
+        return self.request("GET", "/v1/sources?" + self._query(limit=limit, cursor=cursor))
+
+    def source(self, source):
+        return self.request("GET", f"/v1/sources/{self._key(source)}")
+
+    def ingest_source(self, source, batch):
+        body = batch.model_dump(mode="json") if hasattr(batch, "model_dump") else batch
+        return self.request("POST", f"/v1/sources/{self._key(source)}/records", body)
+
+    def source_records(self, source, *, after=0, limit=200):
+        return self.request(
+            "GET", f"/v1/sources/{self._key(source)}/records?" + self._query(after=after, limit=limit)
+        )
+
+    def report_source_status(self, source, status):
+        body = status.model_dump(mode="json") if hasattr(status, "model_dump") else status
+        return self.request("POST", f"/v1/sources/{self._key(source)}/status-reports", body)
+
+    def source_status(self, source):
+        return self.request("GET", f"/v1/sources/{self._key(source)}/status")
+
+    # -- Evaluation -----------------------------------------------------------
+    def compare(self, sessions):
+        return self.request("POST", "/v1/comparisons", {"sessions": list(sessions)})
+
+    @staticmethod
+    def _key(value):
+        return urllib.parse.quote(str(value), safe="")
+
+    @staticmethod
+    def _query(**values):
+        return urllib.parse.urlencode({key: value for key, value in values.items() if value is not None})
+
+    def replay(self, session):
         cursor = 0
         while True:
-            page = self.events(environment, cursor)
+            page = self.evidence(session, cursor)
             if not page["events"]:
                 return
             yield from page["events"]

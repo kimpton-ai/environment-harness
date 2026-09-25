@@ -1,11 +1,14 @@
 """Local browser connection must not remove the supplier API's authentication boundary."""
 
 import pytest
+from _credentials import bearer
 from fastapi.testclient import TestClient
 
-from environment_harness import EnvironmentSession, EvidenceStore, Principal, local_viewer
+from environment_harness import EvidenceStore, local_viewer
+from environment_harness.access import _AccessContext
 from environment_harness.fixtures import SyntheticEnvironment
 from environment_harness.local_viewer import LocalViewerAccess
+from environment_harness.runtime import _SessionRuntime
 from environment_harness.server import create_app
 
 ORIGIN = "http://127.0.0.1:8765"
@@ -13,9 +16,9 @@ ORIGIN = "http://127.0.0.1:8765"
 
 @pytest.fixture
 def local_service(tmp_path):
-    session = EnvironmentSession(EvidenceStore(tmp_path), SyntheticEnvironment())
-    principal = Principal(tenant="local", subject="researcher", role="researcher")
-    access = LocalViewerAccess(ORIGIN, session.store.issue(principal))
+    session = _SessionRuntime(EvidenceStore(tmp_path), SyntheticEnvironment())
+    principal = _AccessContext(tenant="local", subject="researcher", policy="trusted-local")
+    access = LocalViewerAccess(ORIGIN, bearer(session.store, principal))
     app = create_app(session, local_access=access)
     return session, access, app
 
@@ -24,7 +27,7 @@ def test_local_viewer_reconnects_while_api_stays_authenticated(local_service):
     session, access, app = local_service
     client = TestClient(app, base_url=ORIGIN, client=("127.0.0.1", 50000))
     headers = {"Origin": ORIGIN}
-    assert client.get("/v1/environments").status_code == 401
+    assert client.get("/v1/sessions").status_code == 401
     html = client.get("/").text
     assert access.credential not in html
     first = client.post("/local/connect", headers=headers)
@@ -34,10 +37,8 @@ def test_local_viewer_reconnects_while_api_stays_authenticated(local_service):
     assert first.json() == second.json()
     credential = first.json()["token"]
     assert session.store.authenticate(credential).tenant == "local"
-    assert (
-        client.get("/v1/environments", headers={"Authorization": "Bearer " + credential}).status_code == 200
-    )
-    assert client.get("/v1/environments").status_code == 401
+    assert client.get("/v1/sessions", headers={"Authorization": "Bearer " + credential}).status_code == 200
+    assert client.get("/v1/sessions").status_code == 401
     assert client.get("/viewer/config").json() == {"authentication": "local"}
 
 
@@ -69,7 +70,7 @@ def test_supplier_service_has_no_local_connection_endpoint(local_service):
     client = TestClient(create_app(session), base_url=ORIGIN, client=("127.0.0.1", 50000))
     response = client.post("/local/connect", headers={"Origin": ORIGIN})
     assert response.status_code == 404
-    assert client.get("/v1/environments").status_code == 401
+    assert client.get("/v1/sessions").status_code == 401
     assert client.get("/viewer/config").json() == {"authentication": "credential"}
 
 
@@ -116,13 +117,13 @@ def test_browser_opening_and_readiness_fail_safely(monkeypatch, capsys):
 
     server = type("Server", (), {"started": True, "should_exit": False})()
     monkeypatch.setattr(local_viewer, "open_browser", lambda _url: False)
-    local_viewer.open_when_ready(server, "http://localhost/home")
-    assert capsys.readouterr().out == ("Could not open a browser. Open http://localhost/home manually.\n")
+    local_viewer.open_when_ready(server, "http://localhost/overview")
+    assert capsys.readouterr().out == ("Could not open a browser. Open http://localhost/overview manually.\n")
 
     server = type("Server", (), {"started": False, "should_exit": True})()
-    local_viewer.open_when_ready(server, "http://localhost/home")
+    local_viewer.open_when_ready(server, "http://localhost/overview")
 
     server = type("Server", (), {"started": True, "should_exit": False})()
     monkeypatch.setattr(local_viewer, "open_browser", lambda _url: (_ for _ in ()).throw(OSError()))
-    local_viewer.open_when_ready(server, "http://localhost/home")
+    local_viewer.open_when_ready(server, "http://localhost/overview")
     assert "Could not open a browser" in capsys.readouterr().out

@@ -1,17 +1,19 @@
 import pytest
 
-from environment_harness import AgentSpec, EnvironmentSession, EvidenceStore, ExperimentSpec, Principal
+from environment_harness import AgentSpec, EvidenceStore, ExperimentSpec
+from environment_harness.access import _AccessContext
 from environment_harness.contracts import Action, Finding, ScoreReport
 from environment_harness.errors import Conflict
 from environment_harness.fixtures import SyntheticEnvironment
+from environment_harness.runtime import _SessionRuntime
 from environment_harness.store import uid
 
 
 def setup(tmp_path):
     store = EvidenceStore(tmp_path)
     implementation = SyntheticEnvironment()
-    session = EnvironmentSession(store, implementation)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    session = _SessionRuntime(store, implementation)
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     spec = ExperimentSpec(
         environment=implementation.spec,
         participants=(
@@ -22,8 +24,8 @@ def setup(tmp_path):
     )
     environment = session.create(spec, researcher)["id"]
     agents = {
-        name: Principal(
-            tenant="tenant", subject=name, role="agent", environment=environment, participant=name
+        name: _AccessContext(
+            tenant="tenant", subject=name, policy="participant", session=environment, participant=name
         )
         for name in ("a", "b")
     }

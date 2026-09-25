@@ -50,7 +50,7 @@ environment-harness --store ./environment-sessions serve --open
 ```
 
 `serve` binds to `127.0.0.1` on port `8765`. It never listens on an external interface. Omit
-`--open` when you want to open `http://127.0.0.1:8765/home` yourself. The flag changes only browser
+`--open` when you want to open `http://127.0.0.1:8765/overview` yourself. The flag changes only browser
 launch behavior, not authentication.
 
 Use another port when needed:
@@ -59,7 +59,7 @@ Use another port when needed:
 environment-harness --store ./environment-sessions serve --port 9876
 ```
 
-The loopback viewer obtains an in-memory researcher credential on every page load. Refreshes, deep
+The loopback viewer obtains an in-memory read-only viewer credential on every page load. Refreshes, deep
 links, and new tabs work without a login form or browser storage. Every `/v1` API route still
 requires an explicit bearer credential.
 
@@ -79,7 +79,7 @@ Pass the value only in the `Authorization` header:
 ```sh
 curl \
   --header "Authorization: Bearer $ENVIRONMENT_HARNESS_TOKEN" \
-  http://127.0.0.1:8765/v1/environments
+  http://127.0.0.1:8765/v1/sessions
 ```
 
 Do not put credentials in URLs, committed configuration, shell history, browser bundles, or logs.
@@ -98,7 +98,7 @@ The response is:
 ```
 
 OpenAPI is available at `/openapi.json`, and the interactive API reference is available at
-`/docs`. The viewer routes are `/home`, `/compare`, `/session/{id}`, and the supported session
+`/docs`. The viewer routes are `/overview`, `/comparisons`, `/sessions/{id}`, and the supported session
 subroutes.
 
 ## Understand local persistence
@@ -117,6 +117,50 @@ environment.
 
 ## Embed a supplier application
 
+## Durable local scheduling
+
+The database, not the process-local thread pool, is the source of requested Session work. Creating
+an Experiment and all of its Session rows is one transaction; only after it commits does the bounded
+local scheduler claim work. Submitting a job to the thread pool is a post-commit delivery attempt —
+if submission fails, the Session stays durably `queued`, the failure is recorded as scheduler
+activity, and a later `harness.reconcile()` or process restart retries it without creating another
+Session.
+
+Opening a store runs startup reconciliation before the process accepts new work:
+
+- every eligible `queued` Session is reconstructed from its frozen Experiment, Scenario, seed,
+  trial, turn limit, participant, policy, and environment references;
+- a Session left `running` by a lost process becomes `interrupted` with a `process_loss` reason and
+  requires the existing explicit resume; it is never executed twice automatically; and
+- terminal Sessions remain byte-for-byte unchanged.
+
+Reconciliation is idempotent, runs under the store's normal writer-concurrency mechanism, and
+produces durable activity evidence for every state correction. It assumes no other live process is
+executing the same store's sessions. This is a local durable scheduler, not a hosted queue: it adds
+no Redis, worker service, deployment orchestration, cross-machine lease, or remote execution.
+
+### Typed environment factories
+
+Recovered work resolves executable code through typed factories configured once on one
+`EnvironmentHarness`:
+
+```python
+harness = EnvironmentHarness(
+    store,
+    environment=(WarehouseEnvironment, BrowserEnvironment),
+    agents={"alice": MyAgent},
+)
+experiment = harness.experiment("study", scenarios, environment=WarehouseEnvironment)
+```
+
+Python callers supply implementation classes or typed factory objects, never import-path strings.
+Only the portable reference `(id, version, spec_digest)` is serialized. Recovery matches that frozen
+reference against the specs produced by the currently supplied factories and verifies the
+schema/capability digest before scheduling; it never dynamically imports persisted text. A missing,
+duplicate, or mismatched factory leaves the Session `blocked` with a typed, inspectable reason and
+never substitutes another implementation. Supplying the correct factory later makes the same frozen
+Session schedulable through `resume()` without rewriting the Experiment or Session.
+
 `create_app()` is the application seam for a supplier-owned service. Without `local_access`, it
 uses credential mode: `/local/connect` is absent, the viewer shows a credential form, and every API
 request requires a bearer credential.
@@ -124,14 +168,20 @@ request requires a bearer credential.
 The following synthetic application is suitable for integration testing, not production hosting:
 
 ```python
-from environment_harness import EnvironmentSession, EvidenceStore
-from environment_harness.fixtures import SyntheticEnvironment
+from environment_harness import EnvironmentHarness, EvidenceStore
+from environment_harness.fixtures import SyntheticAgent, SyntheticEnvironment
 from environment_harness.server import create_app
 
-store = EvidenceStore("./environment-sessions")
-session = EnvironmentSession(store, SyntheticEnvironment())
-app = create_app(session)
+harness = EnvironmentHarness(
+    EvidenceStore("./environment-sessions"),
+    environment=SyntheticEnvironment,
+    agents={"alice": SyntheticAgent},
+)
+app = create_app(harness)
 ```
+
+Issue admin credentials with `harness.admin_credential()`. The server never accepts a
+policy, role, or permission from a request. See [Authentication](AUTHENTICATION.md).
 
 Save that module as `app.py`, then run it behind Uvicorn during development:
 
@@ -147,6 +197,25 @@ loopback machine and is deliberately separate from supplier authentication.
 The current browser bundle must be served by the same EnvironmentHarness application as its API.
 The server rejects browser requests whose `Origin` differs from its own base URL. A UI hosted on a
 separate domain therefore requires a future, reviewed authentication and cross-origin design.
+
+### Historical trajectory ingestion
+
+`create_app(session)` is read-only for historical sources. It exposes authenticated trajectory,
+source-status, snapshot, dataset, and recorded-training-result reads but omits source registration,
+record ingestion, and status mutation. An explicitly managed ingestion service may use:
+
+```python
+app = create_app(session, trajectory_ingestion=True)
+```
+
+That flag adds only bearer-authenticated admin routes. It does not make ingestion
+public, authorize environment actions, run selectors, or execute trainer plugins. Keep a source's
+domain journal as the delivery backlog during service outages and resume from its last acknowledged
+position and hash. Do not configure ingestion on a supplier/viewer process that is intended to be
+read-only.
+
+The server never executes `TrainingIntegration` code. Trusted local Python or the CLI may invoke an
+explicitly installed integration and record its immutable receipt; HTTP can only read that receipt.
 
 ## Optional PostgreSQL and object-storage seam
 
@@ -177,14 +246,18 @@ See [Protocol](PROTOCOL.md), [Coordinated persistent sessions](coordinated-sessi
 
 ### A refreshed route returns 404
 
-Run the packaged EnvironmentHarness server. It serves the viewer shell for `/home`, `/compare`,
-`/experiment/{id}`, `/experiment/{id}/scenarios`, `/experiment/{id}/scenarios/{scenario}`,
-`/experiment/{id}/sessions`, and
-supported `/session/{id}/{section}` deep links. A generic static-file server does not know those routes.
+Run the packaged EnvironmentHarness server. It serves the viewer shell for `/overview`,
+`/comparisons`, `/experiments/{id}`, `/experiments/{id}/scenarios`,
+`/experiments/{id}/scenarios/{scenario}`, `/experiments/{id}/sessions`, and supported
+`/sessions/{id}/{section}` deep links. A generic static-file server does not know those routes.
 
-`/experiment/{id}` restores the frozen experiment overview. Its Scenarios tab appears only for
+`/experiments/{id}` restores the frozen experiment overview. Its Scenarios tab appears only for
 meaningful scenario snapshots, and its Sessions tab retains a flat, filterable list. Each child
-session links to its canonical `/session/{id}/{section}` inspection route.
+session links to its canonical `/sessions/{id}/{section}` inspection route.
+
+`/experiments/{id}/training` is refresh-safe even when its conditional tab is hidden, and
+`/trajectories/{id}` restores imported-trajectory inspection. Both remain authenticated read-only
+viewer routes.
 
 ### The local viewer shows “Local viewer unavailable”
 
@@ -209,6 +282,7 @@ Update this guide in the same pull request when any of these change:
 
 - `serve` flags, bind address, authentication, routes, or health response;
 - store location, migration, backup, or restoration behavior;
+- historical-ingestion or training-result boundaries;
 - supported Python version or installation extras;
 - remote browser topology or cross-origin policy; or
 - hosted-deployment qualification in [Release scope](STATUS.md).

@@ -1,6 +1,7 @@
 from threading import Event, Lock, current_thread
 
 import pytest
+from _credentials import bearer
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
@@ -12,13 +13,12 @@ from environment_harness import (
     ExperimentResult,
     ExperimentSpec,
     OperationSpec,
-    Principal,
     Scenario,
 )
+from environment_harness.access import _AccessContext
 from environment_harness.contracts import Capabilities, EnvironmentSpec, Transition
 from environment_harness.errors import Conflict, Forbidden
-from environment_harness.operations import Operations
-from environment_harness.runner import run as run_session
+from environment_harness.runtime import _SessionRuntime
 from environment_harness.server import create_app
 
 SESSION_COMPLETION_TIMEOUT = 10
@@ -80,8 +80,8 @@ class ScenarioAgent:
 def test_harness_runs_a_standalone_environment_session(tmp_path):
     harness = EnvironmentHarness(
         tmp_path,
-        environment_factory=ScenarioEnvironment,
-        agent_factories={"agent": ScenarioAgent},
+        environment=ScenarioEnvironment,
+        agents={"agent": ScenarioAgent},
     )
 
     session = harness.run(Scenario(id="standalone", input={"difficulty": 2}), turns=1)
@@ -93,24 +93,20 @@ def test_harness_runs_a_standalone_environment_session(tmp_path):
 
 
 def test_harness_rejects_a_session_runner_that_does_not_return_the_current_record(tmp_path):
-    def invalid_runner(session, environment, researcher, agents, *, turns):
+    def invalid_runner(control, agents, *, turns):
         return {"status": "completed"}
 
     harness = EnvironmentHarness(
         tmp_path,
-        environment_factory=ScenarioEnvironment,
-        agent_factories={"agent": ScenarioAgent},
+        environment=ScenarioEnvironment,
+        agents={"agent": ScenarioAgent},
         session_runner=invalid_runner,
     )
 
     session = harness.run(Scenario(id="invalid-runner", input={"difficulty": 2}), turns=1)
 
     assert session.status == "failed"
-    record = next(
-        item
-        for item in harness.store.activity_snapshot(harness.researcher)["standalone"]
-        if item["id"] == session.id
-    )
+    record = next(item for item in harness.hierarchy()["standalone"] if item["id"] == session.id)
     assert record["failure"] == "Conflict"
 
 
@@ -133,45 +129,37 @@ def test_harness_freezes_environment_supplied_operation_specs(tmp_path):
                 }
             )
 
-    def run_with_inspection(session, environment, researcher, agents, *, turns):
-        run_session(session, environment, researcher, agents, turns=1)
-        agent = Principal(
-            tenant=researcher.tenant,
-            subject="agent",
-            role="agent",
-            environment=environment,
-            participant="agent",
-        )
-        operations = Operations(session.store)
-        operations.prepare(
-            environment,
-            agent,
+    def run_with_inspection(control, agents, *, turns):
+        control.advance(agents, turns=1)
+        # The typed control derives the participant scope; no caller builds one.
+        control.prepare_operation(
             "inspect",
+            participant="agent",
             endpoint="world",
             operation="world.inspect",
             payload={"location": "Arena"},
         )
-        lease = session.lease(environment, researcher, "example-operation")
+        lease = control.lease("example-operation")
         try:
-            operations.dispatch(session, environment, researcher, lease, "inspect")
+            control.dispatch_operation(lease, "inspect")
         finally:
-            session.release(environment, researcher, lease)
-        return run_session(session, environment, researcher, agents, turns=turns - 1)
+            control.release(lease)
+        return control.advance(agents, turns=turns - 1)
 
     harness = EnvironmentHarness(
         tmp_path,
-        environment_factory=OperableEnvironment,
-        agent_factories={"agent": ScenarioAgent},
+        environment=OperableEnvironment,
+        agents={"agent": ScenarioAgent},
         session_runner=run_with_inspection,
     )
 
     session = harness.run(Scenario(id="operable", input={"difficulty": 2}), turns=2)
 
-    manifest = session.get(session.id, harness.researcher)["experiment"]
+    manifest = session.record()["experiment"]
     assert manifest["operations"] == [InspectOperation.spec.model_dump(mode="json")]
     assert manifest["policy"]["allowed_endpoints"] == ["world"]
     assert manifest["policy"]["allowed_operations"] == ["world.inspect"]
-    evidence = list(harness.store.replay(session.id, harness.researcher))
+    evidence = list(session.replay())
     assert (
         next(event for event in evidence if event["kind"] == "operation.receipt")["payload"]["receipt"][
             "operation_id"
@@ -188,8 +176,8 @@ def test_experiment_rejects_invalid_environment_operations_before_queueing(tmp_p
 
     harness = EnvironmentHarness(
         tmp_path,
-        environment_factory=BrokenEnvironment,
-        agent_factories={"agent": ScenarioAgent},
+        environment=BrokenEnvironment,
+        agents={"agent": ScenarioAgent},
     )
     experiment = harness.experiment(
         "Broken operation",
@@ -199,7 +187,7 @@ def test_experiment_rejects_invalid_environment_operations_before_queueing(tmp_p
 
     with pytest.raises(Conflict, match="world.inspect.*runtime implementation"):
         experiment.start()
-    assert harness.store.activity_snapshot(harness.researcher)["experiments"] == []
+    assert harness.hierarchy()["experiments"] == []
 
 
 def test_standalone_rejects_invalid_environment_operations_before_queueing(tmp_path):
@@ -210,20 +198,20 @@ def test_standalone_rejects_invalid_environment_operations_before_queueing(tmp_p
 
     harness = EnvironmentHarness(
         tmp_path,
-        environment_factory=BrokenEnvironment,
-        agent_factories={"agent": ScenarioAgent},
+        environment=BrokenEnvironment,
+        agents={"agent": ScenarioAgent},
     )
 
     with pytest.raises(Conflict, match="world.inspect.*runtime implementation"):
         harness.start(Scenario(id="broken", input={"difficulty": 2}), turns=1)
-    assert harness.store.activity_snapshot(harness.researcher)["standalone"] == []
+    assert harness.hierarchy()["standalone"] == []
 
 
 def test_experiment_expands_scenarios_and_trials_reproducibly(tmp_path):
     harness = EnvironmentHarness(
         tmp_path,
-        environment_factory=ScenarioEnvironment,
-        agent_factories={"agent": ScenarioAgent},
+        environment=ScenarioEnvironment,
+        agents={"agent": ScenarioAgent},
         max_concurrency=2,
     )
     scenarios = [
@@ -263,8 +251,8 @@ def test_experiments_share_a_fair_bounded_scheduler(tmp_path):
 
     harness = EnvironmentHarness(
         tmp_path,
-        environment_factory=ScenarioEnvironment,
-        agent_factories={"agent": OrderingAgent},
+        environment=ScenarioEnvironment,
+        agents={"agent": OrderingAgent},
         max_concurrency=1,
     )
     first = harness.experiment(
@@ -285,7 +273,7 @@ def test_experiments_share_a_fair_bounded_scheduler(tmp_path):
 def test_interrupted_experiment_requires_explicit_resume(tmp_path):
     interrupted = False
 
-    def environment_factory():
+    def build_environment():
         nonlocal interrupted
         if current_thread().name.startswith("environment-session") and not interrupted:
             interrupted = True
@@ -294,8 +282,8 @@ def test_interrupted_experiment_requires_explicit_resume(tmp_path):
 
     harness = EnvironmentHarness(
         tmp_path,
-        environment_factory=environment_factory,
-        agent_factories={"agent": ScenarioAgent},
+        environment=build_environment,
+        agents={"agent": ScenarioAgent},
     )
     experiment = harness.experiment("restart", [Scenario(id="recoverable", input={"difficulty": 2})], turns=1)
 
@@ -318,55 +306,57 @@ def test_interrupted_experiment_requires_explicit_resume(tmp_path):
 def test_activity_outbox_is_resumable_for_global_experiment_and_session_streams(tmp_path):
     harness = EnvironmentHarness(
         tmp_path,
-        environment_factory=ScenarioEnvironment,
-        agent_factories={"agent": ScenarioAgent},
+        environment=ScenarioEnvironment,
+        agents={"agent": ScenarioAgent},
     )
     result = harness.experiment("streamed", [Scenario(id="one", input={"difficulty": 1})], turns=1).run()
-    token = harness.store.issue(Principal(tenant="local", subject="reader", role="researcher"))
-    client = TestClient(create_app(EnvironmentSession(harness.store, ScenarioEnvironment())))
+    token = bearer(harness.store, _AccessContext(tenant="local", subject="reader", policy="trusted-local"))
+    client = TestClient(create_app(_SessionRuntime(harness.store, ScenarioEnvironment())))
     headers = {"Authorization": f"Bearer {token}"}
 
-    page = client.get("/v1/activity/events", headers=headers).json()
+    page = client.get("/v1/activity", headers=headers).json()
 
     assert page["events"]
     assert page["cursor"] == page["events"][-1]["id"]
     assert any(event["kind"] == "experiment.updated" for event in page["events"])
     caught_up = client.get(
-        f"/v1/experiments/{result.id}/events",
+        f"/v1/experiments/{result.id}/activity",
         headers=headers | {"Accept": "text/event-stream", "Last-Event-ID": str(page["cursor"])},
     )
     assert caught_up.headers["content-type"].startswith("text/event-stream")
     assert "retry: 2000" in caught_up.text
     assert ": heartbeat" in caught_up.text
-    session_page = client.get(f"/v1/environments/{result.sessions[0].id}/activity", headers=headers).json()
+    session_page = client.get(f"/v1/sessions/{result.sessions[0].id}/activity", headers=headers).json()
     assert all(event["environment"] == result.sessions[0].id for event in session_page["events"])
 
 
 def test_activity_snapshot_groups_experiments_and_keeps_standalone_sessions_top_level(tmp_path):
     harness = EnvironmentHarness(
         tmp_path,
-        environment_factory=ScenarioEnvironment,
-        agent_factories={"agent": ScenarioAgent},
+        environment=ScenarioEnvironment,
+        agents={"agent": ScenarioAgent},
     )
     grouped = harness.experiment(
         "grouped", [Scenario(id="one", input={"difficulty": 1})], trials=2, turns=1
     ).run()
     standalone = harness.run(Scenario(id="solo", input={"difficulty": 2}), turns=1)
-    legacy_runtime = EnvironmentSession(harness.store, ScenarioEnvironment())
+    legacy_runtime = _SessionRuntime(harness.store, ScenarioEnvironment())
     legacy = legacy_runtime.create(
         ExperimentSpec(
             environment=ScenarioEnvironment.spec,
             participants=(AgentSpec(id="agent", implementation="scenario-agent@1", policy_version="1"),),
             scenario_input={"difficulty": 1},
         ),
-        Principal(tenant="local", subject="legacy", role="researcher"),
+        _AccessContext(tenant="local", subject="legacy", policy="trusted-local"),
     )
-    token = harness.store.issue(Principal(tenant="local", subject="reader", role="researcher"))
-    client = TestClient(create_app(EnvironmentSession(harness.store, ScenarioEnvironment())))
+    token = bearer(harness.store, _AccessContext(tenant="local", subject="reader", policy="trusted-local"))
+    client = TestClient(create_app(_SessionRuntime(harness.store, ScenarioEnvironment())))
 
-    snapshot = client.get("/v1/activity/snapshot", headers={"Authorization": f"Bearer {token}"}).json()
+    snapshot = client.get("/v1/activity/hierarchy", headers={"Authorization": f"Bearer {token}"}).json()
 
-    assert snapshot["summary"] == {"running": 0, "queued": 0, "failed": 0}
+    # Every created Session now has a durable row, including one created
+    # directly through the private runtime.
+    assert snapshot["summary"] == {"running": 1, "queued": 0, "failed": 0}
     assert snapshot["experiments"][0]["id"] == grouped.id
     assert snapshot["experiments"][0]["kind"] == "experiment"
     assert snapshot["experiments"][0]["progress"] == {"completed": 2, "total": 2}
@@ -411,20 +401,35 @@ def test_activity_snapshot_groups_experiments_and_keeps_standalone_sessions_top_
     assert snapshot["standalone"][0]["id"] == standalone.id
     assert snapshot["standalone"][0]["kind"] == "session"
     assert "experiment" not in snapshot["standalone"][0]
-    legacy_snapshot = next(session for session in snapshot["standalone"] if session["id"] == legacy["id"])
-    assert legacy_snapshot["target_turns"] is None
-    with pytest.raises(Forbidden, match="activity authority"):
-        harness.store.activity_snapshot(
-            Principal(tenant="local", subject="agent", role="agent", participant="agent")
+    runtime_created = next(session for session in snapshot["standalone"] if session["id"] == legacy["id"])
+    # A runtime-created session carries its frozen turn budget rather than
+    # appearing as an ownerless legacy row.
+    assert runtime_created["target_turns"] == 10000
+    assert runtime_created["status"] == "running"
+    with pytest.raises(Forbidden, match="policy denies"):
+        harness.store.activity_hierarchy(
+            _AccessContext(
+                tenant="local",
+                subject="agent",
+                policy="participant",
+                session="0" * 32,
+                participant="agent",
+            )
         )
-    agent = Principal(tenant="local", subject="agent", role="agent", participant="agent")
-    outsider = Principal(tenant="other", subject="researcher", role="researcher")
-    with pytest.raises(Forbidden, match="activity authority"):
+    agent = _AccessContext(
+        tenant="local",
+        subject="agent",
+        policy="participant",
+        session="0" * 32,
+        participant="agent",
+    )
+    outsider = _AccessContext(tenant="other", subject="researcher", policy="trusted-local")
+    with pytest.raises(Forbidden, match="policy denies"):
         harness.store.activity(agent)
     with pytest.raises(ValueError, match="activity page"):
-        harness.store.activity(harness.researcher, after=-1)
+        harness.activity(after=-1)
     with pytest.raises(ValueError, match="activity page"):
-        harness.store.activity(harness.researcher, limit=0)
+        harness.activity(limit=0)
     with pytest.raises(Forbidden, match="experiment unavailable"):
         harness.store.activity(outsider, experiment=grouped.id)
     with pytest.raises(Forbidden, match="environment session unavailable"):
@@ -453,8 +458,8 @@ def test_concurrent_progress_counts_and_failure_isolation(tmp_path):
 
     harness = EnvironmentHarness(
         tmp_path,
-        environment_factory=ScenarioEnvironment,
-        agent_factories={"agent": BlockingAgent},
+        environment=ScenarioEnvironment,
+        agents={"agent": BlockingAgent},
         max_concurrency=2,
     )
     experiment = harness.experiment(
@@ -490,8 +495,8 @@ def test_stopping_a_running_environment_session_is_terminal(tmp_path):
 
     harness = EnvironmentHarness(
         tmp_path,
-        environment_factory=ScenarioEnvironment,
-        agent_factories={"agent": BlockingAgent},
+        environment=ScenarioEnvironment,
+        agents={"agent": BlockingAgent},
     )
     session = harness.start(Scenario(id="stop", input={"difficulty": 1}), turns=2)
     assert started.wait(2)
@@ -504,37 +509,36 @@ def test_stopping_a_running_environment_session_is_terminal(tmp_path):
 
 
 def test_harness_lifecycle_guards_and_validation_edges(tmp_path):
-    low_level = EnvironmentSession(tmp_path / "low-level", ScenarioEnvironment())
-    with pytest.raises(AttributeError, match="do not have an ID"):
-        _ = low_level.id
-    with pytest.raises(AttributeError, match="lifecycle properties"):
-        _ = low_level.status
-    with pytest.raises(AttributeError, match="wait is available"):
-        low_level.wait()
-    with pytest.raises(AttributeError, match="stop is available"):
-        low_level.stop()
-    with pytest.raises(AttributeError, match="resume is available"):
-        low_level.resume()
+    # EnvironmentHarness is the only public local-execution facade: its handle
+    # neither inherits from nor exposes the private session runtime.
+    assert not issubclass(EnvironmentSession, _SessionRuntime)
+    assert not any(
+        isinstance(getattr(EnvironmentSession, name, None), type)
+        and issubclass(getattr(EnvironmentSession, name), _SessionRuntime)
+        for name in dir(EnvironmentSession)
+    )
 
     with pytest.raises(ValueError, match="limits must be positive"):
         EnvironmentHarness(
             tmp_path / "limits",
-            environment_factory=ScenarioEnvironment,
-            agent_factories={"agent": ScenarioAgent},
+            environment=ScenarioEnvironment,
+            agents={"agent": ScenarioAgent},
             max_concurrency=0,
         )
-    with pytest.raises(ValueError, match="agent factory"):
-        EnvironmentHarness(tmp_path / "agents", environment_factory=ScenarioEnvironment, agent_factories={})
+    with pytest.raises(ValueError, match="at least one agent is required"):
+        EnvironmentHarness(tmp_path / "agents", environment=ScenarioEnvironment, agents={})
 
     harness = EnvironmentHarness(
         tmp_path / "valid",
-        environment_factory=ScenarioEnvironment,
-        agent_factories={"agent": ScenarioAgent},
+        environment=ScenarioEnvironment,
+        agents={"agent": ScenarioAgent},
         max_sessions=2,
     )
-    missing = EnvironmentSession(harness.store, ScenarioEnvironment(), harness=harness, session_id="f" * 32)
+    missing = EnvironmentSession(harness, "f" * 32)
     with pytest.raises(Conflict, match="record is unavailable"):
         _ = missing.status
+    with pytest.raises(Conflict, match="session is unavailable"):
+        harness.session("f" * 32)
     scenario = Scenario(id="one", input={"difficulty": 1})
     with pytest.raises(ValueError, match="turns must be positive"):
         harness.start(scenario, turns=0)
@@ -581,8 +585,8 @@ def test_harness_lifecycle_guards_and_validation_edges(tmp_path):
 
     schema_harness = EnvironmentHarness(
         tmp_path / "schema",
-        environment_factory=SchemaEnvironment,
-        agent_factories={"agent": ScenarioAgent},
+        environment=SchemaEnvironment,
+        agents={"agent": ScenarioAgent},
     )
     assert schema_harness._validate_scenario(scenario) == scenario
 
@@ -599,8 +603,8 @@ def test_harness_stops_queued_work_and_enforces_active_limits(tmp_path):
 
     harness = EnvironmentHarness(
         tmp_path / "queued",
-        environment_factory=ScenarioEnvironment,
-        agent_factories={"agent": BlockingAgent},
+        environment=ScenarioEnvironment,
+        agents={"agent": BlockingAgent},
         max_concurrency=1,
         max_sessions=3,
     )
@@ -627,8 +631,8 @@ def test_harness_stops_queued_work_and_enforces_active_limits(tmp_path):
 
     limited = EnvironmentHarness(
         tmp_path / "limited",
-        environment_factory=ScenarioEnvironment,
-        agent_factories={"agent": LimitAgent},
+        environment=ScenarioEnvironment,
+        agents={"agent": LimitAgent},
         max_concurrency=1,
         max_sessions=1,
     )

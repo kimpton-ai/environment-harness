@@ -38,11 +38,11 @@
   <div id="workspace" hidden>
     <nav class="app-navbar" aria-label="Application Navigation">
       <div class="sidebar-brand"><a class="brand" href="/">EnvironmentHarness</a></div>
-      <div class="global-tabs global-breadcrumb" aria-label="Breadcrumb">
-        <a id="home" href="/home" aria-current="page">
-          <span>Home</span>
-        </a>
-        <div id="breadcrumb-trail" class="breadcrumb-trail" aria-label="Breadcrumb" hidden></div>
+      <div id="global-destinations" class="global-tabs global-destinations" role="navigation" aria-label="Global Navigation">
+        <a id="destination-overview" data-destination="overview" href="/overview" aria-current="page"><span>Overview</span></a>
+        <a id="destination-experiments" data-destination="experiments" href="/experiments"><span>Experiments</span></a>
+        <a id="destination-sessions" data-destination="sessions" href="/sessions"><span>Sessions</span></a>
+        <a id="destination-trajectories" data-destination="trajectories" href="/trajectories"><span>Trajectories</span></a>
       </div>
       <div class="navbar-actions">
         <input id="environment-id" aria-label="Environment ID" placeholder="Environment ID">
@@ -50,11 +50,16 @@
       </div>
     </nav>
 
+    <div id="context-bar" class="context-bar">
+      <nav id="breadcrumb-trail" class="breadcrumb-trail" aria-label="Breadcrumb"></nav>
+    </div>
+    <div class="workspace-body">
+    <nav id="context-nav" class="context-nav" aria-label="Resource Navigation" hidden></nav>
     <section class="content">
       <section id="home-view" class="home-view" hidden>
         <header class="home-heading">
           <div>
-            <p id="home-eyebrow" class="eyebrow">Home</p>
+            <p id="home-eyebrow" class="eyebrow">Overview</p>
             <h1 id="home-title">Environment Sessions</h1>
             <p id="home-description">Find a run, investigate what changed, or select sessions to compare.</p>
           </div>
@@ -66,12 +71,27 @@
             <time id="list-synced"></time>
           </div>
         </header>
-        <nav id="experiment-tabs" class="session-tabs experiment-tabs" role="tablist" aria-label="Selected Experiment Navigation" hidden>
-          <button type="button" role="tab" data-experiment-tab="overview" aria-selected="true">Overview</button>
-          <button type="button" role="tab" data-experiment-tab="scenarios" aria-selected="false">Scenarios</button>
-          <button type="button" role="tab" data-experiment-tab="sessions" aria-selected="false">Sessions</button>
-        </nav>
+        <section id="overview-summary" class="experiment-page overview-summary" hidden></section>
+        <section id="experiment-index" class="experiment-page collection-index" hidden>
+          <div class="overview-heading">
+            <div><h2>Experiments</h2><p>Frozen experiment definitions and the sessions they produced.</p></div>
+          </div>
+          <div id="experiment-index-list" class="collection-index-list"></div>
+        </section>
+        <section id="trajectory-index" class="experiment-page collection-index" hidden>
+          <div class="overview-heading">
+            <div><h2>Trajectories</h2><p>Native session evidence and historical evidence imported from external source journals.</p></div>
+          </div>
+          <div id="trajectory-index-list" class="collection-index-list"></div>
+        </section>
         <section id="experiment-overview" class="experiment-page" hidden></section>
+        <section id="experiment-configuration" class="experiment-page" hidden></section>
+        <section id="experiment-trajectories" class="experiment-page" hidden>
+          <div class="overview-heading">
+            <div><h2>Trajectories</h2><p>Trajectory evidence recorded by the sessions in this context.</p></div>
+          </div>
+          <div id="experiment-trajectory-list" class="collection-index-list"></div>
+        </section>
         <section id="experiment-scenarios" class="experiment-page" hidden>
           <div class="overview-heading">
             <div><h2>Scenarios</h2><p>Immutable inputs and references applied within this experiment.</p></div>
@@ -90,6 +110,7 @@
             </article>
           </div>
         </section>
+        <section id="experiment-training" class="experiment-page" hidden></section>
         <div id="home-list-content" class="home-list-content">
         <div class="home-list-heading">
           <h2 id="home-list-title">All Sessions</h2>
@@ -148,6 +169,36 @@
         </div>
       </section>
 
+      <section id="trajectory-shell" class="trajectory-shell" hidden>
+        <header class="page-context">
+          <div><p class="eyebrow">Trajectory</p><h1 id="trajectory-title">Trajectory</h1><p id="trajectory-description">Portable evidence from an authoritative source journal.</p></div>
+        </header>
+        <div class="trajectory-detail">
+          <div id="trajectory-overview-panel">
+            <section class="overview-section">
+              <div class="overview-heading"><div><h2>Collection Health</h2><p>Evidence delivery and execution are independent states.</p></div></div>
+              <dl id="trajectory-health" class="frozen-summary"></dl>
+            </section>
+            <section class="overview-section">
+              <div class="overview-heading"><div><h2>Segments</h2><p>Execution intervals and their recorded sequence boundaries.</p></div></div>
+              <div id="trajectory-segments" class="trajectory-segments"></div>
+            </section>
+          </div>
+          <section id="trajectory-records-panel" class="overview-section" hidden>
+            <div class="overview-heading"><div><h2>Records</h2><p>Inert summaries only; extension payloads and sensitive content stay hidden.</p></div></div>
+            <div id="trajectory-records" class="trajectory-records"></div>
+          </section>
+          <section id="trajectory-snapshots-panel" class="overview-section" hidden>
+            <div class="overview-heading"><div><h2>Snapshots</h2><p>Immutable evidence boundaries frozen for repeatable export.</p></div></div>
+            <div id="trajectory-snapshots" class="trajectory-segments"></div>
+          </section>
+          <section id="trajectory-provenance-panel" class="overview-section" hidden>
+            <div class="overview-heading"><div><h2>Provenance</h2><p>Registered sources, frozen datasets, and recorded training results that used this trajectory.</p></div></div>
+            <div id="trajectory-provenance" class="trajectory-provenance"></div>
+          </section>
+        </div>
+      </section>
+
       <div id="session-shell" hidden>
       <header class="page-context">
         <div>
@@ -157,12 +208,6 @@
         </div>
         <div id="mode-summary" class="mode-summary" aria-live="polite"></div>
       </header>
-      <nav class="session-tabs" role="tablist" aria-label="Selected Session Navigation">
-        <button type="button" role="tab" data-session-tab="overview" aria-selected="true">Overview</button>
-        <button type="button" role="tab" data-session-tab="turns" aria-selected="false">Turns</button>
-        <button type="button" role="tab" data-session-tab="progression" aria-selected="false">Progression</button>
-        <button type="button" role="tab" data-session-tab="reports" aria-selected="false">Reports</button>
-      </nav>
       <div id="empty-state" class="panel empty-state" hidden>
         <p class="eyebrow">No environment sessions yet</p>
         <h1>Run a session, then inspect what happened.</h1>
@@ -175,20 +220,35 @@
       <div id="session-view" hidden>
         <section id="session-overview" class="session-overview">
           <div class="overview-section">
-            <div class="overview-heading"><h2>Frozen Experiment</h2><p>The configuration recorded when this environment session was created.</p></div>
-            <div id="frozen-summary" class="frozen-summary"></div>
-          </div>
-          <div class="overview-section">
             <div class="overview-heading">
               <div><h2>Scores and Findings</h2><p>A concise view of what evaluation returned.</p></div>
               <div class="overview-heading-actions">
                 <button id="reports-progression" type="button" class="text-button">Progression</button>
-                <button id="reports-records" type="button" class="text-button">Reports</button>
+                <button id="reports-configuration" type="button" class="text-button">Configuration</button>
               </div>
             </div>
             <div id="reports"><p class="muted">No environment session selected.</p></div>
           </div>
           <div class="overview-actions"><button id="export" class="quiet">Export</button></div>
+        </section>
+
+        <section id="session-configuration" class="session-overview" hidden>
+          <div class="overview-section">
+            <div class="overview-heading"><div><h2>Frozen Experiment</h2><p>The configuration recorded when this environment session was created.</p></div></div>
+            <div id="frozen-summary" class="frozen-summary"></div>
+          </div>
+          <div class="overview-section">
+            <div class="overview-heading"><div><h2>Lineage</h2><p>How this environment session relates to the rest of its lineage.</p></div></div>
+            <p class="identity"><span id="environment-identity"></span><button id="copy-id" class="quiet small">Copy</button></p>
+            <div id="stats" class="stats"></div><p id="lineage" class="muted"></p>
+          </div>
+        </section>
+
+        <section id="session-trajectory" class="session-overview" hidden>
+          <div class="overview-section">
+            <div class="overview-heading"><div><h2>Trajectory</h2><p>The portable trajectory recorded by this environment session.</p></div></div>
+            <div id="session-trajectory-body"><p class="muted">No trajectory has been recorded for this environment session.</p></div>
+          </div>
         </section>
 
         <section id="inspect-view" class="inspect-view" hidden>
@@ -274,8 +334,6 @@
 
         <div class="panel legacy-view">
           <div class="row"><h1 id="environment-title">Select an environment session</h1><span id="environment-status" class="tag"></span></div>
-          <p class="identity"><span id="environment-identity"></span><button id="copy-id" class="quiet small">Copy</button></p>
-          <div id="stats" class="stats"></div><p id="lineage" class="muted"></p>
         </div>
 
         <div class="panel legacy-view">
@@ -298,6 +356,7 @@
         </div>
       </section>
     </section>
+    </div>
     <footer class="app-footer">
       <div id="instance-summary" class="instance-summary"><strong id="instance-type">Local</strong></div>
     </footer>

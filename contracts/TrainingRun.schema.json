@@ -1,0 +1,302 @@
+{
+  "$defs": {
+    "Policy": {
+      "additionalProperties": false,
+      "description": "Portable identity for an agent policy without serializing live framework state.",
+      "properties": {
+        "apiVersion": {
+          "const": "environmentharness.dev/v1alpha1",
+          "title": "Apiversion",
+          "type": "string"
+        },
+        "extensions": {
+          "additionalProperties": true,
+          "title": "Extensions",
+          "type": "object"
+        },
+        "features": {
+          "$ref": "#/$defs/ResourceFeatures"
+        },
+        "kind": {
+          "const": "Policy",
+          "title": "Kind",
+          "type": "string"
+        },
+        "metadata": {
+          "$ref": "#/$defs/ResourceMetadata"
+        },
+        "spec": {
+          "$ref": "#/$defs/PolicySpec"
+        },
+        "status": {
+          "$ref": "#/$defs/PolicyStatus"
+        }
+      },
+      "required": [
+        "apiVersion",
+        "kind",
+        "metadata",
+        "features",
+        "spec",
+        "status",
+        "extensions"
+      ],
+      "title": "Policy",
+      "type": "object"
+    },
+    "PolicySpec": {
+      "additionalProperties": true,
+      "properties": {
+        "artifact": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact"
+        },
+        "implementation": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Implementation",
+          "type": "string"
+        },
+        "lineage": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Lineage",
+          "type": "array"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "implementation"
+      ],
+      "title": "PolicySpec",
+      "type": "object"
+    },
+    "PolicyStatus": {
+      "additionalProperties": true,
+      "properties": {
+        "digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Digest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "digest"
+      ],
+      "title": "PolicyStatus",
+      "type": "object"
+    },
+    "ResourceFeatures": {
+      "additionalProperties": true,
+      "properties": {
+        "optional": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Optional",
+          "type": "array"
+        },
+        "required": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Required",
+          "type": "array"
+        }
+      },
+      "required": [
+        "required",
+        "optional"
+      ],
+      "title": "ResourceFeatures",
+      "type": "object"
+    },
+    "ResourceMetadata": {
+      "additionalProperties": true,
+      "properties": {
+        "createdAt": {
+          "minLength": 1,
+          "title": "Createdat",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Labels",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "createdAt",
+        "labels"
+      ],
+      "title": "ResourceMetadata",
+      "type": "object"
+    },
+    "TrainingRunSpec": {
+      "additionalProperties": true,
+      "properties": {
+        "configDigest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Configdigest",
+          "type": "string"
+        },
+        "datasetDigest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Datasetdigest",
+          "type": "string"
+        },
+        "datasetId": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Datasetid",
+          "type": "string"
+        },
+        "integration": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Integration",
+          "type": "string"
+        },
+        "integrationVersion": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Integrationversion",
+          "type": "string"
+        }
+      },
+      "required": [
+        "datasetId",
+        "datasetDigest",
+        "integration",
+        "integrationVersion",
+        "configDigest"
+      ],
+      "title": "TrainingRunSpec",
+      "type": "object"
+    },
+    "TrainingRunStatus": {
+      "additionalProperties": true,
+      "properties": {
+        "artifacts": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Artifacts",
+          "type": "array"
+        },
+        "completedAt": {
+          "minLength": 1,
+          "title": "Completedat",
+          "type": "string"
+        },
+        "limitations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Limitations",
+          "type": "array"
+        },
+        "metrics": {
+          "additionalProperties": true,
+          "title": "Metrics",
+          "type": "object"
+        },
+        "policy": {
+          "$ref": "#/$defs/Policy"
+        },
+        "state": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "policy",
+        "metrics",
+        "artifacts",
+        "limitations",
+        "completedAt"
+      ],
+      "title": "TrainingRunStatus",
+      "type": "object"
+    }
+  },
+  "$id": "urn:environment-harness:v1:TrainingRun",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "environmentharness.dev/v1alpha1",
+      "title": "Apiversion",
+      "type": "string"
+    },
+    "extensions": {
+      "additionalProperties": true,
+      "title": "Extensions",
+      "type": "object"
+    },
+    "features": {
+      "$ref": "#/$defs/ResourceFeatures"
+    },
+    "kind": {
+      "const": "TrainingRun",
+      "title": "Kind",
+      "type": "string"
+    },
+    "metadata": {
+      "$ref": "#/$defs/ResourceMetadata"
+    },
+    "spec": {
+      "$ref": "#/$defs/TrainingRunSpec"
+    },
+    "status": {
+      "$ref": "#/$defs/TrainingRunStatus"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "features",
+    "spec",
+    "status",
+    "extensions"
+  ],
+  "title": "TrainingRun",
+  "type": "object"
+}

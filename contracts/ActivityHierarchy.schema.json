@@ -350,10 +350,10 @@
       "type": "object"
     }
   },
-  "$id": "urn:environment-harness:v1:ActivitySnapshot",
+  "$id": "urn:environment-harness:v1:ActivityHierarchy",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Authoritative recovery snapshot for the live activity hierarchy.",
+  "description": "Authoritative recovery projection for the live ownership hierarchy.\n\n\"Snapshot\" names the immutable ``TrajectorySnapshot`` resource, so the\nactivity projection uses \"hierarchy\" instead.",
   "properties": {
     "cursor": {
       "minimum": 0,
@@ -384,6 +384,6 @@
     "summary",
     "cursor"
   ],
-  "title": "ActivitySnapshot",
+  "title": "ActivityHierarchy",
   "type": "object"
 }

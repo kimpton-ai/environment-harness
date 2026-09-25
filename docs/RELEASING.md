@@ -52,6 +52,93 @@ Use a release candidate when the release needs real installation and integration
 the stable version. PyPI prereleases are immutable production-PyPI releases, but ordinary
 `pip install environment-harness` does not select them.
 
+### Frozen `0.3.0rc1` manifest
+
+The trajectory-contract program uses exactly one coordinated candidate, `0.3.0rc1`, followed by
+`0.3.0`. Do not introduce alpha, beta, or routine additional candidates to stage internal
+workstreams. **This manifest is frozen.** `0.3.0` publishes the same package set and the same
+public feature surface; an additional candidate is permitted only to fix a qualification failure
+found in `0.3.0rc1`, never to add scope.
+
+**Packages.** Three artifacts on one coordinated version: the Python wheel, the Python source
+distribution, and the TypeScript client tarball attached to the GitHub release. No npm registry
+publication.
+
+**Runtime.** Python `>=3.12`. Base dependencies `pydantic>=2.12.5,<3` and `jsonschema>=4.26,<5`.
+Extras: `server`, `postgres`, `modal`, `pettingzoo`, `signatures`, `mcp`, `verifiers`.
+
+**Public Python surface.** The 24 names in `environment_harness.__all__`. `EnvironmentHarness` is
+the only local-execution facade; `EnvironmentSession` and `SessionControl` are its typed handles.
+No public callable exposes a principal, access context, role, kind, or permission.
+
+**Wire contracts.** Protocol `environment-session.v1`; portable resources
+`environmentharness.dev/v1alpha1`. The canonical short HTTP hierarchy with a typed management-list
+envelope, ETags, `Location` headers, one stable error taxonomy, and the three declared capabilities
+`historical-ingestion`, `participant-credentials`, `local-viewer`. All 40 frozen 0.2 operations are
+classified exactly once in `contracts/migrations/http-0.2-to-0.3.json`.
+
+**Generated artifacts.** 36 JSON Schemas and `contracts/openapi.json` under `contracts/`; the
+checked-in viewer assets under `src/environment_harness/viewer/`; the generated
+[HTTP migration](HTTP-MIGRATION.md) table. Every one has a `--check` drift gate.
+
+**Storage.** Migrations `001` through `006`, applied automatically for SQLite and through
+`PostgresEvidenceStore.initialize()` for PostgreSQL.
+
+**Credentials.** Three issuable server-owned policies — `admin`, `viewer`, `participant` — plus the
+non-issuable in-process `trusted-local` context.
+
+**Viewer.** Four global destinations, one contextual left navigation per resource, ancestry
+breadcrumbs, and the reserved-height context bar.
+
+**Documentation.** `README.md`, `packages/typescript/README.md`, `CHANGELOG.md`, and the 20 guides
+under `docs/`.
+
+**Explicitly excluded.** Parquet export, RLlib conversion and external-environment support, TRL
+integration, live OpenEnv training, remote training workers and distributed decision workers, and
+the separately owned **Pluggable Decision-Selection Seam**. None of these is a dependency of the
+trajectory foundation. The bounded Verifiers legacy bridge is included and pinned to
+`>=0.3.1,<0.4`.
+
+A separately installable decision runtime keeps its own version and release gate. If it is ever
+added to a manifest it ships in the same candidate/final release event rather than on its own
+timeline. See [Decision runtime](DECISION-RUNTIME.md).
+
+### Downstream-impact appendix
+
+`0.3.0rc1` is broadly incompatible with `0.2.x`. This appendix is the complete list of breaking
+changes and their required migrations, derived from this repository's own diff, so it can be
+written and reviewed here without copying consumer code, deployment state, or credentials into the
+repository or the release artifacts.
+
+**Last compatible pin for any consumer that has not migrated: `environment-harness==0.2.4rc2`.**
+An unqualified deployment must stay at that pin rather than upgrade partway.
+
+No downstream consumer is known to depend on `0.2.x` at the time of this freeze. Add a row here for
+any breaking change a later release introduces, and re-verify the table against any consumer that
+adopts the SDK before `0.3.0`.
+
+| Change | Affected API or stored representation | Required migration |
+| --- | --- | --- |
+| `Principal` and the four-role model removed | Every SDK call and HTTP request that constructed or forwarded a principal; `x-roles` in generated clients | Delete principal construction. Use `EnvironmentHarness` in process; send only a bearer credential remotely. No adapter is possible — the type is gone. |
+| Migration `005_credential_policies` deletes every credential row | The `credentials` table; all issued bearer tokens | Reissue before or immediately after upgrade. Old tokens return `401`. Tokens cannot be converted. |
+| `/v1/environments/*` replaced by the short hierarchy | Every HTTP route and generated client method | Apply the per-operation mapping in `contracts/migrations/http-0.2-to-0.3.json` and [HTTP migration](HTTP-MIGRATION.md). Regenerate clients; do not hand-edit paths. |
+| `GET /v1/environment` removed | Consumers that fetched a standalone `EnvironmentSpec` | Read the spec frozen inside the Experiment and inherited by its Sessions. |
+| `Trajectory.status.records` removed | Any consumer that read records from the status object | Page `GET /v1/trajectories/{id}/records`, or `records_page`/`stream_records` in process. A materializing shim reintroduces the unbounded read this change removed; do not write one. |
+| `ActivitySnapshot` → `ActivityHierarchy`; `/v1/activity/snapshot` → `/v1/activity/hierarchy` | Activity recovery callers and stored client types | Rename. Field semantics are unchanged. |
+| Management collections return `items`/`nextCursor`/`links` with an opaque cursor | Every list response and any consumer that persisted a list cursor | Read `items`; treat the cursor as opaque and never derive or store a synthetic one. Durable evidence and activity feeds keep their integer cursors. |
+| `GET /v1/sessions/{id}/invocations` returns `items` (was `work`) | Agent-work readers | Rename the key. |
+| Snapshot and dataset export uses content negotiation on `/records` | `/export` verb callers | Request `/records` with the desired media type. |
+| Typed environment factories replace persisted import paths | `session_runs` rows and any consumer that wrote an import path | Configure factories once per harness. Migration `006_scheduler_recovery` adds `environment_id`, `environment_version`, `spec_digest`, and `blocked_reason`; legacy rows project read-only without rewrite. A missing or mismatched factory leaves a Session durably `blocked` rather than failing at execution time. |
+| `EnvironmentHarness(environment_factory=, agent_factories=)` renamed | Every SDK construction site | Rename to `environment=` and `agents=`. Replace `environments=[A, B]` with `environment=[A, B]`. Read the durable blocked reason as `environment_not_configured`. |
+| `SessionRunner` receives a typed `SessionControl` | Custom session runners | Replace `(session, environment, access, agents, turns=...)` with `(control, agents, turns=...)`. See [Environment authoring](AUTHORING.md). |
+| `RunPolicy.inference_capture` defaults to `summary` | Recorded inference evidence and any consumer reading rendered requests, responses, token IDs, or log probabilities | Set `inference_capture="training"` with a training entitlement and a non-zero `max_inference_artifact_bytes`. Existing recorded evidence is unchanged; only new sessions are affected. |
+| Viewer routes are plural and a detail root equals its Overview tab | Deep links, bookmarks, embedded links, `serve --open`, and `create_synthetic_showcase().review` | Rewrite links to `/overview`, `/experiments/{id}`, `/sessions/{id}`, `/trajectories/{id}`, `/comparisons`. Read `review.overview` instead of `review.home`. |
+
+Two rows deliberately have no converter: the credential deletion and the `Principal` removal. The
+project accepts a forced reissue and a hard compile break rather than carrying the discarded role
+taxonomy or a principal compatibility mapper into `0.3`. Do not justify either by claiming tokens
+are necessarily short-lived — the previous API allowed long TTLs.
+
 ## Prepare a release candidate
 
 Release preparation is an explicitly dispatched workflow that changes the coordinated version on a
@@ -121,6 +208,52 @@ make security
 viewer drift, browser UI checks, and TypeScript tests. `make build` creates and validates the wheel,
 source distribution, and TypeScript tarball. `make security` performs the full repository policy,
 dependency, and audit checks.
+
+### The fresh-environment walkthrough
+
+`scripts/check_release.py` is the documentation-acceptance walkthrough, and it is a required check
+rather than a manual procedure. It builds a throwaway virtual environment outside the checkout,
+installs the pinned runtime dependencies and then the built wheel with `--no-deps`, and runs the
+public journey against that installation with a filtered environment. Running it locally requires
+`uv` and exactly one wheel in `dist/`:
+
+```sh
+uv build
+uv run --no-sync python scripts/check_release.py
+```
+
+It records its result to `.local/release-check.json` and asserts, in order:
+
+1. the imported package resolves inside the installed prefix, its metadata, `__version__`, and
+   `environment-harness doctor` agree, and `py.typed` and the SQL migrations ship;
+2. the shipped examples run and produce their documented totals and single-lineage comparison;
+3. `EnvironmentHarness` records a native session through a custom `SessionRunner` that stops inside
+   its budget, leaving the session resumable;
+4. a historical source is registered and ingested, an identical retry is idempotent, and a **second
+   process** resumes from the acknowledged position and hash — the restart-safe cursor is exercised,
+   not asserted;
+5. an immutable snapshot freezes and re-exports byte-identically, while a dataset built from the
+   same evaluation-only evidence is refused for lacking a training entitlement;
+6. the packaged server serves the four global viewer destinations, a session deep link, and a
+   trajectory tab, and returns `404` for the removed `/v1/environments`, `/home`, and
+   `/session/{id}` surfaces;
+7. an unauthenticated read returns `401`, and a participant credential cannot observe another
+   participant or see their private evidence;
+8. a pause and resume over HTTP produce a continuation segment that names its predecessor and
+   interruption, records stay a paged stream rather than appearing in `status`, and the imported
+   trajectory reports collection, execution, termination, and verified outcome independently;
+9. snapshot content negotiation streams exactly the rows the in-process export produced; and
+10. the canonical `POST /v1/experiments` route accepts a strict `ExperimentSpec`, honours the
+    supplied operation ID, and cancellation is idempotent.
+
+When the separately owned decision runtime is selected for the manifest, extend this walkthrough to
+exercise its deterministic selector and to verify the optional distribution **without** installing
+TypeSafe by default.
+
+Changes to optional adapters, `training.py`, plugin discovery, or dependency bounds also run the
+path-routed optional-integration job. Contract paths are separately classified as schema impact;
+malformed or incomplete GitHub change metadata fails closed. Before freezing `0.3.0rc1`, verify the
+shared compatibility fixtures are required rather than advisory.
 
 The PostgreSQL integration test runs in CI against its configured service. Do not claim a local
 PostgreSQL pass when `ENVIRONMENT_HARNESS_POSTGRES_URL` was absent and the test was skipped.
@@ -228,6 +361,12 @@ Every release pull request must check whether it needs updates to:
 - [Viewer maintenance](VIEWER-MAINTENANCE.md) for the browser build or test contract;
 - [Protocol](PROTOCOL.md), generated [API reference](API-REFERENCE.md), and `contracts/` for API changes;
 - [Compatibility](COMPATIBILITY.md) for upgrade behavior;
+- [Authentication](AUTHENTICATION.md) whenever authentication requirements, credential policies, or
+  resource constraints change;
+- [Decision runtime](DECISION-RUNTIME.md) when the minimum decision payloads or the seam's
+  inclusion state change;
+- the downstream-impact appendix above for any new breaking change, with its last compatible pin
+  and required migration;
 - [Release scope](STATUS.md) for newly qualified or explicitly unqualified capabilities; and
 - `CHANGELOG.md` for every user-visible change.
 

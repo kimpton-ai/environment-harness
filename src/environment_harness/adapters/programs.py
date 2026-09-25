@@ -1,6 +1,7 @@
 """Bounded command, HTTP, instrumented model and MCP boundaries."""
 
 import json
+import math
 import os
 import queue
 import subprocess
@@ -19,6 +20,8 @@ class CommandAgent:
     """Trusted local command. Use DockerBackend for hostile agent programs."""
 
     managed_cancellation = True
+    # Declared rather than inferred: the hooks below exist only to reject use.
+    supports_checkpoint = False
 
     def __init__(self, command, implementation, *, timeout=30, max_bytes=1048576):
         self.command, self.implementation = list(command), implementation
@@ -114,6 +117,8 @@ class CommandAgent:
 
 
 class HTTPAgent:
+    supports_checkpoint = False
+
     def __init__(self, endpoint, token, implementation, *, allow_loopback=False):
         self.client = EnvironmentClient(endpoint, token, allow_loopback=allow_loopback)
         self.implementation = implementation
@@ -129,55 +134,216 @@ class HTTPAgent:
 
 
 class InstrumentedModel:
-    """Record exactly the supplied rendered request. Never infer missing token metadata."""
+    """The only inference-evidence write path.
 
-    def __init__(self, store, environment, principal, generate):
-        self.store, self.environment, self.principal, self.generate = store, environment, principal, generate
+    Record exactly the supplied rendered request and never infer missing token
+    metadata. The session's frozen `RunPolicy.inference_capture` decides how much
+    is recorded: `none` records nothing, `summary` records identities, usage,
+    timing, counts, finish reason, and validation state, and `training` also
+    records rendered content, token IDs, and log probabilities within the
+    session's cumulative inference-artifact budget.
+
+    Only in-process Python agents that call this class can provide token-faithful
+    inference evidence. `CommandAgent` and remote HTTP participants remain valid
+    evaluation transports but cannot attach inference evidence.
+    """
+
+    def __init__(
+        self,
+        store,
+        environment,
+        access,
+        generate,
+        *,
+        model="unidentified",
+        tokenizer="unavailable",
+        renderer="unavailable",
+        seed=None,
+        capture_content=False,
+    ):
+        """``capture_content`` is a request, not an override.
+
+        The frozen session policy still decides what is recorded, so a caller
+        cannot widen capture beyond its experiment's entitlement.
+        """
+
+        self.store, self.environment, self.access, self.generate = (
+            store,
+            environment,
+            access,
+            generate,
+        )
+        self.model = model
+        self.tokenizer = tokenizer
+        self.renderer = renderer
+        self.seed = seed
+        self.capture_content = capture_content
+
+    def _capture(self):
+        """Read the frozen capture level and budget for this session."""
+
+        with self.store.transaction() as db:
+            row = self.store.environment(db, self.environment, self.access, "session.read")
+            policy = json.loads(row["manifest"])["policy"]
+        return (
+            policy.get("inference_capture", "summary"),
+            policy.get("max_inference_artifact_bytes", 0),
+            policy["max_event_bytes"],
+        )
 
     def call(self, request, *, context_changes=None):
+        from ..runner import current_inference_context
+        from ..store import digest, uid
+
+        level, _budget, _limit = self._capture()
+        if level == "none":
+            # Capture is disabled for this session: run the provider and record
+            # nothing rather than recording a partial, misleading summary.
+            response = self.generate(request)
+            self._validate_response(response)
+            return response
+        detailed = level == "training"
+        try:
+            request_digest = digest(request)
+        except (TypeError, ValueError):
+            raise Conflict("invalid inference evidence request") from None
+        call_id = uid()
+        correlation = current_inference_context()
+        identity = {
+            "call_id": call_id,
+            "correlation": correlation,
+            "model": self.model,
+            "tokenizer": self.tokenizer,
+            "renderer": self.renderer,
+            "seed": self.seed,
+        }
+        request_payload = identity | {
+            "request_digest": request_digest,
+            "rendered_request": request if (self.capture_content and detailed) else None,
+            "context_changes": context_changes if detailed else None,
+            "capture": level,
+            "visibility": "instrumented",
+        }
+        request_payload = self._spill_detail(
+            request_payload,
+            ("rendered_request", "context_changes"),
+            "inference.request",
+        )
         with self.store.transaction() as db:
-            row = self.store.environment(db, self.environment, self.principal, ("agent",))
+            row = self.store.environment(db, self.environment, self.access, "participant.act")
             self.store.append(
                 db,
                 self.environment,
                 row["revision"],
                 "model.request",
-                {
-                    "rendered_request": request,
-                    "context_changes": context_changes,
-                    "visibility": "instrumented",
-                },
-                (self.principal.participant,),
+                request_payload,
+                (self.access.participant,),
             )
         try:
             response = self.generate(request)
-        except Exception:
+            self._validate_response(response)
+        except Exception as error:
             with self.store.transaction() as db:
-                row = self.store.environment(db, self.environment, self.principal)
+                row = self.store.environment(db, self.environment, self.access, "session.read")
                 self.store.append(
                     db,
                     self.environment,
                     row["revision"],
                     "model.failure",
-                    {"category": "infrastructure"},
-                    (self.principal.participant,),
+                    identity
+                    | {
+                        "category": "malformed" if isinstance(error, Conflict) else "infrastructure",
+                        "request_digest": request_digest,
+                    },
+                    (self.access.participant,),
                 )
             raise
+        response_payload = identity | {
+            "response": response if (self.capture_content and detailed) else None,
+            "token_ids": response.get("token_ids") if detailed else None,
+            "logprobs": response.get("logprobs") if detailed else None,
+            "token_count": len(response["token_ids"]) if response.get("token_ids") else None,
+            "usage": response.get("usage"),
+            "finish_reason": response.get("finish_reason"),
+            "request_digest": request_digest,
+            "capture": level,
+            "validation": "validated",
+        }
+        response_payload = self._spill_detail(
+            response_payload,
+            ("response", "token_ids", "logprobs"),
+            "inference.response",
+        )
         with self.store.transaction() as db:
-            row = self.store.environment(db, self.environment, self.principal)
+            row = self.store.environment(db, self.environment, self.access, "session.read")
             self.store.append(
                 db,
                 self.environment,
                 row["revision"],
                 "model.response",
-                {
-                    "response": response,
-                    "token_ids": response.get("token_ids"),
-                    "logprobs": response.get("logprobs"),
-                },
-                (self.principal.participant,),
+                response_payload,
+                (self.access.participant,),
             )
         return response
+
+    def _spill_detail(self, payload, fields, purpose):
+        level, budget, max_event_bytes = self._capture()
+        if len(encode(payload).encode()) <= max_event_bytes:
+            return payload
+        detail = {field: payload[field] for field in fields}
+        body = encode(detail).encode()
+        self._charge_inference_budget(len(body), budget, level)
+        artifact = self.store.artifact(
+            self.environment,
+            self.access,
+            body,
+            audience=(self.access.participant,),
+            media_type="application/json",
+        )
+        summary = payload | {field: None for field in fields}
+        summary["detail_artifact"] = artifact | {"purpose": purpose}
+        if len(encode(summary).encode()) > max_event_bytes:
+            raise Conflict("inference evidence summary exceeds event size limit")
+        return summary
+
+    def _charge_inference_budget(self, size, budget, level):
+        """Enforce the cumulative per-Session inference-artifact budget.
+
+        Oversized detail fails explicitly rather than being silently truncated.
+        """
+
+        with self.store.transaction() as db:
+            self.store.environment(db, self.environment, self.access, "artifact.write")
+            spent = db.execute(
+                "SELECT coalesce(sum(size),0) FROM artifacts WHERE environment=? "
+                "AND media_type='application/json'",
+                (self.environment,),
+            ).fetchone()[0]
+        if spent + size > budget:
+            raise Conflict(
+                f"cumulative inference-artifact budget exhausted for {level!r} capture: "
+                f"{spent + size} bytes exceeds {budget}"
+            )
+
+    @staticmethod
+    def _validate_response(response):
+        if not isinstance(response, dict):
+            raise Conflict("invalid inference evidence response")
+        token_ids = response.get("token_ids")
+        logprobs = response.get("logprobs")
+        if token_ids is not None and (
+            not isinstance(token_ids, list) or any(type(token) is not int or token < 0 for token in token_ids)
+        ):
+            raise Conflict("invalid inference evidence token IDs")
+        if logprobs is not None and (
+            not isinstance(logprobs, list)
+            or any(
+                type(value) not in (int, float) or not math.isfinite(value) or value > 0 for value in logprobs
+            )
+        ):
+            raise Conflict("invalid inference evidence log probabilities")
+        if token_ids is not None and logprobs is not None and len(token_ids) != len(logprobs):
+            raise Conflict("invalid inference evidence token/logprob lengths")
 
 
 class MCPTools:

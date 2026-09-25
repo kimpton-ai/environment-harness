@@ -5,11 +5,12 @@ import json
 import pytest
 
 from environment_harness import cli, presentation
-from environment_harness.contracts import AgentSpec, ExperimentSpec, Principal, RunPolicy
+from environment_harness.access import _AccessContext
+from environment_harness.contracts import AgentSpec, ExperimentSpec, RunPolicy
 from environment_harness.evaluation import compare
 from environment_harness.fixtures import SyntheticAgent, SyntheticEnvironment
 from environment_harness.runner import run
-from environment_harness.runtime import EnvironmentSession
+from environment_harness.runtime import _SessionRuntime
 from environment_harness.store import EvidenceStore
 
 
@@ -17,8 +18,8 @@ from environment_harness.store import EvidenceStore
 def lineage(tmp_path):
     store = EvidenceStore(tmp_path)
     env = SyntheticEnvironment()
-    session = EnvironmentSession(store, env)
-    who = Principal(tenant="local", subject="local-researcher", role="researcher")
+    session = _SessionRuntime(store, env)
+    who = _AccessContext(tenant="local", subject="local-researcher", policy="trusted-local")
     spec = ExperimentSpec(
         environment=env.spec,
         participants=tuple(
@@ -68,8 +69,8 @@ def test_perspective_hides_other_participants(lineage):
     turns = timeline(store, who, parent, perspective="alice")
     assert all(turn["participants"]["bob"][slot] is None for turn in turns for slot in presentation.SLOTS)
     text = presentation.render_timeline(turns, perspective="alice")
-    assert "synthetic-secret-alice" in text
-    assert "synthetic-secret-bob" not in text
+    assert "synthetic-briefing-alice" in text
+    assert "synthetic-briefing-bob" not in text
     assert "bob    not visible from this perspective" in text
     assert text.startswith("Revision 0 to 1")
 
@@ -125,7 +126,7 @@ def test_cli_inspection_commands(lineage, tmp_path, monkeypatch, capsys):
     assert "No score report recorded." in shown and "reports" in json.loads(main("show", child, "--json"))
     turns = json.loads(main("timeline", child, "--json"))
     assert turns[0]["revision"] == 3 and turns[0]["inherited"]["count"] == 31
-    assert "synthetic-secret-alice" not in main("timeline", parent, "--participant", "bob")
+    assert "synthetic-briefing-alice" not in main("timeline", parent, "--participant", "bob")
     assert "Checkpoint" in main("timeline", parent, "--kind", "checkpoint")
     human = main("compare", parent, child)
     assert human.startswith("Compared 2 environments in 1 lineage.") and "alice, bob (Original)" in human

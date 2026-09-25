@@ -2,6 +2,125 @@
 
 ## Unreleased
 
+### Breaking changes
+
+- **The public four-role authorization model is removed.** `Principal`,
+  `Principal.role`, and the `researcher`/`agent`/`scorer`/`worker` vocabulary are gone from the
+  SDK, HTTP API, OpenAPI (`x-roles`), generated artifacts, and examples. A remote caller sends only
+  an opaque bearer credential; the server resolves it to an `admin`, `viewer`, or `participant`
+  policy it owns. Requests can never assert a policy, role, or permission.
+- **Every pre-`0.3.0rc1` credential is deleted.** Numbered migration `005_credential_policies`
+  drops all legacy principal rows transactionally. Old bearer tokens return `401`; reissue through
+  `environment-harness token`, the embedding API, or the participant-credential operation. See
+  [Authentication](docs/AUTHENTICATION.md).
+- **The `/v1/environments` surface is replaced** by the canonical short resource hierarchy
+  (`/v1/scenario-sets`, `/v1/experiments`, `/v1/sessions`, `/v1/policies`, `/v1/trajectories`,
+  `/v1/snapshots`, `/v1/datasets`, `/v1/sources`, `/v1/training-runs`, `/v1/comparisons`,
+  `/v1/capabilities`, `/v1/activity`). Old paths return `404`. `GET /v1/environment` is removed:
+  `EnvironmentSpec` is frozen inside each Experiment and inherited by its Sessions. Every 0.2
+  operation is classified exactly once in the enforced
+  [HTTP migration manifest](docs/HTTP-MIGRATION.md).
+- **`Trajectory.status.records` is removed.** Records are a cursor-paged stream read through
+  `GET /v1/trajectories/{id}/records`, `TrajectoryRepository.records_page`, or
+  `TrajectoryRepository.stream_records`.
+- **`ActivitySnapshot` is renamed `ActivityHierarchy`** and `GET /v1/activity/snapshot` becomes
+  `GET /v1/activity/hierarchy`, so "snapshot" names only the immutable `TrajectorySnapshot`.
+- **Management collections return one typed envelope** (`items`, `nextCursor`, `links`) with an
+  opaque cursor. Durable evidence and activity feeds keep their integer cursors.
+- **Snapshot and dataset export uses content negotiation** on `/records` instead of an `/export`
+  verb path.
+- Viewer routes are plural: `/overview`, `/experiments/{id}`, `/sessions/{id}`,
+  `/trajectories/{id}`, `/comparisons`. `/home`, `/compare`, `/experiment/{id}`,
+  `/session/{id}`, and `/trajectory/{id}` are gone, a detail root is equivalent to its `Overview`
+  tab, and `serve --open` now opens `/overview`. `create_synthetic_showcase` returns
+  `review.overview` in place of `review.home`.
+- **A custom `SessionRunner` is called with a typed `SessionControl`**, not the private session
+  runtime, environment-session ID, and access context. Replace
+  `runner(session, environment, access, agents, turns=...)` with
+  `runner(control, agents, turns=...)` and use `control.advance`, `control.observation`,
+  `control.lease`, `control.release`, `control.prepare_operation`, and
+  `control.dispatch_operation`. The default runner is the exported `run_session`. See
+  [Environment authoring](docs/AUTHORING.md).
+- **`EnvironmentHarness` constructor arguments are renamed and one is removed.**
+  `environment_factory=` becomes `environment=`, `agent_factories=` becomes `agents=`, and the
+  separate `environments=` sequence parameter is gone — `environment=` accepts one class or a
+  sequence of them. Passing both previously dropped `environment_factory` silently. Passing an
+  instance now explains that the harness builds a fresh environment per session. The durable
+  blocked reason `environment_factory_unavailable` becomes `environment_not_configured`.
+
+  ```python
+  # before
+  EnvironmentHarness(store, environment_factory=MyEnvironment, agent_factories={"alice": MyAgent})
+  # after
+  EnvironmentHarness(store, environment=MyEnvironment, agents={"alice": MyAgent})
+  ```
+- **`GET /v1/sessions/{id}/invocations` returns `items`**, replacing the `work` key on the removed
+  `/v1/environments/{environment}/agent-work` route.
+- **Token-faithful inference capture is now entitled and budgeted.** `RunPolicy.inference_capture`
+  defaults to `summary`; `training` requires `purpose`/`split` of `training` and a non-zero
+  `RunPolicy.max_inference_artifact_bytes`. Experiments that previously recorded rendered requests,
+  responses, token IDs, or log probabilities by default now record summaries only until they opt in.
+
+### Added
+
+- `EnvironmentHarness` is the only public local-execution facade, returning a typed
+  `EnvironmentSession` handle that neither inherits from nor exposes the private session runtime.
+  The handle adds `advance`, `checkpoint`, `branch`, `resource`, `records`, `snapshot`, `report`,
+  `artifact`, and `participant_credential`, and `harness.sources()` exposes the trusted local
+  trajectory, source, and dataset surface.
+- Restart-safe local scheduling: startup reconciliation, durable submission-failure recording, and
+  typed environment factories selected by object identity with only
+  `(id, version, spec_digest)` serialized. A missing or mismatched factory leaves a Session
+  durably `blocked`.
+- Portable `ScenarioSet`, `Experiment`, `Session`, and `Checkpoint` resources in
+  `environment_harness.resources`, with a strict `BranchRequest` that returns a child Session.
+- `GET /v1/capabilities`, `x-capability` annotations, and `501 capability_unavailable`.
+- One stable error taxonomy shared by Python, HTTP, OpenAPI, and TypeScript.
+- `docs/AUTHENTICATION.md`, `docs/DATA-MODELS.md`, `docs/HTTP-MIGRATION.md`, and
+  `docs/DECISION-RUNTIME.md`.
+- Inference capture levels `none`, `summary`, and `training`, a cumulative per-session artifact
+  budget that fails closed, and representative storage estimates in
+  [Training](docs/TRAINING.md).
+- The accepted viewer information architecture: four global destinations
+  (`Overview | Experiments | Sessions | Trajectories`), one contextual left navigation per selected
+  resource, ownership-ancestry breadcrumbs that stop at the parent, a reserved-height context bar
+  with same-height loading skeletons, narrow-screen ancestry collapse, and contextual training
+  provenance. See [Viewer maintenance](docs/VIEWER-MAINTENANCE.md).
+- `SessionControl` and `run_session` are exported, so a custom session runner composes domain
+  operations without receiving an authorization value.
+
+### Fixed
+
+- Three unreachable guards are removed rather than left to read as protection they cannot provide:
+  a `Checkpoint` continuation-state check that its own required field already enforced, a duplicate
+  16 MiB artifact bound the request middleware applies first, and a third copy of
+  "trajectory has no evidence" inside `freeze`, which `get` raises before it is reached.
+- `403 cross_origin_denied` is a distinct error code again. The taxonomy rewrite had collapsed it
+  into `forbidden`, which contradicts the documented meaning of that code: a cross-origin rejection
+  happens before any credential is consulted, so it is a browser-boundary rejection rather than an
+  authorization decision.
+- A background catalog refresh no longer drops keyboard focus out of an open viewer listbox.
+- Switching viewer destinations while the catalog request is in flight no longer lets the older
+  request repaint over the newer destination.
+
+EnvironmentHarness now projects native and imported traces into additive `v1alpha1` Policy,
+Trajectory, TrajectorySnapshot, TrajectoryDataset, and TrainingRun resources. Historical sources use
+immutable namespaced registrations, bounded hash-chained ingestion, idempotent retries, explicit
+acknowledgement cursors, and independently inspectable collection, execution, termination, and
+verified-outcome state. Native pause/resume histories become causally linked continuation segments.
+
+Python, TypeScript, HTTP, and CLI surfaces now page trajectory records and stream reproducible
+snapshot/dataset JSONL. Training datasets require complete terminal training evidence, compatible
+schemas, and resolved finite reward supersession chains. `InstrumentedModel` correlates model calls
+to durable agent work and spills oversized detail to participant-scoped artifacts. Trainer plugins
+remain explicit local Python/CLI integrations; the server only reads immutable receipts.
+
+The viewer adds imported trajectory health/segment inspection and conditional experiment Training
+details without exposing raw extension or inference payloads. The Verifiers bridge now matches the
+declared `>=0.3.1,<0.4` extra and derives authorized rows from canonical trajectories. Optional
+integration changes have a path-routed CI job. RLlib, TRL, live OpenEnv training, Parquet, and the
+separately owned decision-selection seam are not claimed by this change.
+
 Typed scenarios now expand into bounded concurrent experiment trials with durable
 status, deterministic seeds and resumable activity feeds. The evidence viewer adds
 experiment grouping, filtering, unequal-length comparison, progression and report

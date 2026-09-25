@@ -6,24 +6,24 @@ import pytest
 from environment_harness import (
     AgentSpec,
     EnvironmentHarness,
-    EnvironmentSession,
     EvidenceStore,
     ExperimentSpec,
-    Principal,
     presentation,
 )
+from environment_harness.access import _AccessContext
 from environment_harness.contracts import OperationSpec, RunPolicy
 from environment_harness.errors import BudgetExceeded, Conflict, Forbidden, Unsupported
 from environment_harness.fixtures import SyntheticEnvironment
 from environment_harness.operations import EnvironmentOperation, Operations, environment_operations
+from environment_harness.runtime import _SessionRuntime
 from environment_harness.store import encode
 
 
 def setup(tmp_path):
     store = EvidenceStore(tmp_path)
     environment_impl = SyntheticEnvironment()
-    session = EnvironmentSession(store, environment_impl)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    session = _SessionRuntime(store, environment_impl)
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     spec = ExperimentSpec(
         environment=environment_impl.spec,
         participants=(AgentSpec(id="a", implementation="synthetic", policy_version="1"),),
@@ -34,7 +34,9 @@ def setup(tmp_path):
         ),
     )
     environment = session.create(spec, researcher)["id"]
-    agent = Principal(tenant="tenant", subject="a", role="agent", environment=environment, participant="a")
+    agent = _AccessContext(
+        tenant="tenant", subject="a", policy="participant", session=environment, participant="a"
+    )
     return store, session, researcher, environment, agent
 
 
@@ -147,8 +149,8 @@ def test_environment_package_supplies_custom_operation_without_core_registration
     environment_impl.spec = environment_impl.spec.model_copy(update={"operations": (operation.spec,)})
     environment_impl.operations = {operation.spec.name: operation}
     store = EvidenceStore(tmp_path)
-    session = EnvironmentSession(store, environment_impl)
-    researcher = Principal(tenant="tenant", subject="researcher", role="researcher")
+    session = _SessionRuntime(store, environment_impl)
+    researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
     spec = ExperimentSpec(
         environment=environment_impl.spec,
         participants=(AgentSpec(id="a", implementation="synthetic", policy_version="1"),),
@@ -156,7 +158,9 @@ def test_environment_package_supplies_custom_operation_without_core_registration
         policy=RunPolicy(allowed_endpoints=("world",), allowed_operations=("world.teleport",)),
     )
     environment = session.create(spec, researcher)["id"]
-    agent = Principal(tenant="tenant", subject="a", role="agent", environment=environment, participant="a")
+    agent = _AccessContext(
+        tenant="tenant", subject="a", policy="participant", session=environment, participant="a"
+    )
     operations = Operations(store)
     operations.prepare(
         environment,
@@ -218,8 +222,8 @@ def test_operation_supporting_guards_and_presentation(tmp_path):
     with pytest.raises(TypeError, match="session_runner must be callable"):
         EnvironmentHarness(
             tmp_path,
-            environment_factory=SyntheticEnvironment,
-            agent_factories={"agent": object},
+            environment=SyntheticEnvironment,
+            agents={"agent": object},
             session_runner=None,
         )
     assert (
@@ -304,8 +308,8 @@ def test_session_rejects_runtime_operation_configuration_drift(tmp_path):
     )
 
     with pytest.raises(Conflict, match="no matching runtime implementation"):
-        EnvironmentSession(EvidenceStore(tmp_path), environment).create(
-            spec, Principal(tenant="tenant", subject="researcher", role="researcher")
+        _SessionRuntime(EvidenceStore(tmp_path), environment).create(
+            spec, _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
         )
 
 
@@ -330,8 +334,8 @@ def test_session_rejects_missing_runtime_operation(tmp_path):
     )
 
     with pytest.raises(Conflict, match="runtime implementation"):
-        EnvironmentSession(EvidenceStore(tmp_path), environment_impl).create(
-            spec, Principal(tenant="tenant", subject="researcher", role="researcher")
+        _SessionRuntime(EvidenceStore(tmp_path), environment_impl).create(
+            spec, _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
         )
 
 

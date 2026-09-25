@@ -8,15 +8,15 @@ from .runner import writer
 from .store import uid
 
 
-def advance(session, environment, principal, *, owner=None):
+def advance(session, environment, access, *, owner=None):
     """Resolve at most one ready phase under the normal fenced writer lease.
 
     Return waiting without closing an incomplete coordinated phase. A declared
     deadline and missing-action policy decide whether incomplete phases can advance.
     """
-    with writer(session, environment, principal, owner or uid()) as (lease, failures):
+    with writer(session, environment, access, owner or uid()) as (lease, failures):
         with session.store.transaction() as db:
-            row = session.store.environment(db, environment, principal, ("researcher", "worker"))
+            row = session.store.environment(db, environment, access, "session.write")
             session._fence(row, lease)
             if row["status"] != "running":
                 return {"status": row["status"], "revision": row["revision"]}
@@ -47,12 +47,12 @@ def advance(session, environment, principal, *, owner=None):
         if spec.environment.phase_deadline == "coordinator":
             session.close_phase(
                 environment,
-                principal,
+                access,
                 lease,
                 revision=revision,
                 reason="decisions_complete" if complete else "deadline",
             )
-        result = session.resolve(environment, principal, lease)
+        result = session.resolve(environment, access, lease)
         if failures:
             raise Conflict("coordinator lost authority; inspect the committed revision")
         return result

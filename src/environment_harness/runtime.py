@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import random
 import time
+from contextlib import suppress
 
 from jsonschema import Draft202012Validator
 
-from .contracts import Action, ExperimentSpec, Principal, Transition
+from .contracts import Action, ExperimentSpec, Transition
 from .errors import Conflict, Forbidden, Unsupported
 from .history import inherit
 from .operations import environment_operations
@@ -19,7 +20,16 @@ def tuples(value):
     return tuple(tuples(x) for x in value) if isinstance(value, list) else value
 
 
-class EnvironmentSession:
+class _SessionRuntime:
+    """Private authorization-aware runtime. Not exported by the package.
+
+    Every operation that can observe or mutate session state requires an
+    ``_AccessContext``. ``EnvironmentHarness`` creates a trusted local context,
+    HTTP authentication creates policy-constrained contexts, and the runner
+    creates participant-scoped contexts, so local, HTTP, and runner paths cannot
+    drift into separate authorization implementations.
+    """
+
     def __init__(self, store: EvidenceStore, environment):
         self.store = store
         self.environment = environment
@@ -32,9 +42,10 @@ class EnvironmentSession:
             raise Conflict("environment version changed; explicit migration required")
         return spec
 
-    def create(self, experiment: ExperimentSpec, who: Principal, *, environment_id=None):
-        if who.role != "researcher" or who.environment is not None:
-            raise Forbidden("unscoped researcher authority required")
+    def create(self, experiment: ExperimentSpec, access, *, environment_id=None):
+        access.require("session.create")
+        if access.session is not None:
+            raise Forbidden("session-scoped credentials cannot create sessions")
         if experiment.environment != self.environment.spec:
             raise Conflict("environment contract mismatch")
         runtime_operations = environment_operations(self.environment)
@@ -51,7 +62,7 @@ class EnvironmentSession:
         with self.store.transaction() as db:
             existing = db.execute("SELECT * FROM environments WHERE id=?", (environment,)).fetchone()
             if existing:
-                self.store.environment(db, environment, who)
+                self.store.environment(db, environment, access, "session.read")
                 if existing["manifest"] != encode(manifest):
                     raise Conflict("session id reused with different experiment")
                 return self._public(existing)
@@ -61,11 +72,16 @@ class EnvironmentSession:
         with self.store.transaction() as db:
             existing = db.execute("SELECT * FROM environments WHERE id=?", (environment,)).fetchone()
             if existing:
-                self.store.environment(db, environment, who)
+                self.store.environment(db, environment, access, "session.read")
                 if existing["manifest"] != encode(manifest):
                     raise Conflict("session id reused with different experiment")
                 return self._public(existing)
-            split_key = (who.tenant, experiment.environment.id, experiment.scenario, experiment.time_boundary)
+            split_key = (
+                access.tenant,
+                experiment.environment.id,
+                experiment.scenario,
+                experiment.time_boundary,
+            )
             split = db.execute(
                 "SELECT split FROM splits WHERE tenant=? AND environment=? AND scenario=? AND time_boundary=?",
                 split_key,
@@ -98,7 +114,7 @@ class EnvironmentSession:
                 VALUES (?,?,?,?,?,?,?,?,?,?)""",
                 (
                     environment,
-                    who.tenant,
+                    access.tenant,
                     encode(manifest),
                     encode(state),
                     encode(scheduler),
@@ -116,9 +132,55 @@ class EnvironmentSession:
                 "session.created",
                 {"experiment": manifest, "manifest_hash": digest(manifest)},
             )
+            self._register_session_row(db, environment, access, experiment, manifest)
             return self._public(
                 db.execute("SELECT * FROM environments WHERE id=?", (environment,)).fetchone()
             )
+
+    def _register_session_row(self, db, environment, access, experiment, manifest):
+        """Give every created session a durable Session row.
+
+        The local scheduler inserts its own row before execution; a session
+        created directly through the runtime or the implicit
+        experiment-of-one gets one here so every Session is addressable and
+        recoverable through the same projection.
+        """
+
+        if db.execute("SELECT 1 FROM session_runs WHERE environment=?", (environment,)).fetchone():
+            return
+        now = time.time()
+        scenario = {
+            "id": experiment.scenario,
+            "input": manifest["scenario_input"],
+            "reference": manifest["scenario_reference"],
+            "metadata": manifest["scenario_metadata"],
+        }
+        db.execute(
+            "INSERT INTO session_runs (environment,tenant,experiment,scenario,trial,seed,status,error,"
+            "turns,target_turns,latest_activity,scenario_body,created,updated,environment_id,"
+            "environment_version,spec_digest,blocked_reason) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                environment,
+                access.tenant,
+                None,
+                experiment.scenario,
+                0,
+                experiment.seed,
+                "running",
+                None,
+                0,
+                experiment.policy.max_turns,
+                "Started",
+                encode(scenario),
+                now,
+                now,
+                manifest["environment"]["id"],
+                manifest["environment"]["version"],
+                digest(manifest["environment"]),
+                None,
+            ),
+        )
 
     def _public(self, row):
         manifest = json.loads(row["manifest"])
@@ -135,9 +197,8 @@ class EnvironmentSession:
             "reserved_micros": row["reserved"],
         }
 
-    def list_page(self, who, limit=100, cursor=None):
-        if who.role != "researcher":
-            raise Forbidden("researcher required")
+    def list_page(self, access, limit=100, cursor=None):
+        access.require("session.read")
         if not 1 <= limit <= 1000:
             raise ValueError("invalid environment-session page size")
         if cursor is not None and (
@@ -148,28 +209,28 @@ class EnvironmentSession:
             rows = db.execute(
                 "SELECT * FROM environments WHERE tenant=? AND (CAST(? AS TEXT) IS NULL OR id=?) "
                 "AND (CAST(? AS TEXT) IS NULL OR id<?) ORDER BY id DESC LIMIT ?",
-                (who.tenant, who.environment, who.environment, cursor, cursor, limit + 1),
+                (access.tenant, access.session, access.session, cursor, cursor, limit + 1),
             ).fetchall()
             page = [self._public(row) for row in rows[:limit]]
             return page, page[-1]["id"] if len(rows) > limit else None
 
-    def list(self, who, limit=100):
-        return self.list_page(who, limit)[0]
+    def list(self, access, limit=100):
+        return self.list_page(access, limit)[0]
 
-    def get(self, environment, who):
+    def get(self, environment, access):
         with self.store.transaction() as db:
-            row = self.store.environment(db, environment, who)
+            row = self.store.environment(db, environment, access, "session.read")
             result = self._public(row)
-            if who.role != "agent":
+            if access.full_evidence:
                 result["experiment"] = json.loads(row["manifest"])
                 result["scheduler"] = json.loads(row["scheduler"])
             return result
 
-    def lease(self, environment, who, owner, ttl=30):
+    def lease(self, environment, access, owner, ttl=30):
         if not owner or not 0 < ttl <= 300:
             raise ValueError("invalid lease")
         with self.store.transaction() as db:
-            row = self.store.environment(db, environment, who, ("researcher", "worker"))
+            row = self.store.environment(db, environment, access, "session.write")
             now = time.time()
             if row["lease_until"] > now and row["lease_owner"] != owner:
                 raise Conflict("environment has an active writer")
@@ -180,19 +241,19 @@ class EnvironmentSession:
             )
             return {"owner": owner, "epoch": epoch, "expires": now + ttl}
 
-    def release(self, environment, who, lease):
+    def release(self, environment, access, lease):
         with self.store.transaction() as db:
-            row = self.store.environment(db, environment, who, ("researcher", "worker"))
+            row = self.store.environment(db, environment, access, "session.write")
             self._fence(row, lease)
             db.execute("UPDATE environments SET lease_until=0 WHERE id=?", (environment,))
         return {"released": True}
 
-    def renew(self, environment, who, lease, ttl=90):
+    def renew(self, environment, access, lease, ttl=90):
         """Extend an existing running writer, never reacquire an expired lease."""
         if not 0 < ttl <= 300:
             raise ValueError("invalid lease")
         with self.store.transaction() as db:
-            row = self.store.environment(db, environment, who, ("researcher", "worker"))
+            row = self.store.environment(db, environment, access, "session.write")
             self._fence(row, lease)
             if row["status"] != "running":
                 raise Conflict("session is not running")
@@ -209,12 +270,36 @@ class EnvironmentSession:
         ):
             raise Conflict("writer lease expired or fenced")
 
-    def observe(self, environment, who, participant=None):
-        participant = participant or who.participant
+    def participant_context(self, environment, access, participant):
+        """Derive the participant-scoped context used to dispatch one actor.
+
+        Session runners and environment extensions call this instead of building
+        an access context themselves, so participant isolation has exactly one
+        implementation.
+        """
+
+        from .access import _AccessContext
+
         with self.store.transaction() as db:
-            row = self.store.environment(db, environment, who)
+            row = self.store.environment(db, environment, access, "session.read")
+            member = json.loads(row["participants"]).get(participant)
+            if not member or not member["active"]:
+                raise Forbidden("inactive participant")
+        return _AccessContext(
+            tenant=access.tenant,
+            subject=member["controller"],
+            policy="participant",
+            session=environment,
+            participant=participant,
+            generation=member["generation"],
+        )
+
+    def observe(self, environment, access, participant=None):
+        participant = participant or access.participant
+        with self.store.transaction() as db:
+            row = self.store.environment(db, environment, access, "observation.read")
             self._compatible(row)
-            if who.role == "agent" and participant != who.participant:
+            if access.participant is not None and participant != access.participant:
                 raise Forbidden("private observation")
             participants = json.loads(row["participants"])
             if participant not in participants or not participants[participant]["active"]:
@@ -230,7 +315,7 @@ class EnvironmentSession:
         payload = self.environment.observe(json.loads(snapshot["state"]), participant)
         self.observation_validator.validate(payload)
         with self.store.transaction() as db:
-            row = self.store.environment(db, environment, who)
+            row = self.store.environment(db, environment, access, "observation.read")
             if any(
                 row[key] != snapshot[key]
                 for key in ("revision", "participants", "state", "scheduler", "status")
@@ -265,18 +350,18 @@ class EnvironmentSession:
             )
             return result
 
-    def submit(self, environment, who, action: Action):
+    def submit(self, environment, access, action: Action):
         with self.store.transaction() as db:
-            row = self.store.environment(db, environment, who, ("agent",))
+            row = self.store.environment(db, environment, access, "participant.act")
             self._compatible(row)
-            if who.participant != action.participant:
+            if access.participant != action.participant:
                 raise Forbidden("cannot act for another participant")
             request = encode(action.model_dump(mode="json"))
             previous = db.execute(
                 "SELECT * FROM actions WHERE environment=? AND id=?", (environment, action.operation_id)
             ).fetchone()
             if previous:
-                if previous["request"] != request or previous["participant"] != who.participant:
+                if previous["request"] != request or previous["participant"] != access.participant:
                     raise Conflict("operation identifier reused")
                 return json.loads(previous["receipt"])
             reason = None
@@ -287,12 +372,12 @@ class EnvironmentSession:
                 reason = "stale_observation"
             observation = db.execute(
                 "SELECT * FROM observations WHERE id=? AND environment=? AND participant=? AND generation=? AND revision=?",
-                (action.observation_id, environment, who.participant, who.generation, action.revision),
+                (action.observation_id, environment, access.participant, access.generation, action.revision),
             ).fetchone()
             if not observation:
                 raise Forbidden("action does not identify a delivered observation")
             scheduler = json.loads(row["scheduler"])
-            if self.environment.spec.scheduling == "sequential" and scheduler["actor"] != who.participant:
+            if self.environment.spec.scheduling == "sequential" and scheduler["actor"] != access.participant:
                 reason = "not_selected_actor"
             if scheduler.get("closed") or (
                 self.environment.spec.phase_deadline == "wall" and scheduler["deadline"] <= time.time()
@@ -302,7 +387,7 @@ class EnvironmentSession:
                 reason, category = "invalid_action_schema", "malformed"
             duplicate = db.execute(
                 "SELECT 1 FROM actions WHERE environment=? AND revision=? AND participant=? AND status IN ('accepted','committed')",
-                (environment, action.revision, who.participant),
+                (environment, action.revision, access.participant),
             ).fetchone()
             if duplicate:
                 reason = "decision_already_submitted"
@@ -318,14 +403,14 @@ class EnvironmentSession:
                 row["revision"],
                 "action.attempted",
                 {"action": action.model_dump(mode="json"), "receipt": receipt, "category": category},
-                (who.participant,),
+                (access.participant,),
             )
             db.execute(
                 "INSERT INTO actions VALUES (?,?,?,?,?,?,?)",
                 (
                     environment,
                     action.operation_id,
-                    who.participant,
+                    access.participant,
                     action.revision,
                     request,
                     receipt["status"],
@@ -334,9 +419,9 @@ class EnvironmentSession:
             )
             return receipt
 
-    def resolve(self, environment, who, lease):
+    def resolve(self, environment, access, lease):
         with self.store.transaction() as db:
-            row = self.store.environment(db, environment, who, ("researcher", "worker"))
+            row = self.store.environment(db, environment, access, "session.write")
             self._fence(row, lease)
             spec = self._compatible(row)
             if row["status"] != "running":
@@ -423,7 +508,7 @@ class EnvironmentSession:
                 )
             raise
         with self.store.transaction() as db:
-            current = self.store.environment(db, environment, who, ("researcher", "worker"))
+            current = self.store.environment(db, environment, access, "session.write")
             self._fence(current, lease)
             if (
                 current["revision"] != phase
@@ -437,7 +522,7 @@ class EnvironmentSession:
                 (result.model_dump_json(), encode(rng.getstate()), environment, phase, input_hash),
             )
         with self.store.transaction() as db:
-            row = self.store.environment(db, environment, who, ("researcher", "worker"))
+            row = self.store.environment(db, environment, access, "session.write")
             self._fence(row, lease)
             if (
                 row["revision"] != phase
@@ -532,12 +617,31 @@ class EnvironmentSession:
                 "UPDATE transitions SET status='committed' WHERE environment=? AND revision=? AND input_hash=?",
                 (environment, phase, input_hash),
             )
+            self._sync_session_row(db, environment, revision, status)
             self._fence(db.execute("SELECT * FROM environments WHERE id=?", (environment,)).fetchone(), lease)
             return {"revision": revision, "status": status, "event": outcome["seq"]}
 
-    def close_phase(self, environment, who, lease, *, revision, reason="decisions_complete"):
+    def _sync_session_row(self, db, environment, revision, status):
+        """Keep the durable Session row's turn count and terminal state current.
+
+        The local scheduler owns its own status transitions, so only a session
+        this runtime drove to completion is marked terminal here.
+        """
+
+        db.execute(
+            "UPDATE session_runs SET turns=?,updated=? WHERE environment=?",
+            (revision, time.time(), environment),
+        )
+        if status == "completed":
+            db.execute(
+                "UPDATE session_runs SET status='succeeded',latest_activity='Completed',updated=? "
+                "WHERE environment=? AND status='running'",
+                (time.time(), environment),
+            )
+
+    def close_phase(self, environment, access, lease, *, revision, reason="decisions_complete"):
         with self.store.transaction() as db:
-            row = self.store.environment(db, environment, who, ("researcher", "worker"))
+            row = self.store.environment(db, environment, access, "session.write")
             self._fence(row, lease)
             if self._compatible(row).environment.phase_deadline != "coordinator":
                 raise Unsupported("environment uses wall-clock deadlines")
@@ -550,9 +654,9 @@ class EnvironmentSession:
                 self.store.append(db, environment, revision, "phase.closed", {"reason": reason})
             return {"revision": revision, "closed": True}
 
-    def external_event(self, environment, who, lease, *, source, cursor, event_time, payload, gap=False):
+    def external_event(self, environment, access, lease, *, source, cursor, event_time, payload, gap=False):
         with self.store.transaction() as db:
-            row = self.store.environment(db, environment, who, ("researcher", "worker"))
+            row = self.store.environment(db, environment, access, "session.write")
             self._fence(row, lease)
             cursors = json.loads(row["cursors"])
             if source in cursors and cursor <= cursors[source]:
@@ -571,19 +675,19 @@ class EnvironmentSession:
                 db, environment, row["revision"], "feed.ingested", event, event_time=event_time
             )
 
-    def memory(self, environment, who, memory, agent_state=None, expected_revision=None):
+    def memory(self, environment, access, memory, agent_state=None, expected_revision=None):
         with self.store.transaction() as db:
-            row = self.store.environment(db, environment, who, ("agent",))
+            row = self.store.environment(db, environment, access, "participant.memory.write")
             if row["status"] != "running":
                 raise Conflict("session is not running")
             if expected_revision is not None and row["revision"] != expected_revision:
                 raise Conflict("agent state belongs to another revision")
             participants = json.loads(row["participants"])
-            participant = participants[who.participant]
+            participant = participants[access.participant]
             participant["memory"] = memory
             if agent_state is not None:
                 spec = self._compatible(row)
-                if not next(p for p in spec.participants if p.id == who.participant).checkpoint:
+                if not next(p for p in spec.participants if p.id == access.participant).checkpoint:
                     raise Unsupported("agent has no checkpoint hook")
                 participant["agent_state"] = agent_state
             if len(encode(participants)) > json.loads(row["manifest"])["policy"]["max_state_bytes"]:
@@ -596,13 +700,13 @@ class EnvironmentSession:
                 environment,
                 row["revision"],
                 "participant.memory",
-                {"participant": who.participant, "memory_hash": digest(memory)},
-                (who.participant,),
+                {"participant": access.participant, "memory_hash": digest(memory)},
+                (access.participant,),
             )
 
-    def transfer(self, environment, who, lease, participant, controller, *, active=True):
+    def transfer(self, environment, access, lease, participant, controller, *, active=True):
         with self.store.transaction() as db:
-            row = self.store.environment(db, environment, who, ("researcher",))
+            row = self.store.environment(db, environment, access, "session.control")
             self._fence(row, lease)
             participants = json.loads(row["participants"])
             if participant not in participants:
@@ -635,22 +739,25 @@ class EnvironmentSession:
                     "active": active,
                 },
             )
-            return Principal(
-                tenant=who.tenant,
-                subject=controller,
-                role="agent",
-                environment=environment,
-                participant=participant,
-                generation=participants[participant]["generation"],
-            )
+            # Authority transfer records the new controller. Issuing a
+            # participant credential remains a separate, purpose-specific
+            # operation so transfer cannot mint remote access.
+            return {
+                "participant": participant,
+                "controller": controller,
+                "generation": participants[participant]["generation"],
+                "active": active,
+            }
 
-    def reconcile_agent(self, environment, who, lease, *, operation_id, response, evidence, agent_state=None):
+    def reconcile_agent(
+        self, environment, access, lease, *, operation_id, response, evidence, agent_state=None
+    ):
         """Record an authorized recovery result without dispatching the agent again."""
         if not isinstance(evidence, dict) or not evidence:
             raise ValueError("reconciliation requires lookup or operator evidence")
         self.action_validator.validate(response)
         with self.store.transaction() as db:
-            row = self.store.environment(db, environment, who, ("researcher",))
+            row = self.store.environment(db, environment, access, "session.control")
             self._fence(row, lease)
             work = db.execute(
                 "SELECT * FROM agent_work WHERE environment=? AND id=?", (environment, operation_id)
@@ -686,15 +793,15 @@ class EnvironmentSession:
                     "operation_id": operation_id,
                     "response_hash": digest(response),
                     "evidence": evidence,
-                    "authorized_by": who.subject,
+                    "authorized_by": access.subject,
                 },
                 (work["participant"],),
             )
             return {"operation_id": operation_id, "status": "responded"}
 
-    def checkpoint(self, environment, who, lease, *, exact_agents=False):
+    def checkpoint(self, environment, access, lease, *, exact_agents=False):
         with self.store.transaction() as db:
-            row = self.store.environment(db, environment, who, ("researcher",))
+            row = self.store.environment(db, environment, access, "session.control")
             self._fence(row, lease)
             spec = self._compatible(row)
             if not spec.environment.capabilities.checkpoint:
@@ -775,9 +882,9 @@ class EnvironmentSession:
                 "exact_agents": exact_agents,
             }
 
-    def resume(self, environment, who, lease, *, implementations=None):
+    def resume(self, environment, access, lease, *, implementations=None):
         with self.store.transaction() as db:
-            row = self.store.environment(db, environment, who, ("researcher", "worker"))
+            row = self.store.environment(db, environment, access, "session.write")
             self._fence(row, lease)
             spec = self._compatible(row)
             if not spec.environment.capabilities.resume:
@@ -801,9 +908,35 @@ class EnvironmentSession:
                 db.execute("SELECT * FROM environments WHERE id=?", (environment,)).fetchone()
             )
 
-    def branch(self, environment, who, checkpoint, interventions=None, *, new_environment=None):
+    def resume_if_paused(self, environment, access):
+        """Return a recovered session to ``running`` without a public lease dance.
+
+        Recovery never repeats a committed effect: it only clears a paused or
+        interrupted execution flag so the existing durable phase can continue.
+        """
+
+        lease = self.lease(environment, access, "environment-harness-recovery", ttl=60)
+        try:
+            with self.store.transaction() as db:
+                row = self.store.environment(db, environment, access, "session.write")
+                self._fence(row, lease)
+                if row["status"] == "paused":
+                    db.execute("UPDATE environments SET status='running' WHERE id=?", (environment,))
+                    self.store.append(
+                        db, environment, row["revision"], "session.resumed", {"epoch": lease["epoch"]}
+                    )
+                return self._public(
+                    db.execute("SELECT * FROM environments WHERE id=?", (environment,)).fetchone()
+                )
+        finally:
+            with suppress(Conflict):
+                self.release(environment, access, lease)
+
+    def branch(
+        self, environment, access, checkpoint, interventions=None, *, new_environment=None, turns=None
+    ):
         with self.store.transaction() as db:
-            parent = self.store.environment(db, environment, who, ("researcher",))
+            parent = self.store.environment(db, environment, access, "session.control")
             spec = self._compatible(parent)
             if not spec.environment.capabilities.branch:
                 raise Unsupported("environment cannot implement counterfactual branches")
@@ -827,7 +960,7 @@ class EnvironmentSession:
             existing = db.execute("SELECT * FROM environments WHERE id=?", (child,)).fetchone()
             changes = interventions or {}
             if existing:
-                self.store.environment(db, child, who.model_copy(update={"environment": None}))
+                self.store.environment(db, child, access, "session.control")
                 if (
                     existing["parent"] != environment
                     or existing["checkpoint"] != checkpoint
@@ -909,11 +1042,73 @@ class EnvironmentSession:
                     "split": spec.split,
                 },
             )
+            self._register_child_session(db, environment, child, checkpoint, snapshot, turns)
             return self._public(db.execute("SELECT * FROM environments WHERE id=?", (child,)).fetchone())
 
-    def finalize_outcomes(self, environment, who, lease, report_revision):
+    def _register_child_session(self, db, parent, child, checkpoint, snapshot, turns):
+        """Give a branched child a durable Session row of its own.
+
+        The child starts ``interrupted`` so branching never repeats an
+        externally visible effect without explicit caller intent.
+        """
+
+        origin = db.execute("SELECT * FROM session_runs WHERE environment=?", (parent,)).fetchone()
+        if origin is None:
+            return
+        if db.execute("SELECT 1 FROM session_runs WHERE environment=?", (child,)).fetchone():
+            return
+        now = time.time()
+        db.execute(
+            "INSERT INTO session_runs (environment,tenant,experiment,scenario,trial,seed,status,error,"
+            "turns,target_turns,latest_activity,scenario_body,created,updated,environment_id,"
+            "environment_version,spec_digest,blocked_reason) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                child,
+                origin["tenant"],
+                origin["experiment"],
+                origin["scenario"],
+                origin["trial"],
+                origin["seed"],
+                "interrupted",
+                None,
+                snapshot["revision"],
+                turns or origin["target_turns"],
+                "Branched",
+                origin["scenario_body"],
+                now,
+                now,
+                origin["environment_id"],
+                origin["environment_version"],
+                origin["spec_digest"],
+                None,
+            ),
+        )
+        db.execute(
+            "INSERT INTO event_outbox (tenant,topic,experiment,environment,kind,body,created) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (
+                origin["tenant"],
+                "experiment" if origin["experiment"] else "environment_session",
+                origin["experiment"],
+                child,
+                "environment_session.branched",
+                encode(
+                    {
+                        "status": "interrupted",
+                        "scenario_id": origin["scenario"],
+                        "trial": origin["trial"],
+                        "parent": parent,
+                        "checkpoint": checkpoint,
+                    }
+                ),
+                now,
+            ),
+        )
+
+    def finalize_outcomes(self, environment, access, lease, report_revision):
         with self.store.transaction() as db:
-            row = self.store.environment(db, environment, who, ("researcher", "worker"))
+            row = self.store.environment(db, environment, access, "session.write")
             self._fence(row, lease)
             if row["status"] != "outcomes_pending":
                 raise Conflict("session has no pending outcome lifecycle")
@@ -937,12 +1132,12 @@ class EnvironmentSession:
             )
             return {"status": "completed", "report_revision": report_revision}
 
-    def cancel(self, environment, who):
+    def cancel(self, environment, access):
         """Cancel execution without acquiring its writer lease. Uncertain effects remain unsettled."""
         from .operations import Operations
 
         with self.store.transaction() as db:
-            row = self.store.environment(db, environment, who, ("researcher",))
+            row = self.store.environment(db, environment, access, "session.control")
             if row["status"] not in ("running", "paused", "cancelled"):
                 raise Conflict("session already terminal")
             if row["status"] != "cancelled":
@@ -981,13 +1176,13 @@ class EnvironmentSession:
                 ],
             }
 
-    def control(self, environment, who, lease, command):
+    def control(self, environment, access, lease, command):
         if command not in ("pause", "cancel"):
             raise ValueError("unknown control")
         if command == "cancel":
-            return self.cancel(environment, who)
+            return self.cancel(environment, access)
         with self.store.transaction() as db:
-            row = self.store.environment(db, environment, who, ("researcher",))
+            row = self.store.environment(db, environment, access, "session.control")
             self._fence(row, lease)
             if row["status"] not in ("running", "paused"):
                 raise Conflict("session already terminal")

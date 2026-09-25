@@ -1,34 +1,51 @@
 # Environment-session v1
 
+Environment-session v1 remains the native execution protocol. Portable resources use the separate,
+additively evolving `environmentharness.dev/v1alpha1` family. A trace is the authoritative native
+or imported journal; a trajectory is a digest-bound projection of that trace. Neither resource
+family replaces or rewrites environment-session evidence.
+
 ## Authority and transport
 
-The supplier service owns the environment. HTTPS commands use bearer credentials. Loopback HTTP is an explicit development option. Credentials bind tenant, role, environment, participant and authority generation. Researcher, worker, scorer and participant permissions are separate. Participant credential issuance is researcher-only. Expired credentials fail closed; researchers may issue replacements without changing participant generation. Authority transfer increments generation and invalidates the old controller.
+The supplier service owns the environment. HTTPS requests carry only an opaque bearer credential; the server resolves it to an identity plus one of its fixed admin, viewer, or participant access policies. Loopback HTTP is an explicit development option. There is no public role model and requests never assert permissions. A participant credential is bound to one session, participant, and authority generation, and is issued only through the purpose-specific participant-credential operation. Invalid, expired, or revoked credentials return `401`; a valid credential denied by its policy or constraint returns a non-enumerating `403`. Authority transfer increments the generation and invalidates the old controller. See [Authentication](AUTHENTICATION.md).
 
 Administrative Python methods are trusted embedding APIs. They must not be exposed directly to untrusted agents. Store directories are private to the operating-system account. SQL credentials, signing keys, model credentials and resource handles belong to the server or worker scope.
 
-The loopback CLI's `serve` command configures automatic local viewer access independently of browser launch. The viewer reads its non-secret authentication mode from `GET /viewer/config` and exchanges local access through `POST /local/connect`, which requires the exact loopback origin and a loopback peer. The endpoint supports refreshes and new tabs, is absent from ordinary supplier applications, and never places its researcher credential in a URL, HTML, browser storage or a token file. `serve --open` only opens the plain viewer URL. The CLI disables proxy-header trust. Manual supplier connections retain credentials only in page memory, and every supplier API request still requires its bearer credential.
+The loopback CLI's `serve` command configures automatic local viewer access independently of browser launch. The viewer reads its non-secret authentication mode from `GET /viewer/config` and exchanges local access through `POST /local/connect`, which requires the exact loopback origin and a loopback peer. The endpoint supports refreshes and new tabs, is absent from ordinary supplier applications, and never places its viewer credential in a URL, HTML, browser storage or a token file. `serve --open` only opens the plain viewer URL. The CLI disables proxy-header trust. Manual supplier connections retain credentials only in page memory, and every supplier API request still requires its bearer credential.
 
 ## API
 
 | Operation | Route |
 | --- | --- |
-| Inspect contract | `GET /v1/environment` |
-| Create/list environments | `POST/GET /v1/environments` |
-| Session state | `GET /v1/environments/{id}` |
-| Authorized observation | `GET /v1/environments/{id}/observation` |
-| Submit decision | `POST /v1/environments/{id}/actions` |
-| Events | `GET /v1/environments/{id}/events?after=CURSOR` |
-| Activity snapshot | `GET /v1/activity/snapshot` |
-| Global activity | `GET /v1/activity/events?after=CURSOR` |
-| Experiment activity | `GET /v1/experiments/{id}/events?after=CURSOR` |
-| Environment-session activity | `GET /v1/environments/{id}/activity?after=CURSOR` |
-| Lifecycle | `POST /v1/environments/{id}/commands` |
-| Participant token | `POST /v1/environments/{id}/credentials` |
-| Journal external intent | `POST /v1/environments/{id}/operations` |
-| Upload/download artifact | `POST /v1/environments/{id}/artifacts`, `GET .../artifacts/{key}` |
-| Versioned scoring | `POST/GET /v1/environments/{id}/reports` |
-| Evidence/training export | `GET /v1/environments/{id}/export?format=evidence` or `training` |
-| Comparison | `POST /v1/compare` |
+| Deployment capabilities | `GET /v1/capabilities` |
+| Create an experiment and its sessions | `POST /v1/experiments` |
+| Experiments and their sessions | `GET /v1/experiments`, `GET /v1/experiments/{id}/sessions` |
+| Scenario sets | `GET /v1/scenario-sets`, `GET /v1/scenario-sets/{id}` |
+| Session state | `GET /v1/sessions`, `GET /v1/sessions/{id}` |
+| Authorized observation | `GET /v1/sessions/{id}/participants/{participant}/observation` |
+| Submit decision | `POST /v1/sessions/{id}/participants/{participant}/actions` |
+| Participant credential | `POST /v1/sessions/{id}/participants/{participant}/credentials` |
+| Evidence | `GET /v1/sessions/{id}/evidence?after=CURSOR` |
+| Activity hierarchy | `GET /v1/activity/hierarchy` |
+| Global activity | `GET /v1/activity?after=CURSOR` |
+| Experiment activity | `GET /v1/experiments/{id}/activity?after=CURSOR` |
+| Session activity | `GET /v1/sessions/{id}/activity?after=CURSOR` |
+| Lifecycle | `POST /v1/sessions/{id}/commands` |
+| Checkpoints | `GET/POST /v1/sessions/{id}/checkpoints` |
+| Branch to a child session | `POST /v1/sessions/{id}/branches` |
+| Durable agent invocations | `GET /v1/sessions/{id}/invocations` |
+| Journal external intent | `POST /v1/sessions/{id}/operations` |
+| Upload/download artifact | `POST /v1/sessions/{id}/artifacts`, `GET .../artifacts/{id}` |
+| Versioned scoring | `POST/GET /v1/sessions/{id}/scores` |
+| Trajectories and records | `GET /v1/trajectories`, `GET /v1/trajectories/{id}/records` |
+| Policies | `GET /v1/policies`, `GET /v1/policies/{id}` |
+| Snapshots and export | `GET /v1/snapshots/{id}/records` with `Accept: application/x-ndjson` |
+| Datasets and export | `GET /v1/datasets/{id}/records` with `Accept: application/x-ndjson` |
+| Training receipts | `GET /v1/training-runs`, `GET /v1/training-runs/{id}` |
+| Sources and ingestion | `GET/POST /v1/sources`, `POST /v1/sources/{id}/records`, `POST /v1/sources/{id}/status-reports` |
+| Comparison | `POST /v1/comparisons` |
+
+See [HTTP migration](HTTP-MIGRATION.md) for the exhaustive 0.2 → 0.3 classification.
 
 Every HTTP error uses one traceable envelope. `request_id` also appears in the `X-Request-ID` response header; operators may use it to correlate safe server-side logs without recording credentials or request bodies. Validation details identify fields but omit submitted values.
 
@@ -61,7 +78,7 @@ Commands have shape `{"operation":"checkpoint","arguments":{"lease":{"owner":"wo
 
 Events support JSON pages and finite server-sent-event pages. Reconnect with `Last-Event-ID`; an empty page means caught up. Cursors expose ordering gaps but never hidden event payloads. A viewer can disconnect without blocking evidence writes. Artifact access is authorized against its environment and audience before retrieving any bytes.
 
-Activity feeds use a transactional outbox and global cursor. They cover experiment status and environment-session evidence without exposing the scheduler queue as an authority. The recovery snapshot includes the experiment's frozen shared configuration and each scenario's immutable input, reference, and metadata. SSE pages include a reconnect delay and heartbeat; clients tolerate duplicate IDs and recover from the activity snapshot after reconnecting. Global, experiment and environment-session scopes all require an authenticated tenant principal.
+Activity feeds use a transactional outbox and global cursor. They cover experiment status and environment-session evidence without exposing the scheduler queue as an authority. The recovery snapshot includes the experiment's frozen shared configuration and each scenario's immutable input, reference, and metadata. SSE pages include a reconnect delay and heartbeat; clients tolerate duplicate IDs and recover from the activity snapshot after reconnecting. Global, experiment and environment-session scopes all require an authenticated tenant credential.
 
 The checked-in `ActivityPage` and `ActivitySnapshot` JSON Schemas are the durable JSON response
 contracts for those feeds. The generated OpenAPI document references the same response models and
@@ -87,10 +104,42 @@ Branches copy checkpoint state into a new environment and retain lineage. Parent
 
 ## Evidence and limitations
 
-Local evidence uses sorted, compact ASCII JSON with finite numbers and a SHA-256 hash chain. This is an explicitly specified encoding, not a claim of RFC 8785 conformance. Events, checkpoints and report revisions are append-only. Participant projections cannot verify hidden portions of a hash chain; researcher/scorer authority can verify the complete chain. Optional Ed25519 receipts establish supplier provenance, not independent reproduction of hidden mechanics.
+Local evidence uses sorted, compact ASCII JSON with finite numbers and a SHA-256 hash chain. This is an explicitly specified encoding, not a claim of RFC 8785 conformance. Events, checkpoints and report revisions are append-only. Participant projections cannot verify hidden portions of a hash chain; trusted-local and admin authority can verify the complete chain. Optional Ed25519 receipts establish supplier provenance, not independent reproduction of hidden mechanics.
 
 Findings validate participant/action/observation links and existence of referenced outcome/consequence events. The runtime does not adjudicate the scientific truth of a grader's judgment. Comparisons aggregate lineage means and do not treat turns or related branches as independent experiments. Unknown uncertainty remains explicit.
 
 PostgreSQL and S3 support lives in `hosted.py`. Initialize its dedicated schema explicitly. It is not a migration authority for a platform database. Object access stays server-mediated. Production deployment additionally requires resource admission, backup/restore, rotation, transport hardening and the omitted live acceptance checks.
 
 [Session reliability and compatibility](COMPATIBILITY.md) specifies lease-independent cancellation, guarded response recovery, metric grouping, inherited chunks and legacy-store behavior.
+
+## Portable trajectory resources
+
+`Policy`, `Trajectory`, `TrajectorySnapshot`, `TrajectoryDataset`, and `TrainingRun` use a strict
+top-level envelope containing `apiVersion`, `kind`, `metadata`, `features`, `spec`, `status`, and
+`extensions`. Commands and mutations reject unknown fields. Nested portable evidence preserves
+unknown optional fields; required feature names must be understood before a reader accepts the
+resource. Python's canonical sorted compact JSON encoding is the digest authority for `v1alpha1`.
+
+A trajectory manifest freezes environment, participant, purpose, policy, and source identity. One
+trajectory can contain multiple segments and an ordered record stream. Durable sequence and
+explicit `causes` links determine order. Wall time and native clocks remain coordinates, not
+authority. Unknown record types must be reverse-domain namespaced and are inert.
+
+Collection, execution, termination/truncation, and verified outcome are independent. Ingestion
+completion cannot imply task success. A source registration is immutable within its tenant,
+namespace, and run ID. Each accepted batch continues a canonical hash chain and returns the
+acknowledged native position plus hash. Identical retries are idempotent; conflicting identities or
+broken chains fail. Gaps, capture failures, backlog, or an unacknowledged terminal boundary prevent
+a complete collection state.
+
+Snapshots freeze source/evidence cursors, segment and record ranges, score revisions, artifact
+digests, schema/features, and audience projection. Re-export is ordered JSONL and does not change
+after later appends or regrading. Reward supersession chains must be complete, acyclic, unambiguous,
+finite, and unretracted before they enter a training dataset. See [Trajectories](TRAJECTORIES.md).
+
+`decision.requested` and `decision.selected` attach to this record envelope. Their minimum payloads
+and their zero/one/many operation links are core contracts here; the selector runtime described by
+**Pluggable Decision-Selection Seam** is separately owned, is not part of this release, and does not
+introduce another journal or registry. A final decision may authorize zero, one, or many operations,
+and fan-out/fan-in preserves those exact links — a consumer never reconstructs causality from
+timestamps or arrival order. See [Decision runtime](DECISION-RUNTIME.md).

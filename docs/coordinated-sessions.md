@@ -1,6 +1,20 @@
 # Coordinated persistent sessions
 
-`EnvironmentSpec.phase_deadline` defaults to `wall`. An environment may declare `coordinator` when only explicit phase closure advances execution. For that mode, a trusted researcher or worker with the current writer lease calls `close_phase(environment, principal, lease, revision=...)` before `resolve`. Closure is durable and idempotent. Actions submitted after closure are rejected. Waiting for inference or reconnecting does not change simulation time.
+## Trajectory continuity
+
+An environment session is the complete execution identity. Pausing and resuming it creates a new
+trajectory continuation segment rather than a new environment session. The resume record begins
+that segment and remains causally linked to the final record of the prior segment. A branch is a new
+environment session with parent/checkpoint lineage; it does not overwrite the parent's trajectory.
+
+Concurrent participants and overlapping work use durable operation IDs and causal links. A final
+decision may authorize zero, one, or many operations, and fan-out/fan-in must preserve those exact
+links; no consumer should reconstruct causality from timestamps. The minimum decision payload and its
+operation-link representation are core EnvironmentHarness contracts; the selector runtime that
+produces them is owned by **Pluggable Decision-Selection Seam**. See
+[Decision runtime](DECISION-RUNTIME.md).
+
+`EnvironmentSpec.phase_deadline` defaults to `wall`. An environment may declare `coordinator` when only explicit phase closure advances execution. For that mode, the admin caller or worker holding the current writer lease closes the phase before `resolve`, through the `close_phase` lifecycle command over HTTP or the `environment_harness.coordinator.advance` supervisor loop. Closure is interleaved with action submission inside one turn, so it belongs to that supervisor rather than to a custom `SessionRunner`. Closure is durable and idempotent. Actions submitted after closure are rejected. Waiting for inference or reconnecting does not change simulation time.
 
 `AgentJournal` stores serializable, revision-scoped work through the participant checkpoint hook. A program can preserve tool responses and final decisions before submitting an action. State writes check participant authority and the expected environment revision. External operations still use the operation journal and receipt reconciliation; agent memory does not authorize redispatch of an ambiguous effect.
 
@@ -17,8 +31,9 @@ responses and explicit continuation state before submitting a stable action ID.
 A restarted runner reuses accepted actions and saved responses. Ambiguous work
 stops with a reconciliation error instead of repeating an agent call.
 
-Researchers and scoped agents can inspect `/v1/environments/{environment}/agent-work`.
-An authorized researcher can recover a known completed result using the
+Management and scoped participant credentials can inspect
+`/v1/sessions/{session_id}/invocations`. An admin caller can recover a
+known completed result using the
 `reconcile_agent` command with its operation ID, response, continuation state
 and lookup or operator evidence. Recovery is audited. It does not make another
 model call. Checkpointing rejects unresolved work and responses awaiting action

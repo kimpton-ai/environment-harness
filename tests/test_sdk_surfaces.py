@@ -11,9 +11,10 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from environment_harness import backends, hosted, plugins, receipts, worker
+from environment_harness.access import _AccessContext
 from environment_harness.adapters.programs import HTTPAgent, InstrumentedModel, MCPTools
 from environment_harness.client import EnvironmentClient, NoRedirect
-from environment_harness.contracts import AgentSpec, ExperimentSpec, Principal
+from environment_harness.contracts import AgentSpec, ExperimentSpec
 from environment_harness.errors import Conflict, Forbidden, HarnessError, Unsupported
 from environment_harness.fixtures import SyntheticEnvironment
 
@@ -31,6 +32,11 @@ class Response:
     def read(self, limit):
         assert limit == 16777217
         return self.body
+
+
+class StreamingResponse(Response):
+    def __iter__(self):
+        return iter(self.body.splitlines(keepends=True))
 
 
 def test_remote_client_validates_transport_and_builds_public_requests(monkeypatch):
@@ -67,28 +73,136 @@ def test_remote_client_validates_transport_and_builds_public_requests(monkeypatc
         environment=SyntheticEnvironment().spec,
         participants=(AgentSpec(id="a", implementation="test", policy_version="1"),),
     )
-    assert client.create(spec)[0:3] == ("POST", "/v1/environments", spec.model_dump(mode="json"))
-    assert client.list(limit=25, cursor="a" * 32)[1].endswith("/v1/environments?limit=25&cursor=" + "a" * 32)
-    assert client.get("a/b")[1].endswith("a%2Fb")
-    assert client.observe("env", "a/b")[1].endswith("?participant=a%2Fb")
-    assert client.submit("env", {"value": 1})[1].endswith("/actions")
+    assert client.create_experiment(spec)[0:3] == (
+        "POST",
+        "/v1/experiments",
+        spec.model_dump(mode="json"),
+    )
+    assert client.experiments(limit=25, cursor="a" * 32)[1] == "/v1/experiments?limit=25&cursor=" + "a" * 32
+    assert client.experiment("a/b")[1] == "/v1/experiments/a%2Fb"
+    assert client.experiment_sessions("a/b")[1].startswith("/v1/experiments/a%2Fb/sessions?")
+    assert client.scenario_sets()[1].startswith("/v1/scenario-sets?")
+    assert client.scenario_set("a/b")[1] == "/v1/scenario-sets/a%2Fb"
+    assert client.sessions(limit=25, cursor="a" * 32)[1] == "/v1/sessions?limit=25&cursor=" + "a" * 32
+    assert client.session("a/b")[1].endswith("a%2Fb")
+    assert client.observe("env", "a/b")[1].endswith("/participants/a%2Fb/observation")
+    assert client.submit("env", "alice", {"value": 1})[1].endswith("/participants/alice/actions")
     assert client.command("env", "cancel", reason="test")[2]["arguments"] == {"reason": "test"}
-    assert client.agent_work("env")[1].endswith("/agent-work")
+    assert client.invocations("env")[1].endswith("/invocations")
     assert client.cancel("env")[2]["operation"] == "cancel"
     assert client.advance("env")[2]["operation"] == "advance"
-    assert client.credentials("env", "a", ttl=30)[2] == {"participant": "a", "ttl": 30}
-    assert client.reports("env")[1].endswith("/reports")
-    assert client.events("env", 7)[1].endswith("events?after=7")
-    assert client.activity_snapshot()[1] == "/v1/activity/snapshot"
-    assert client.activity(3)[1].endswith("activity/events?after=3")
-    assert client.experiment_activity("a/b", 4)[1].endswith("experiments/a%2Fb/events?after=4")
-    assert client.session_activity("a/b", 5)[1].endswith("environments/a%2Fb/activity?after=5")
+    assert client.credentials("env", "a", ttl=30)[2] == {"ttl": 30}
+    assert client.credentials("env", "a")[1].endswith("/participants/a/credentials")
+    assert client.scores("env")[1].endswith("/scores")
+    assert client.publish_score("env", {"scorer": "s"})[0] == "POST"
+    assert client.checkpoints("env")[1].startswith("/v1/sessions/env/checkpoints?")
+    assert client.create_checkpoint("env", exact_agents=True)[2] == {"exact_agents": True}
+    assert client.checkpoint("env", "cp")[1].endswith("/checkpoints/cp")
+    assert client.branch("env", {"checkpoint": "cp"})[1].endswith("/branches")
+    assert client.evidence("env", 7)[1].endswith("evidence?after=7")
+    assert client.activity_hierarchy()[1] == "/v1/activity/hierarchy"
+    assert client.activity(3)[1].endswith("/v1/activity?after=3")
+    assert client.experiment_activity("a/b", 4)[1].endswith("experiments/a%2Fb/activity?after=4")
+    assert client.session_activity("a/b", 5)[1].endswith("sessions/a%2Fb/activity?after=5")
+    assert client.capabilities()[1] == "/v1/capabilities"
+    assert client.policies()[1].startswith("/v1/policies?")
+    assert client.policy("a/b")[1] == "/v1/policies/a%2Fb"
+    assert client.trajectories(limit=25, cursor="source-a")[1] == (
+        "/v1/trajectories?limit=25&cursor=source-a"
+    )
+    assert client.trajectory("a/b")[1].endswith("/v1/trajectories/a%2Fb")
+    assert client.trajectory_records("a/b", after=12, limit=50)[1] == (
+        "/v1/trajectories/a%2Fb/records?after=12&limit=50"
+    )
+    assert client.register_source({"namespace": "example"})[1] == "/v1/sources"
+    assert client.sources()[1].startswith("/v1/sources?")
+    assert client.source("a/b")[1] == "/v1/sources/a%2Fb"
+    assert client.ingest_source("a/b", {"records": []})[1].endswith("/v1/sources/a%2Fb/records")
+    assert client.source_records("a/b")[1].startswith("/v1/sources/a%2Fb/records?")
+    report = client.report_source_status("a/b", {"collection_state": "current"})
+    assert report[0] == "POST" and report[1].endswith("/v1/sources/a%2Fb/status-reports")
+    assert client.source_status("a/b")[1].endswith("/v1/sources/a%2Fb/status")
+    assert client.freeze_trajectory("a/b")[1].endswith("/v1/trajectories/a%2Fb/snapshots")
+    assert client.trajectory_snapshots("a/b", limit=25)[1].startswith("/v1/trajectories/a%2Fb/snapshots?")
+    assert client.snapshots(trajectory="a/b")[1].startswith("/v1/snapshots?trajectory=a%2Fb")
+    assert client.snapshot("a/b")[1].endswith("/v1/snapshots/a%2Fb")
+    assert client.snapshot_records("a/b")[1].startswith("/v1/snapshots/a%2Fb/records?")
+    assert client.freeze_dataset("training", ["a/b"])[1] == "/v1/datasets"
+    assert client.dataset("a/b")[1].endswith("/v1/datasets/a%2Fb")
+    assert client.dataset_records("a/b")[1].startswith("/v1/datasets/a%2Fb/records?")
+    assert client.training_run("a/b")[1].endswith("/v1/training-runs/a%2Fb")
+    assert client.datasets(limit=25)[1] == "/v1/datasets?limit=25"
+    assert client.training_runs(dataset="a/b", limit=25)[1] == ("/v1/training-runs?dataset=a%2Fb&limit=25")
+    assert client.compare(["a", "b"])[2] == {"sessions": ["a", "b"]}
 
 
-def test_advanced_module_exposes_the_low_level_workflow():
+def test_remote_client_streams_snapshot_and_dataset_jsonl_without_materializing_response(monkeypatch):
+    client = EnvironmentClient("http://127.0.0.1:8000", "token", allow_loopback=True)
+    seen = []
+
+    class Opener:
+        def open(self, request, timeout):
+            seen.append((request, timeout))
+            return StreamingResponse(b'{"row":1}\n\n{"row":2}\n')
+
+    client.opener = Opener()
+
+    assert list(client.stream_snapshot_records("a/b")) == [{"row": 1}, {"row": 2}]
+    assert list(client.stream_dataset_records("c/d")) == [{"row": 1}, {"row": 2}]
+    assert seen[0][0].full_url.endswith("/v1/snapshots/a%2Fb/records")
+    assert seen[1][0].full_url.endswith("/v1/datasets/c%2Fd/records")
+    # NDJSON streaming is the same authenticated GET with an explicit Accept.
+    assert seen[0][0].get_header("Accept") == "application/x-ndjson"
+
+
+@pytest.mark.parametrize(
+    ("result", "message"),
+    [
+        (StreamingResponse(b"x" * 16777217 + b"\n"), "size limit"),
+        (StreamingResponse(b"{broken\n"), "malformed JSONL"),
+        (StreamingResponse(b"[]\n"), "malformed JSONL"),
+        (urllib.error.URLError("offline"), "unavailable"),
+    ],
+)
+def test_remote_client_streaming_fails_closed(result, message):
+    client = EnvironmentClient("http://127.0.0.1:8000", "token", allow_loopback=True)
+
+    class Opener:
+        def open(self, *_args, **_kwargs):
+            if isinstance(result, BaseException):
+                raise result
+            return result
+
+    client.opener = Opener()
+    with pytest.raises(HarnessError, match=message):
+        list(client.stream_snapshot_records("snapshot"))
+
+
+def test_remote_client_streaming_translates_http_errors():
+    client = EnvironmentClient("https://example.test", "token")
+    error = urllib.error.HTTPError(
+        "https://example.test",
+        403,
+        "forbidden",
+        {"Content-Type": "application/json"},
+        io.BytesIO(b"{}"),
+    )
+
+    class Opener:
+        def open(self, *_args, **_kwargs):
+            raise error
+
+    client.opener = Opener()
+    with pytest.raises(HarnessError):
+        list(client.stream_snapshot_records("snapshot"))
+
+
+def test_advanced_module_exposes_the_explicit_specification_workflow():
     import environment_harness.advanced as advanced
 
-    assert advanced.EnvironmentSession is not None
+    # The authorization-aware runtime is private and must not be re-exported.
+    assert not hasattr(advanced, "EnvironmentSession")
+    assert not hasattr(advanced, "_SessionRuntime")
     assert advanced.ExperimentSpec is ExperimentSpec
     assert callable(advanced.run)
 
@@ -181,7 +295,7 @@ def test_client_replay_stops_at_empty_page(monkeypatch):
             {"events": [], "cursor": 2},
         ]
     )
-    monkeypatch.setattr(client, "events", lambda *_args: next(pages))
+    monkeypatch.setattr(client, "evidence", lambda *_args: next(pages))
     assert list(client.replay("env")) == [{"seq": 1}, {"seq": 2}]
 
 
@@ -194,11 +308,18 @@ def test_plugin_discovery_loading_and_diagnostics(monkeypatch):
     assert plugins.discover() == [
         {"name": "custom", "distribution": "installed-package", "target": "package:Environment"}
     ]
+    assert plugins.discover_training() == [
+        {"name": "custom", "distribution": "installed-package", "target": "package:Environment"}
+    ]
+    loaded = plugins.training_integration("custom", mode="event")
+    assert isinstance(loaded, SyntheticEnvironment)
     assert isinstance(plugins.environment("custom", mode="event"), SyntheticEnvironment)
     assert isinstance(plugins.environment("synthetic-protocol"), SyntheticEnvironment)
     monkeypatch.setattr(plugins, "entry_points", lambda **kwargs: [])
     with pytest.raises(Unsupported, match="install one"):
         plugins.environment("missing")
+    with pytest.raises(Unsupported, match="training integration"):
+        plugins.training_integration("missing")
 
     monkeypatch.setattr(
         plugins,
@@ -435,7 +556,13 @@ def test_postgres_store_queries_transactions_and_artifacts(monkeypatch):
         )
     )
     assert store._environment_row(db, "env")["id"] == "env"
-    who = Principal(tenant="t", subject="a", role="agent", participant="a")
+    who = _AccessContext(
+        tenant="t",
+        subject="a",
+        policy="participant",
+        session="0" * 32,
+        participant="a",
+    )
     assert store._event_page(db, "env", 0, who, 10) == [{"seq": 1}]
 
     class Context:
@@ -478,10 +605,21 @@ def test_http_model_and_mcp_adapters_record_boundaries(monkeypatch):
                 return None
 
         transaction = Transaction
-        environment = staticmethod(lambda *_args: {"revision": 2})
+        environment = staticmethod(
+            lambda *_args: {
+                "revision": 2,
+                "manifest": json.dumps({"policy": {"max_event_bytes": 1_048_576}}),
+            }
+        )
         append = staticmethod(lambda *args: appended.append(args[3:]))
 
-    principal = Principal(tenant="t", subject="a", role="agent", participant="a")
+    principal = _AccessContext(
+        tenant="t",
+        subject="a",
+        policy="participant",
+        session="0" * 32,
+        participant="a",
+    )
     model = InstrumentedModel(Store(), "env", principal, lambda request: {"text": request})
     assert model.call("hello")["text"] == "hello"
     assert [item[0] for item in appended] == ["model.request", "model.response"]

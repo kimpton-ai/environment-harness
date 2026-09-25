@@ -1,0 +1,125 @@
+{
+  "$defs": {
+    "TerminationStatus": {
+      "additionalProperties": true,
+      "properties": {
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "terminated": {
+          "title": "Terminated",
+          "type": "boolean"
+        },
+        "truncated": {
+          "title": "Truncated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "terminated",
+        "truncated",
+        "reason"
+      ],
+      "title": "TerminationStatus",
+      "type": "object"
+    },
+    "VerifiedOutcome": {
+      "additionalProperties": true,
+      "properties": {
+        "evidence": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "state": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "evidence"
+      ],
+      "title": "VerifiedOutcome",
+      "type": "object"
+    }
+  },
+  "$id": "urn:environment-harness:v1:SourceStatusUpdate",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "backlog": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Backlog"
+    },
+    "capture_failures": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Capture Failures",
+      "type": "array"
+    },
+    "collection_state": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Collection State",
+      "type": "string"
+    },
+    "execution_state": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Execution State",
+      "type": "string"
+    },
+    "gaps": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Gaps",
+      "type": "array"
+    },
+    "terminal_hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Terminal Hash",
+      "type": "string"
+    },
+    "terminal_position": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Terminal Position",
+      "type": "string"
+    },
+    "termination": {
+      "$ref": "#/$defs/TerminationStatus"
+    },
+    "verified_outcome": {
+      "$ref": "#/$defs/VerifiedOutcome"
+    }
+  },
+  "required": [
+    "collection_state",
+    "execution_state",
+    "termination",
+    "verified_outcome",
+    "terminal_position",
+    "terminal_hash"
+  ],
+  "title": "SourceStatusUpdate",
+  "type": "object"
+}
