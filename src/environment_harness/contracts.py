@@ -110,6 +110,14 @@ class RunPolicy(Record):
     allowed_endpoints: tuple[str, ...] = ()
     allowed_operations: tuple[str, ...] = ()
     external_writes: bool = False
+    #: How much inference evidence `InstrumentedModel` records. `summary` keeps
+    #: identities, usage, timing, counts, finish reason, and validation state
+    #: without rendered content, token IDs, or log probabilities. `training` is
+    #: opt-in, requires training entitlement, and needs a bounded cumulative
+    #: artifact budget. See docs/TRAINING.md for storage estimates.
+    inference_capture: Literal["none", "summary", "training"] = "summary"
+    #: Cumulative per-Session budget for inference-detail artifacts, in bytes.
+    max_inference_artifact_bytes: int = Field(default=67108864, ge=0)
 
 
 class ExperimentSpec(Record):
@@ -139,6 +147,12 @@ class ExperimentSpec(Record):
             raise ValueError("heldout environments cannot be used for training")
         if self.policy.external_writes and not self.environment.capabilities.external_writes:
             raise ValueError("external writes unsupported")
+        if self.policy.inference_capture == "training":
+            if self.purpose != "training" or self.split != "training":
+                raise ValueError("token-faithful inference capture requires training entitlement")
+            if not self.policy.max_inference_artifact_bytes:
+                # Reject an unbounded token-faithful budget before execution.
+                raise ValueError("training inference capture requires a bounded artifact budget")
         available = {operation.name: operation for operation in self.environment.operations}
         selected = [operation.name for operation in self.operations]
         if len(selected) != len(set(selected)):

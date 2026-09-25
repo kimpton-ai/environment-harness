@@ -18,6 +18,55 @@ A trajectory can enter a dataset only when all of these are true:
 Evaluation or heldout trajectories can still be inspected and snapshotted. They cannot be relabeled
 as training data.
 
+## Inference capture levels
+
+Only in-process Python agents that call `InstrumentedModel` can provide token-faithful inference
+evidence. `CommandAgent` and remote HTTP participants remain valid evaluation transports, but their
+trajectories cannot be represented as token-faithful training input. This is a product capability
+boundary, not a missing optional field on `Action`: `Action` has no inference fields, and a
+transport-neutral inference endpoint needs its own security and protocol design.
+
+The session's frozen `RunPolicy.inference_capture` decides how much is recorded. A caller cannot
+widen capture beyond its experiment's entitlement.
+
+| Level | Records | Requires |
+| --- | --- | --- |
+| `none` | Nothing. Provider validation still runs, so a malformed response fails closed. | — |
+| `summary` (default) | Model, tokenizer, and renderer identity, seed, usage, timing, token counts, finish reason, and validation state — no rendered content, token IDs, or log probabilities. | — |
+| `training` | Everything `summary` records plus rendered requests and responses, token IDs, and log probabilities, spilled to audience-restricted artifacts when an event would exceed `max_event_bytes`. | Training entitlement (`purpose="training"` and `split="training"`) and a bounded `max_inference_artifact_bytes` |
+
+```python
+from environment_harness.contracts import RunPolicy
+
+policy = RunPolicy(
+    inference_capture="training",
+    max_inference_artifact_bytes=256 * 1024 * 1024,
+)
+```
+
+A `training` policy with an unbounded cumulative budget is rejected **before execution**, not
+partway through a run. Oversized detail fails explicitly rather than being silently truncated:
+`InstrumentedModel` charges each spilled artifact against the cumulative per-Session budget and
+raises when the budget is exhausted. Credentials and provider session URLs never appear in these
+records.
+
+### Representative storage estimates
+
+Local SQLite users choose retention and capture settings knowingly. These are order-of-magnitude
+estimates from the synthetic fixtures; your own tokenizer, prompt length, and multimodal content
+dominate the real numbers.
+
+| Capture | Per model call | 1,000 calls | 100,000 calls |
+| --- | --- | --- | --- |
+| `none` | 0 | 0 | 0 |
+| `summary` | ~0.5 KiB | ~0.5 MiB | ~50 MiB |
+| `training`, 2,000 output tokens, no content | ~30 KiB | ~30 MiB | ~3 GiB |
+| `training` with rendered request and response | ~60 KiB | ~60 MiB | ~6 GiB |
+
+`summary` is the default because it keeps a full evaluation record at roughly 1% of the storage a
+token-faithful capture needs. Set `max_inference_artifact_bytes` to the ceiling you are willing to
+retain per Session; the default 64 MiB suits an experiment-sized run rather than a long campaign.
+
 ## Freeze and stream a dataset
 
 ```python

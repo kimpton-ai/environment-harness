@@ -134,7 +134,19 @@ class HTTPAgent:
 
 
 class InstrumentedModel:
-    """Record exactly the supplied rendered request. Never infer missing token metadata."""
+    """The only inference-evidence write path.
+
+    Record exactly the supplied rendered request and never infer missing token
+    metadata. The session's frozen `RunPolicy.inference_capture` decides how much
+    is recorded: `none` records nothing, `summary` records identities, usage,
+    timing, counts, finish reason, and validation state, and `training` also
+    records rendered content, token IDs, and log probabilities within the
+    session's cumulative inference-artifact budget.
+
+    Only in-process Python agents that call this class can provide token-faithful
+    inference evidence. `CommandAgent` and remote HTTP participants remain valid
+    evaluation transports but cannot attach inference evidence.
+    """
 
     def __init__(
         self,
@@ -149,6 +161,12 @@ class InstrumentedModel:
         seed=None,
         capture_content=False,
     ):
+        """``capture_content`` is a request, not an override.
+
+        The frozen session policy still decides what is recorded, so a caller
+        cannot widen capture beyond its experiment's entitlement.
+        """
+
         self.store, self.environment, self.access, self.generate = (
             store,
             environment,
@@ -161,10 +179,30 @@ class InstrumentedModel:
         self.seed = seed
         self.capture_content = capture_content
 
+    def _capture(self):
+        """Read the frozen capture level and budget for this session."""
+
+        with self.store.transaction() as db:
+            row = self.store.environment(db, self.environment, self.access, "session.read")
+            policy = json.loads(row["manifest"])["policy"]
+        return (
+            policy.get("inference_capture", "summary"),
+            policy.get("max_inference_artifact_bytes", 0),
+            policy["max_event_bytes"],
+        )
+
     def call(self, request, *, context_changes=None):
         from ..runner import current_inference_context
         from ..store import digest, uid
 
+        level, _budget, _limit = self._capture()
+        if level == "none":
+            # Capture is disabled for this session: run the provider and record
+            # nothing rather than recording a partial, misleading summary.
+            response = self.generate(request)
+            self._validate_response(response)
+            return response
+        detailed = level == "training"
         try:
             request_digest = digest(request)
         except (TypeError, ValueError):
@@ -181,8 +219,9 @@ class InstrumentedModel:
         }
         request_payload = identity | {
             "request_digest": request_digest,
-            "rendered_request": request if self.capture_content else None,
-            "context_changes": context_changes,
+            "rendered_request": request if (self.capture_content and detailed) else None,
+            "context_changes": context_changes if detailed else None,
+            "capture": level,
             "visibility": "instrumented",
         }
         request_payload = self._spill_detail(
@@ -220,12 +259,14 @@ class InstrumentedModel:
                 )
             raise
         response_payload = identity | {
-            "response": response if self.capture_content else None,
-            "token_ids": response.get("token_ids"),
-            "logprobs": response.get("logprobs"),
+            "response": response if (self.capture_content and detailed) else None,
+            "token_ids": response.get("token_ids") if detailed else None,
+            "logprobs": response.get("logprobs") if detailed else None,
+            "token_count": len(response["token_ids"]) if response.get("token_ids") else None,
             "usage": response.get("usage"),
             "finish_reason": response.get("finish_reason"),
             "request_digest": request_digest,
+            "capture": level,
             "validation": "validated",
         }
         response_payload = self._spill_detail(
@@ -246,16 +287,16 @@ class InstrumentedModel:
         return response
 
     def _spill_detail(self, payload, fields, purpose):
-        with self.store.transaction() as db:
-            row = self.store.environment(db, self.environment, self.access, "participant.act")
-            max_event_bytes = json.loads(row["manifest"])["policy"]["max_event_bytes"]
+        level, budget, max_event_bytes = self._capture()
         if len(encode(payload).encode()) <= max_event_bytes:
             return payload
         detail = {field: payload[field] for field in fields}
+        body = encode(detail).encode()
+        self._charge_inference_budget(len(body), budget, level)
         artifact = self.store.artifact(
             self.environment,
             self.access,
-            encode(detail).encode(),
+            body,
             audience=(self.access.participant,),
             media_type="application/json",
         )
@@ -264,6 +305,25 @@ class InstrumentedModel:
         if len(encode(summary).encode()) > max_event_bytes:
             raise Conflict("inference evidence summary exceeds event size limit")
         return summary
+
+    def _charge_inference_budget(self, size, budget, level):
+        """Enforce the cumulative per-Session inference-artifact budget.
+
+        Oversized detail fails explicitly rather than being silently truncated.
+        """
+
+        with self.store.transaction() as db:
+            self.store.environment(db, self.environment, self.access, "artifact.write")
+            spent = db.execute(
+                "SELECT coalesce(sum(size),0) FROM artifacts WHERE environment=? "
+                "AND media_type='application/json'",
+                (self.environment,),
+            ).fetchone()[0]
+        if spent + size > budget:
+            raise Conflict(
+                f"cumulative inference-artifact budget exhausted for {level!r} capture: "
+                f"{spent + size} bytes exceeds {budget}"
+            )
 
     @staticmethod
     def _validate_response(response):

@@ -17,11 +17,17 @@ import tempfile
 from pathlib import Path
 
 from environment_harness import EvidenceStore
-from environment_harness.access import ISSUABLE_POLICIES, POLICY_ACTIONS, registry_fingerprint
+from environment_harness.access import (
+    ISSUABLE_POLICIES,
+    POLICY_ACTIONS,
+    registry_fingerprint,
+)
+from environment_harness.access import (
+    fingerprint as canonical_fingerprint,
+)
 from environment_harness.fixtures import SyntheticEnvironment
 from environment_harness.runtime import _SessionRuntime
 from environment_harness.server import create_app
-from environment_harness.store import digest
 
 ROOT = Path(__file__).resolve().parents[1]
 INVENTORY = ROOT / "contracts/migrations/http-0.2-operations.json"
@@ -637,7 +643,7 @@ def operations(document: dict) -> dict[str, dict]:
 
 
 def fingerprint(entries: dict[str, dict]) -> str:
-    return digest(
+    return canonical_fingerprint(
         {name: {"method": entry["method"], "path": entry["path"]} for name, entry in sorted(entries.items())}
     )
 

@@ -118,8 +118,8 @@
       ]
     }
   },
-  "authorizationRegistryFingerprint": "07ffb8d6489e1f56e824cf1e8850c72afd6ffdfb9237a6b4c12e4cf68a5a709a",
-  "candidateFingerprint": "f3a7fac1360cb32e7754e455cce9fc42e6f81ef4a6215bea34897c14a390f29f",
+  "authorizationRegistryFingerprint": "sha256:07ffb8d6-489e1f56-e824cf1e-8850c72a-fd6ffdfb-9237a6b4-c12e4cf6-8a5a709a",
+  "candidateFingerprint": "sha256:f3a7fac1-360cb32e-7754e455-cce9fc42-e6f81ef4-a6215bea-34897c14-a390f29f",
   "contract": "environmentharness.dev/v1alpha1",
   "from": "0.2.4rc2",
   "operations": [
@@ -1417,7 +1417,7 @@
     "/v1/worker/call": "separate create_worker_app process on environment-worker.v1",
     "/viewer/config": "operational viewer configuration"
   },
-  "previousFingerprint": "3ae73f8ae41e5014e8e6fd1c9e7bf02adc17db9f0d9cf8fb98bb72b56a545410",
+  "previousFingerprint": "sha256:3ae73f8a-e41e5014-e8e6fd1c-9e7bf02a-dc17db9f-0d9cf8fb-98bb72b5-6a545410",
   "schema": "environment-harness.http-migration.v1",
   "to": "0.3.0rc1"
 }

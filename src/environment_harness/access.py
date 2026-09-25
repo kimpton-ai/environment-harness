@@ -114,10 +114,22 @@ ISSUABLE_POLICIES = ("management", "viewer", "participant")
 PARTICIPANT_SCOPED = ("participant",)
 
 
-def registry_fingerprint() -> str:
-    """Digest the access registry so the HTTP migration gate can detect drift."""
+def fingerprint(value) -> str:
+    """Render one canonical digest as a grouped, human-comparable fingerprint.
 
-    return digest(
+    The grouping is cosmetic but deliberate: a fingerprint is published in
+    generated documentation and manifests, and an unbroken 64-character hex run
+    there is indistinguishable from a leaked secret to a scanner.
+    """
+
+    raw = digest(value)
+    return "sha256:" + "-".join(raw[index : index + 8] for index in range(0, len(raw), 8))
+
+
+def registry_fingerprint() -> str:
+    """Fingerprint the access registry so the HTTP migration gate detects drift."""
+
+    return fingerprint(
         {
             "actions": list(ACTIONS),
             "policies": {name: sorted(actions) for name, actions in sorted(POLICY_ACTIONS.items())},

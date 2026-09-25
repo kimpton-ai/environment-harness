@@ -189,6 +189,21 @@ Adding a new remote delegation policy later requires a concrete use case, a
 threat-model review, explicit resource and action constraints, and fail-closed
 tests. It does not require changing the public domain models.
 
+## The access registry fingerprint
+
+The registered action vocabulary, the three issuable policies, and their resource-constraint rules
+are digested into one fingerprint. The HTTP migration gate recomputes it, so an authorization change
+cannot hide inside a route rename or a response migration:
+
+```sh
+uv run python -c "from environment_harness.access import registry_fingerprint; print(registry_fingerprint())"
+```
+
+Any deliberate change to whether authentication is required, which credential policies may call an
+operation, or how session and participant constraints are evaluated is classified as an
+authorization change. It requires a security rationale and policy-by-policy contract tests. The
+generated tables live in [HTTP migration](HTTP-MIGRATION.md).
+
 ## Digest threat model
 
 Canonical digests provide reproducible identity, change detection, and

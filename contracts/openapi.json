@@ -2731,6 +2731,16 @@
             "title": "External Writes",
             "type": "boolean"
           },
+          "inference_capture": {
+            "default": "summary",
+            "enum": [
+              "none",
+              "summary",
+              "training"
+            ],
+            "title": "Inference Capture",
+            "type": "string"
+          },
           "max_artifact_bytes": {
             "default": 16777216,
             "minimum": 1.0,
@@ -2748,6 +2758,12 @@
             "maximum": 16777216.0,
             "minimum": 1024.0,
             "title": "Max Event Bytes",
+            "type": "integer"
+          },
+          "max_inference_artifact_bytes": {
+            "default": 67108864,
+            "minimum": 0.0,
+            "title": "Max Inference Artifact Bytes",
             "type": "integer"
           },
           "max_state_bytes": {

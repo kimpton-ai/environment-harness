@@ -111,8 +111,7 @@ def test_instrumented_model_rejects_invalid_token_evidence(tmp_path, response):
         model.call("prompt")
 
 
-def test_instrumented_model_spills_oversized_detail_to_participant_artifacts(tmp_path):
-    store = EvidenceStore(tmp_path)
+def _capture_session(store, tmp_path, *, capture, training=False, budget=200_000):
     environment = SyntheticEnvironment()
     session = _SessionRuntime(store, environment)
     researcher = _AccessContext(tenant="tenant", subject="researcher", policy="trusted-local")
@@ -120,7 +119,14 @@ def test_instrumented_model_spills_oversized_detail_to_participant_artifacts(tmp
         ExperimentSpec(
             environment=environment.spec,
             participants=(AgentSpec(id="alice", implementation="external", policy_version="1"),),
-            policy=RunPolicy(max_event_bytes=4096, max_artifact_bytes=200_000),
+            purpose="training" if training else "evaluation",
+            split="training" if training else "heldout",
+            policy=RunPolicy(
+                max_event_bytes=4096,
+                max_artifact_bytes=200_000,
+                inference_capture=capture,
+                max_inference_artifact_bytes=budget,
+            ),
         ),
         researcher,
     )["id"]
@@ -131,24 +137,82 @@ def test_instrumented_model_spills_oversized_detail_to_participant_artifacts(tmp
         session=environment_id,
         participant="alice",
     )
-    request = {"prompt": "r" * 10_000}
-    response = {
-        "text": "s" * 10_000,
-        "token_ids": list(range(2_000)),
-        "logprobs": [-0.1] * 2_000,
-        "usage": {"output_tokens": 2_000},
-        "finish_reason": "length",
-    }
+    return environment_id, researcher, principal
+
+
+DETAILED_REQUEST = {"prompt": "r" * 10_000}
+DETAILED_RESPONSE = {
+    "text": "s" * 10_000,
+    "token_ids": list(range(2_000)),
+    "logprobs": [-0.1] * 2_000,
+    "usage": {"output_tokens": 2_000},
+    "finish_reason": "length",
+}
+
+
+def test_summary_capture_records_identities_without_content_or_tokens(tmp_path):
+    """`summary` is the default: no rendered content, token IDs, or logprobs."""
+
+    store = EvidenceStore(tmp_path)
+    environment_id, researcher, principal = _capture_session(store, tmp_path, capture="summary")
 
     assert (
         InstrumentedModel(
             store,
             environment_id,
             principal,
-            lambda _request: response,
+            lambda _request: DETAILED_RESPONSE,
             capture_content=True,
-        ).call(request)
-        == response
+        ).call(DETAILED_REQUEST)
+        == DETAILED_RESPONSE
+    )
+
+    events = list(store.replay(environment_id, researcher))
+    request = next(event for event in events if event["kind"] == "model.request")
+    response = next(event for event in events if event["kind"] == "model.response")
+    assert [event for event in events if event["kind"] == "artifact"] == []
+    assert request["payload"]["capture"] == response["payload"]["capture"] == "summary"
+    assert request["payload"]["rendered_request"] is None
+    assert response["payload"]["response"] is None
+    assert response["payload"]["token_ids"] is None and response["payload"]["logprobs"] is None
+    # Identities, usage, counts, finish reason, and validation stay recorded.
+    assert response["payload"]["usage"] == {"output_tokens": 2_000}
+    assert response["payload"]["token_count"] == 2_000
+    assert response["payload"]["finish_reason"] == "length"
+    assert response["payload"]["validation"] == "validated"
+    assert response["payload"]["request_digest"] == request["payload"]["request_digest"]
+
+
+def test_none_capture_records_no_inference_evidence(tmp_path):
+    store = EvidenceStore(tmp_path)
+    environment_id, researcher, principal = _capture_session(store, tmp_path, capture="none")
+
+    model = InstrumentedModel(store, environment_id, principal, lambda _request: DETAILED_RESPONSE)
+    assert model.call(DETAILED_REQUEST) == DETAILED_RESPONSE
+    # A partial, misleading summary is worse than no record at all.
+    assert [
+        event for event in store.replay(environment_id, researcher) if event["kind"].startswith("model.")
+    ] == []
+    # Validation still runs, so a malformed provider response fails closed.
+    with pytest.raises(Conflict, match="response"):
+        InstrumentedModel(store, environment_id, principal, lambda _request: "bad").call({"p": 1})
+
+
+def test_training_capture_spills_oversized_detail_to_participant_artifacts(tmp_path):
+    store = EvidenceStore(tmp_path)
+    environment_id, researcher, principal = _capture_session(
+        store, tmp_path, capture="training", training=True
+    )
+
+    assert (
+        InstrumentedModel(
+            store,
+            environment_id,
+            principal,
+            lambda _request: DETAILED_RESPONSE,
+            capture_content=True,
+        ).call(DETAILED_REQUEST)
+        == DETAILED_RESPONSE
     )
 
     events = list(store.replay(environment_id, researcher))
@@ -169,6 +233,42 @@ def test_instrumented_model_spills_oversized_detail_to_participant_artifacts(tmp
         ).fetchall()
     assert [row["audience"] for row in rows] == ['["alice"]', '["alice"]']
     assert all(row["media_type"] == "application/json" and row["size"] > 4096 for row in rows)
+
+
+def test_training_capture_requires_entitlement_and_a_bounded_budget(tmp_path):
+    environment = SyntheticEnvironment()
+    for purpose, split, budget, message in (
+        ("evaluation", "heldout", 1024, "training entitlement"),
+        ("training", "training", 0, "bounded artifact budget"),
+    ):
+        with pytest.raises(ValueError, match=message):
+            ExperimentSpec(
+                environment=environment.spec,
+                participants=(AgentSpec(id="alice", implementation="external", policy_version="1"),),
+                purpose=purpose,
+                split=split,
+                policy=RunPolicy(inference_capture="training", max_inference_artifact_bytes=budget),
+            )
+
+
+def test_cumulative_inference_artifact_budget_fails_explicitly(tmp_path):
+    store = EvidenceStore(tmp_path)
+    environment_id, _researcher, principal = _capture_session(
+        store, tmp_path, capture="training", training=True, budget=70_000
+    )
+    model = InstrumentedModel(
+        store,
+        environment_id,
+        principal,
+        lambda _request: DETAILED_RESPONSE,
+        capture_content=True,
+    )
+
+    # The first call spills two artifacts inside the budget.
+    model.call(DETAILED_REQUEST)
+    # A second call exhausts it and fails rather than truncating silently.
+    with pytest.raises(Conflict, match="budget exhausted"):
+        model.call({"prompt": "q" * 10_000})
 
 
 def test_instrumented_model_rejects_unserializable_requests_and_non_mapping_responses(tmp_path):
