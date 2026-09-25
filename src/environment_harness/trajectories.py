@@ -1269,6 +1269,8 @@ class TrajectoryRepository:
 
     def freeze(self, environment: str, access) -> TrajectorySnapshot:
         access.require("snapshot.create")
+        # `get` raises when the trajectory has no evidence, so the streaming loop
+        # below does not repeat that check.
         trajectory = self.get(environment, access)
         with self.store.transaction() as db:
             native = db.execute(
@@ -1307,8 +1309,6 @@ class TrajectoryRepository:
                 source_position = str(
                     record.extensions.get("environmentharness.dev/sourcePosition", source_position)
                 )
-        if not record_count:
-            raise ValueError("trajectory has no evidence")
 
         spec = {
             "trajectoryId": trajectory.metadata.id,

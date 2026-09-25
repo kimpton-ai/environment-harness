@@ -916,12 +916,9 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         summary="Store an artifact",
     )
     async def artifact(session_id: str, request: Request, who=Depends(actor)):
-        chunks, size = [], 0
-        async for chunk in request.stream():
-            size += len(chunk)
-            if size > 16777216:
-                raise PayloadTooLarge("artifact exceeds the 16 MiB limit")
-            chunks.append(chunk)
+        # The request-body middleware already rejects anything over 16 MiB with
+        # `payload_too_large`, so this route does not repeat the bound.
+        chunks = [chunk async for chunk in request.stream()]
         return store.artifact(
             session_id,
             who,

@@ -269,7 +269,8 @@ make build
 ```
 
 `make check` enforces viewer drift, browser behavior, the headless browser security boundary,
-TypeScript compilation and tests, Python tests, formatting, typing, and generated-contract drift. `make build` verifies that the wheel,
+TypeScript compilation and tests, Python tests, 100% coverage of changed lines, formatting, typing,
+and generated-contract drift. `make build` verifies that the wheel,
 source distribution, and TypeScript artifact contain the intended files.
 
 ## Review checklist

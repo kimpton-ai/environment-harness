@@ -443,3 +443,38 @@ def test_cli_inspect_forwards_limit(tmp_path, monkeypatch, capsys):
     who = _AccessContext(tenant="local", subject="local-researcher", policy="trusted-local")
     assert who.allows("session.create") and who.full_evidence
     assert json.loads(invoke(monkeypatch, capsys, store.root, "list", "--json", "--limit", "1")) == []
+
+
+def test_cli_run_executes_a_manifest_through_command_agents(tmp_path, monkeypatch, capsys):
+    """`run` drives a declared manifest with bounded JSON subprocess participants."""
+
+    import stat
+
+    from environment_harness.contracts import AgentSpec, ExperimentSpec, RunPolicy
+    from environment_harness.fixtures import SyntheticEnvironment
+
+    program = tmp_path / "agent.py"
+    program.write_text('import json, sys\njson.load(sys.stdin)\nprint(json.dumps({"value": 1}))\n')
+    program.chmod(program.stat().st_mode | stat.S_IEXEC)
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        ExperimentSpec(
+            environment=SyntheticEnvironment().spec,
+            participants=(
+                AgentSpec(
+                    id="alice",
+                    implementation="command-agent@1",
+                    policy_version="1",
+                    config={"command": [sys.executable, str(program)]},
+                ),
+            ),
+            policy=RunPolicy(max_turns=2),
+        ).model_dump_json()
+    )
+
+    store_path = tmp_path / "manifest-store"
+    printed = invoke(monkeypatch, capsys, store_path, "run", str(manifest), "--turns", "1")
+    result = json.loads(printed)
+    assert result["revision"] == 1
+    assert result["status"] in ("running", "completed")

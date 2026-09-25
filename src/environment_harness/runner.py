@@ -11,6 +11,9 @@ from .contracts import Action
 from .errors import Conflict
 from .store import digest, encode, uid
 
+#: Writer-lease heartbeat interval. Named so tests can drive the loop.
+_HEARTBEAT_SECONDS = 20
+
 _monotonic = time.monotonic
 _inference_context: ContextVar[dict | None] = ContextVar("environment_harness_inference", default=None)
 
@@ -36,7 +39,7 @@ def writer(session, environment, access, owner):
     failures = []
 
     def renew():
-        while not stop.wait(20):
+        while not stop.wait(_HEARTBEAT_SECONDS):
             try:
                 renewed = session.renew(environment, access, lease, ttl=90)
                 if renewed["epoch"] != lease["epoch"]:

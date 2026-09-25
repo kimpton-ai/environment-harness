@@ -258,6 +258,40 @@ def test_http_can_freeze_and_read_datasets_but_exposes_no_training_execution_rou
     assert client.post("/v1/training-runs", headers=headers, json={}).status_code == 405
     assert client.post("/v1/training-runs/not-executable", headers=headers, json={}).status_code == 405
 
+    # A recorded receipt is readable over HTTP and carries its dataset digest as an ETag.
+    class Integration:
+        identity = "com.example.http-trainer"
+        version = "1"
+
+        def validate(self, selected):
+            del selected
+
+        def train(self, selected, config):
+            del selected, config
+            return TrainingOutput(
+                policy={
+                    "apiVersion": "environmentharness.dev/v1alpha1",
+                    "kind": "Policy",
+                    "metadata": {"id": "policy-http", "createdAt": "2026-09-22T15:00:00Z", "labels": {}},
+                    "features": {"required": [], "optional": []},
+                    "spec": {
+                        "implementation": "http-trained",
+                        "version": "1",
+                        "lineage": [],
+                        "artifact": {},
+                    },
+                    "status": {"digest": "0" * 64},
+                    "extensions": {},
+                },
+                metrics={},
+            )
+
+    recorded = TrainingRepository(store).run(dataset_id, Integration(), {}, who)
+    read = client.get(f"/v1/training-runs/{recorded.metadata.id}", headers=headers)
+    assert read.status_code == 200
+    assert read.json()["metadata"]["id"] == recorded.metadata.id
+    assert read.headers["etag"].strip('"') == recorded.spec.dataset_digest
+
 
 def test_dataset_authority_and_lifecycle_rejection_paths(tmp_path, monkeypatch):
     store = EvidenceStore(tmp_path)

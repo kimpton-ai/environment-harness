@@ -91,6 +91,10 @@
 
 ### Fixed
 
+- Three unreachable guards are removed rather than left to read as protection they cannot provide:
+  a `Checkpoint` continuation-state check that its own required field already enforced, a duplicate
+  16 MiB artifact bound the request middleware applies first, and a third copy of
+  "trajectory has no evidence" inside `freeze`, which `get` raises before it is reached.
 - `403 cross_origin_denied` is a distinct error code again. The taxonomy rewrite had collapsed it
   into `forbidden`, which contradicts the documented meaning of that code: a cross-origin rejection
   happens before any credential is consulted, so it is a browser-boundary rejection rather than an

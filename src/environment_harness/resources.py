@@ -313,6 +313,8 @@ class CheckpointSpec(PortableRecord):
     environment_reference: EnvironmentReferenceModel = Field(alias="environmentReference")
     participants: tuple[ParticipantContinuation, ...] = Field(min_length=1)
     #: Opaque continuation state is referenced, never inlined into the envelope.
+    #: Required and digest-shaped, which is what guarantees a resumable or
+    #: branchable Checkpoint always carries continuation state.
     state_reference: str = Field(alias="stateReference", pattern=r"^[0-9a-f]{64}$")
     artifacts: tuple[ResourceReference, ...] = ()
     evidence_sequence: int = Field(alias="evidenceSequence", ge=0)
@@ -350,8 +352,6 @@ class Checkpoint(BaseModel):
     def continuation_is_consistent(self):
         if self.status.exact and not all(item.exact for item in self.spec.participants):
             raise ValueError("an exact checkpoint requires exact participant continuation")
-        if (self.status.resumable or self.status.branchable) and not self.spec.state_reference:
-            raise ValueError("resumable and branchable checkpoints require continuation state")
         json.dumps(self.model_dump(mode="json", by_alias=True), allow_nan=False)
         return self
 

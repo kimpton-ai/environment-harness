@@ -338,3 +338,77 @@ def test_capability_discovery_matches_the_openapi_annotations(tmp_path):
 def test_removed_0_2_routes_return_not_found(tmp_path, path):
     client, _harness, _experiment, _result, headers = service(tmp_path)
     assert client.get(path, headers=headers).status_code == 404
+
+
+def test_action_submission_rejects_a_mismatched_participant(tmp_path):
+    client, _harness, _experiment, result, headers = service(tmp_path)
+    session = result.sessions[0].id
+    response = client.post(
+        f"/v1/sessions/{session}/participants/alice/actions",
+        headers=headers,
+        json={
+            "operation_id": "mismatched-action",
+            "participant": "bob",
+            "observation_id": "observation-1",
+            "revision": 0,
+            "payload": {"value": 1},
+        },
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "forbidden"
+
+
+def test_artifact_upload_refuses_a_body_over_the_frozen_limit(tmp_path):
+    client, _harness, _experiment, result, headers = service(tmp_path)
+    session = result.sessions[0].id
+    response = client.post(
+        f"/v1/sessions/{session}/artifacts",
+        headers=headers | {"Content-Type": "application/octet-stream"},
+        content=b"x" * (16 * 1024 * 1024 + 1),
+    )
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "payload_too_large"
+
+
+def test_source_record_pages_advertise_their_next_cursor(tmp_path):
+    from environment_harness.trajectories import SourceRecord
+
+    client, _harness, _experiment, _result, headers = service(tmp_path, trajectory_ingestion=True)
+    source = client.post(
+        "/v1/sources",
+        headers=headers,
+        json={
+            "namespace": "com.example.paging",
+            "run_id": "paged",
+            "schema_version": "paging.v1",
+            "environment": {"id": "paging", "version": "1"},
+            "participants": ["alice"],
+            "purpose": "evaluation",
+        },
+    ).json()["id"]
+
+    previous = "0" * 64
+    records = []
+    for index in (1, 2, 3):
+        record = SourceRecord.create(
+            id=f"record-{index}",
+            position=str(index),
+            previous_hash=previous,
+            type="com.example.paging.frame",
+            segment="segment-1",
+            participant="alice",
+            revision=index - 1,
+            time={"wallTime": f"2026-09-22T15:00:0{index}Z", "native": []},
+            data={},
+            audience=("*",),
+        )
+        previous = record.source_hash
+        records.append(record.model_dump(mode="json", by_alias=True))
+    assert (
+        client.post(f"/v1/sources/{source}/records", headers=headers, json={"records": records})
+    ).status_code == 200
+
+    page = client.get(f"/v1/sources/{source}/records?limit=2", headers=headers)
+    assert page.status_code == 200 and page.json()["has_more"] is True
+    assert page.headers["x-next-cursor"] == str(page.json()["cursor"])
+    assert 'rel="next"' in page.headers["link"]
