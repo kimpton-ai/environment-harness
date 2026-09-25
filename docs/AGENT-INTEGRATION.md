@@ -8,10 +8,20 @@ ID and the durable agent-work operation, observation, participant, generation, a
 outside runner context remain valid diagnostics but are explicitly uncorrelated.
 
 Token IDs must be non-negative integers. Log probabilities must be finite and non-positive, and
-paired token/logprob arrays must have equal lengths. Rendered content is opt-in. Detail that exceeds
-the event limit spills to a participant-scoped JSON artifact; the event keeps identity, usage,
-finish reason, validation state, request digest, and the artifact reference. The artifact limit
-still applies.
+paired token/logprob arrays must have equal lengths. Detail that exceeds the event limit spills to a
+participant-scoped JSON artifact; the event keeps identity, usage, finish reason, validation state,
+request digest, and the artifact reference.
+
+How much is captured is a frozen experiment decision, not a per-call flag. `RunPolicy.inference_capture`
+selects `none`, `summary`, or `training`; only `training` records rendered requests, responses, token
+IDs, and log probabilities, and it requires a training entitlement plus a bounded
+`max_inference_artifact_bytes`. That budget is cumulative per session and fails closed when
+exhausted. See [Training](TRAINING.md) for the capture table and storage estimates.
+
+A decision that led to an action is recorded separately from the model call that produced it.
+`decision.requested`/`decision.selected` carry the choice and its operation links; the selector
+runtime is separately owned and not part of this release. See
+[Decision runtime](DECISION-RUNTIME.md).
 
 `CommandAgent` and remote HTTP participants submit the existing strict action contract and cannot
 attach inference evidence. Do not place tokens or model responses in an action. A future

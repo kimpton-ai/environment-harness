@@ -9,9 +9,10 @@ environment session with parent/checkpoint lineage; it does not overwrite the pa
 
 Concurrent participants and overlapping work use durable operation IDs and causal links. A final
 decision may authorize zero, one, or many operations, and fan-out/fan-in must preserve those exact
-links; no consumer should reconstruct causality from timestamps. The decision payload itself is
-owned by **Pluggable Decision-Selection Seam**, while the journal and trajectory envelope remain
-core EnvironmentHarness contracts.
+links; no consumer should reconstruct causality from timestamps. The minimum decision payload and its
+operation-link representation are core EnvironmentHarness contracts; the selector runtime that
+produces them is owned by **Pluggable Decision-Selection Seam**. See
+[Decision runtime](DECISION-RUNTIME.md).
 
 `EnvironmentSpec.phase_deadline` defaults to `wall`. An environment may declare `coordinator` when only explicit phase closure advances execution. For that mode, the management caller or worker holding the current writer lease closes the phase before `resolve`, through the `close_phase` lifecycle command over HTTP or the `environment_harness.coordinator.advance` supervisor loop. Closure is interleaved with action submission inside one turn, so it belongs to that supervisor rather than to a custom `SessionRunner`. Closure is durable and idempotent. Actions submitted after closure are rejected. Waiting for inference or reconnecting does not change simulation time.
 

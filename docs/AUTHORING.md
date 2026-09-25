@@ -112,6 +112,10 @@ def run_with_inspection(control, agents, *, turns):
 
 `SessionControl` exposes exactly `id`, `status`, `advance`, `observation`, `lease`, `release`, `prepare_operation`, and `dispatch_operation`. `advance` runs the standard turn loop, so a runner interleaves environment operations without replacing experiment scheduling or persistence. The runner must return the current record — `control.advance(...)` or `control.status()`; the harness rejects stale, partial or unrelated results. The default runner, `run_session`, advances the whole budget and remains in place when this argument is omitted.
 
+A decision that authorizes an operation is recorded as trajectory evidence with zero, one, or many
+operation links. The environment owns execution and reward behavior; the selector runtime that chose
+the decision is separately owned. See [Decision runtime](DECISION-RUNTIME.md).
+
 Scoring stays separate from execution. Freeze scorer IDs through `scoring_versions`, replay the authorized evidence after a session, create a `ScoreReport`, and save it with `EvidenceStore.report`. Metrics appear in Progression and Reports. A `Finding` must link to its supporting observation, action and outcome evidence; operation receipts can contribute metrics and provenance, but they do not bypass the finding evidence contract. The complete example applies the same scorer to every session in the experiment so compatible metrics can be aggregated.
 
 Run the external example with `python examples/external_environment_experiment.py`. It starts [a dependency-free simulator process](../examples/external_simulator.py), connects over a synchronized JSON-lines client, and runs four environment sessions through the ordinary experiment API. Each external write is explicitly enabled in both environment capabilities and `RunPolicy`, fenced immediately before dispatch, and returned as a durable JSON receipt. The simulator keys effects by the harness operation ID, so a lookup can reconcile an ambiguous response without repeating the move. The process client and domain operation remain example code rather than new core SDK types.

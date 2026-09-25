@@ -137,6 +137,9 @@ digests, schema/features, and audience projection. Re-export is ordered JSONL an
 after later appends or regrading. Reward supersession chains must be complete, acyclic, unambiguous,
 finite, and unretracted before they enter a training dataset. See [Trajectories](TRAJECTORIES.md).
 
-The provider-neutral decision payloads described by **Pluggable Decision-Selection Seam** attach to
-this record envelope. They remain separate from environment execution authorization and do not
-introduce another journal or registry.
+`decision.requested` and `decision.selected` attach to this record envelope. Their minimum payloads
+and their zero/one/many operation links are core contracts here; the selector runtime described by
+**Pluggable Decision-Selection Seam** is separately owned, is not part of this release, and does not
+introduce another journal or registry. A final decision may authorize zero, one, or many operations,
+and fan-out/fan-in preserves those exact links — a consumer never reconstructs causality from
+timestamps or arrival order. See [Decision runtime](DECISION-RUNTIME.md).

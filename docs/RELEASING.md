@@ -67,10 +67,49 @@ Verifiers legacy bridge. RLlib, TRL, live OpenEnv training, Parquet, remote trai
 the separately owned **Pluggable Decision-Selection Seam** are excluded unless their complete code,
 dependency, fixture, documentation, and distribution gates land before the manifest freezes.
 
-Attach a downstream-impact appendix to the release PR. For every known incompatible consumer,
-record the last compatible pin, affected API or stored representation, and required adapter,
-converter, or migration. Do not copy private consumer code, deployment state, supplier data, or
-credentials into this repository or release artifacts.
+A separately installable decision runtime keeps its own version and release gate, but when it is
+selected for the manifest it is published in the same candidate/final release event rather than on
+its own timeline. See [Decision runtime](DECISION-RUNTIME.md).
+
+### Downstream-impact appendix
+
+Attach this appendix to the release PR. It is derived from this repository's own breaking changes,
+so it can be written and reviewed here without copying private consumer code, deployment state,
+supplier data, or credentials into the repository or the release artifacts.
+
+**Last compatible pin for any consumer that has not migrated: `environment-harness==0.2.4rc2`.**
+An unqualified downstream deployment must stay at that pin. Completing a downstream migration is
+*not* a prerequisite for choosing the correct EnvironmentHarness contract here, but such a
+deployment must not upgrade past its compatible pin.
+
+The known-incompatible consumer at the time of this program is **EvalRouter**. Each row below is
+mechanical: it names the change, what it affects, and the required adapter, converter, or
+migration. Confirm each row against the consumer before publishing, and add a row for any other
+consumer discovered during qualification.
+
+| Change | Affected API or stored representation | Required migration |
+| --- | --- | --- |
+| `Principal` and the four-role model removed | Every SDK call and HTTP request that constructed or forwarded a principal; `x-roles` in generated clients | Delete principal construction. Use `EnvironmentHarness` in process; send only a bearer credential remotely. No adapter is possible — the type is gone. |
+| Migration `005_credential_policies` deletes every credential row | The `credentials` table; all issued bearer tokens | Reissue before or immediately after upgrade. Old tokens return `401`. Tokens cannot be converted. |
+| `/v1/environments/*` replaced by the short hierarchy | Every HTTP route and generated client method | Apply the per-operation mapping in `contracts/migrations/http-0.2-to-0.3.json` and [HTTP migration](HTTP-MIGRATION.md). Regenerate clients; do not hand-edit paths. |
+| `GET /v1/environment` removed | Consumers that fetched a standalone `EnvironmentSpec` | Read the spec frozen inside the Experiment and inherited by its Sessions. |
+| `Trajectory.status.records` removed | Any consumer that read records from the status object | Page `GET /v1/trajectories/{id}/records`, or `records_page`/`stream_records` in process. A materializing shim reintroduces the unbounded read this change removed; do not write one. |
+| `ActivitySnapshot` → `ActivityHierarchy`; `/v1/activity/snapshot` → `/v1/activity/hierarchy` | Activity recovery callers and stored client types | Rename. Field semantics are unchanged. |
+| Management collections return `items`/`nextCursor`/`links` with an opaque cursor | Every list response and any consumer that persisted a list cursor | Read `items`; treat the cursor as opaque and never derive or store a synthetic one. Durable evidence and activity feeds keep their integer cursors. |
+| `GET /v1/sessions/{id}/invocations` returns `items` (was `work`) | Agent-work readers | Rename the key. |
+| Snapshot and dataset export uses content negotiation on `/records` | `/export` verb callers | Request `/records` with the desired media type. |
+| Typed environment factories replace persisted import paths | `session_runs` rows and any consumer that wrote an import path | Configure factories once per harness. Migration `006_scheduler_recovery` adds `environment_id`, `environment_version`, `spec_digest`, and `blocked_reason`; legacy rows project read-only without rewrite. A missing or mismatched factory leaves a Session durably `blocked` rather than failing at execution time. |
+| `SessionRunner` receives a typed `SessionControl` | Custom session runners | Replace `(session, environment, access, agents, turns=...)` with `(control, agents, turns=...)`. See [Environment authoring](AUTHORING.md). |
+| `RunPolicy.inference_capture` defaults to `summary` | Recorded inference evidence and any consumer reading rendered requests, responses, token IDs, or log probabilities | Set `inference_capture="training"` with a training entitlement and a non-zero `max_inference_artifact_bytes`. Existing recorded evidence is unchanged; only new sessions are affected. |
+| Viewer routes are plural and a detail root equals its Overview tab | Deep links, bookmarks, embedded links, `serve --open`, and `create_synthetic_showcase().review` | Rewrite links to `/overview`, `/experiments/{id}`, `/sessions/{id}`, `/trajectories/{id}`, `/comparisons`. Read `review.overview` instead of `review.home`. |
+
+Two rows deliberately have no converter: the credential deletion and the `Principal` removal. The
+project accepts a forced reissue and a hard compile break rather than carrying the discarded role
+taxonomy or a principal compatibility mapper into `0.3`. Do not justify either by claiming tokens
+are necessarily short-lived — the previous API allowed long TTLs.
+
+No EvalRouter change is implemented in this repository. EvalRouter may be consulted as
+implementation evidence only.
 
 ## Prepare a release candidate
 
@@ -253,6 +292,12 @@ Every release pull request must check whether it needs updates to:
 - [Viewer maintenance](VIEWER-MAINTENANCE.md) for the browser build or test contract;
 - [Protocol](PROTOCOL.md), generated [API reference](API-REFERENCE.md), and `contracts/` for API changes;
 - [Compatibility](COMPATIBILITY.md) for upgrade behavior;
+- [Authentication](AUTHENTICATION.md) whenever authentication requirements, credential policies, or
+  resource constraints change;
+- [Decision runtime](DECISION-RUNTIME.md) when the minimum decision payloads or the seam's
+  inclusion state change;
+- the downstream-impact appendix above for any new breaking change, with its last compatible pin
+  and required migration;
 - [Release scope](STATUS.md) for newly qualified or explicitly unqualified capabilities; and
 - `CHANGELOG.md` for every user-visible change.
 

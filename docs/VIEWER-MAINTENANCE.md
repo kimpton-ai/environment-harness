@@ -352,3 +352,4 @@ both paths before changing the refresh interval.
 - [API reference](API-REFERENCE.md)
 - [Protocol](PROTOCOL.md)
 - [Session reliability and compatibility](COMPATIBILITY.md)
+- [Decision runtime](DECISION-RUNTIME.md)

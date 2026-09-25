@@ -41,11 +41,24 @@ Landed since the baseline:
   resource, ownership-ancestry breadcrumbs that stop at the parent, a reserved-height context bar
   with same-height loading skeletons, and narrow-screen ancestry collapse. Training provenance
   stays contextual. See [Viewer maintenance](VIEWER-MAINTENANCE.md).
+- **Documentation.** Every guide named in the plan's documentation section has been rewritten for
+  this contract, including the new [Decision runtime](DECISION-RUNTIME.md) guide, the
+  [downstream-impact appendix](RELEASING.md#downstream-impact-appendix) with its last compatible
+  pin and per-change migration, the version-range and digest-guarantee sections of
+  [Compatibility](COMPATIBILITY.md), and the source-journal responsibilities in
+  [Adapters](ADAPTERS.md).
 
 Remaining before the candidate:
 
-- the remaining guide rewrites named in the plan's documentation section, including the new
-  decision-runtime guide and the release downstream-impact appendix.
+- the fresh-environment documentation walkthrough that installs the built wheel, records a
+  multi-segment synthetic trajectory, imports a synthetic historical source with a restart-safe
+  cursor, inspects collection/execution/outcome state in the viewer, freezes and re-exports a
+  snapshot, and verifies evaluation export without training entitlement; and
+- the coordinated manifest freeze and the `0.3.0rc1` version bump itself.
+
+Explicitly outside the candidate manifest: Parquet export, RLlib conversion and external-environment
+support, TRL integration, live OpenEnv training, remote training workers, and the separately owned
+**Pluggable Decision-Selection Seam**. The trajectory foundation has no dependency on any of them.
 
 ## Unreleased trajectory scope
 

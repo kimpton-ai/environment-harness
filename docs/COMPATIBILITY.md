@@ -23,7 +23,87 @@ downstream product may need a version pin, adapter, or intentional breaking migr
 them; product storage and APIs do not become SDK contracts merely to avoid that migration. No
 downstream product code or private schema is included in this repository.
 
-These changes keep existing SQLite and PostgreSQL stores readable. They require no schema migration and do not rewrite stored manifests, reports, checkpoints or evidence hashes. Python and TypeScript client calls keep their existing arguments. Response additions are described below.
+## What upgrading to `0.3.0rc1` does and does not change
+
+Existing SQLite and PostgreSQL stores stay readable, and no stored manifest, event, report,
+checkpoint, action, artifact, or evidence hash is rewritten. Two numbered migrations do run:
+
+| Migration | Effect | Rewrites evidence? |
+| --- | --- | --- |
+| `005_credential_policies` | Deletes every legacy credential row inside one transaction and recreates `credentials` with `tenant`, `subject`, `policy`, `session`, `participant`, `generation`, `expires`, `revoked` | No |
+| `006_scheduler_recovery` | Adds `environment_id`, `environment_version`, `spec_digest`, and `blocked_reason` to `session_runs` | No |
+
+Both are idempotent. SQLite applies them when the store is opened and records them in
+`schema_migrations`; PostgreSQL applies them through `PostgresEvidenceStore.initialize()` run by the
+schema owner. Legacy `session_runs` rows with null reference columns project read-only into the
+portable resources without being rewritten, which is covered by a contract fixture.
+
+**Every pre-`0.3.0rc1` bearer credential stops working.** The `credentials` table stored the whole
+`Principal` as JSON and revalidated it against a strict model, so every legacy row fails to parse
+once the field is gone. The project treats those rows as disposable and accepts a forced reissue
+rather than carrying the discarded role taxonomy into a compatibility mapper. Reissue through
+`environment-harness token`, the embedding API, or the participant-credential operation.
+
+Client calls do **not** keep their existing arguments in this release. The public API surface,
+HTTP routes, and list envelopes changed; see the per-item table in
+[Release process](RELEASING.md#downstream-impact-appendix) and the machine-readable
+[HTTP migration](HTTP-MIGRATION.md) manifest.
+
+## Version ranges and what a version promises
+
+| Surface | Versioning | What it promises |
+| --- | --- | --- |
+| Python package | PEP 440 (`environment-harness`) | Ordinary SemVer-style intent for the Python API. Independent of the resource API version. |
+| TypeScript client | SemVer, same coordinated number | Same remote contract as the Python package of that release. |
+| Portable resource API | `environmentharness.dev/v1alpha1` | Additive evolution only. An incompatible change requires a new API version served alongside the old one with an explicit converter. |
+| Worker protocol | `environment-worker.v1` | Private transport with its own shared secret, size boundary, and no OpenAPI document. Not part of the public HTTP contract. |
+| Legacy environment bridge | `world-session.v1` | Readable as a distinct native execution identity. Historical manifests still need their original reader. |
+| Verifiers bridge | `>=0.3.1,<0.4` | A bounded legacy rollout invocation, installed and checked in a path-routed job. |
+
+A **package prerelease is not contract graduation.** `0.3.0rc1` publishes `v1alpha1` resources; the
+package leaving prerelease does not promote the resource API out of `v1alpha1`, and graduating the
+resource API is a separate, explicitly announced decision with its own converter obligations. Do not
+read a stable package version as a stability claim about `v1alpha1`.
+
+Enforced fixtures, not prose, are what make this evolution policy real. `tests/test_contract_fixtures.py`
+is a required CI gate covering strict first-party writes, lenient compatibility reads, legacy-store
+projection, unknown optional versus unknown required features, unknown namespaced record types,
+digest participation for preserved data, and the minimum decision payloads. Schema drift is checked
+separately by `scripts/build_contracts.py --check`; path classification or schema drift alone is not
+compatibility qualification.
+
+## Digest guarantees and non-guarantees
+
+Canonical digests **do** provide reproducible identity, change detection, and evidence-chain
+integrity when the verifier trusts its copy or its source boundary. Repeated export of a frozen
+snapshot preserves canonical manifest and JSONL contents and artifact digests, and digests are
+stable across supported Python versions.
+
+They **do not** authenticate data against an attacker who controls the store. An unsigned digest is
+not proof of provenance or tamper resistance against the store operator. Authenticity requires the
+separately specified signature or attestation boundary in [Protocol](PROTOCOL.md). Do not describe
+an unsigned digest as malicious-store tamper detection.
+
+Python is the sole digest authority for `v1alpha1`. TypeScript treats a server-supplied digest as
+opaque and never recomputes it, which is asserted by a client test.
+
+## Downstream breaking-change policy
+
+EnvironmentHarness is the upstream authority for the public environment-boundary contracts, so a
+downstream product may need a pin, adapter, or intentional breaking migration when adopting them.
+The rules are:
+
+1. **A downstream migration is never a reason to pick the wrong contract.** Choose the correct
+   upstream contract, then record the downstream cost.
+2. **Every breaking change gets an appendix row.** The change, the affected API or stored
+   representation, the last compatible pin, and the required adapter, converter, or migration. See
+   [Release process](RELEASING.md#downstream-impact-appendix).
+3. **Every persisted-shape change gets its own numbered migration.** A stored-row change is not a
+   wire-only change and may not be smuggled in behind one.
+4. **An unqualified downstream deployment must not upgrade past its compatible pin.** For consumers
+   that have not migrated, that pin is `environment-harness==0.2.4rc2`.
+5. **Product storage and APIs do not become SDK contracts** merely to avoid a migration, and no
+   downstream product code or private schema is included in this repository.
 
 ## Cancellation and recovery
 

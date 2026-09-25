@@ -42,8 +42,10 @@ Built-in evidence can use `environment.observation`, `agent.action`, `inference.
 reverse-domain type such as `com.example.drone.telemetry`; an unknown namespaced record is inert
 and round-trips without executing extension code.
 
-The separately owned **Pluggable Decision-Selection Seam** may add typed `decision.requested` and
-`decision.selected` records against this envelope. It does not own the journal, trajectory,
+This contract owns the minimum `decision.requested` and `decision.selected` payloads and their
+zero/one/many operation links; see [Decision runtime](DECISION-RUNTIME.md). The separately owned
+**Pluggable Decision-Selection Seam** implements the selector runtime and may add optional fields to
+those records. It does not own the journal, trajectory,
 snapshot, ingestion, or dataset contracts described here.
 
 ## Independent lifecycle states

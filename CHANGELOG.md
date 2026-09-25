@@ -30,7 +30,23 @@
 - **Snapshot and dataset export uses content negotiation** on `/records` instead of an `/export`
   verb path.
 - Viewer routes are plural: `/overview`, `/experiments/{id}`, `/sessions/{id}`,
-  `/trajectories/{id}`, `/comparisons`.
+  `/trajectories/{id}`, `/comparisons`. `/home`, `/compare`, `/experiment/{id}`,
+  `/session/{id}`, and `/trajectory/{id}` are gone, a detail root is equivalent to its `Overview`
+  tab, and `serve --open` now opens `/overview`. `create_synthetic_showcase` returns
+  `review.overview` in place of `review.home`.
+- **A custom `SessionRunner` is called with a typed `SessionControl`**, not the private session
+  runtime, environment-session ID, and access context. Replace
+  `runner(session, environment, access, agents, turns=...)` with
+  `runner(control, agents, turns=...)` and use `control.advance`, `control.observation`,
+  `control.lease`, `control.release`, `control.prepare_operation`, and
+  `control.dispatch_operation`. The default runner is the exported `run_session`. See
+  [Environment authoring](docs/AUTHORING.md).
+- **`GET /v1/sessions/{id}/invocations` returns `items`**, replacing the `work` key on the removed
+  `/v1/environments/{environment}/agent-work` route.
+- **Token-faithful inference capture is now entitled and budgeted.** `RunPolicy.inference_capture`
+  defaults to `summary`; `training` requires `purpose`/`split` of `training` and a non-zero
+  `RunPolicy.max_inference_artifact_bytes`. Experiments that previously recorded rendered requests,
+  responses, token IDs, or log probabilities by default now record summaries only until they opt in.
 
 ### Added
 
@@ -47,7 +63,24 @@
   `environment_harness.resources`, with a strict `BranchRequest` that returns a child Session.
 - `GET /v1/capabilities`, `x-capability` annotations, and `501 capability_unavailable`.
 - One stable error taxonomy shared by Python, HTTP, OpenAPI, and TypeScript.
-- `docs/AUTHENTICATION.md`, `docs/DATA-MODELS.md`, and `docs/HTTP-MIGRATION.md`.
+- `docs/AUTHENTICATION.md`, `docs/DATA-MODELS.md`, `docs/HTTP-MIGRATION.md`, and
+  `docs/DECISION-RUNTIME.md`.
+- Inference capture levels `none`, `summary`, and `training`, a cumulative per-session artifact
+  budget that fails closed, and representative storage estimates in
+  [Training](docs/TRAINING.md).
+- The accepted viewer information architecture: four global destinations
+  (`Overview | Experiments | Sessions | Trajectories`), one contextual left navigation per selected
+  resource, ownership-ancestry breadcrumbs that stop at the parent, a reserved-height context bar
+  with same-height loading skeletons, narrow-screen ancestry collapse, and contextual training
+  provenance. See [Viewer maintenance](docs/VIEWER-MAINTENANCE.md).
+- `SessionControl` and `run_session` are exported, so a custom session runner composes domain
+  operations without receiving an authorization value.
+
+### Fixed
+
+- A background catalog refresh no longer drops keyboard focus out of an open viewer listbox.
+- Switching viewer destinations while the catalog request is in flight no longer lets the older
+  request repaint over the newer destination.
 
 EnvironmentHarness now projects native and imported traces into additive `v1alpha1` Policy,
 Trajectory, TrajectorySnapshot, TrajectoryDataset, and TrainingRun resources. Historical sources use

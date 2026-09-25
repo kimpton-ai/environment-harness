@@ -10,7 +10,7 @@ Run agents in persistent shared environments, then inspect exactly what they obs
 
 EnvironmentHarness records participant-specific observations, actions, outcomes, checkpoints, score reports, and branch lineage as durable evidence. You provide the environment rules, agent programs, and grading method.
 
-[Quickstart](#quickstart) · [Trajectories](https://github.com/kimpton-ai/environment-harness/blob/main/docs/TRAJECTORIES.md) · [Training](https://github.com/kimpton-ai/environment-harness/blob/main/docs/TRAINING.md) · [Connect an agent](https://github.com/kimpton-ai/environment-harness/blob/main/docs/AGENT-INTEGRATION.md) · [Implement an environment](https://github.com/kimpton-ai/environment-harness/blob/main/docs/AUTHORING.md) · [API reference](https://github.com/kimpton-ai/environment-harness/blob/main/docs/API-REFERENCE.md)
+[Quickstart](#quickstart) · [Trajectories](https://github.com/kimpton-ai/environment-harness/blob/main/docs/TRAJECTORIES.md) · [Training](https://github.com/kimpton-ai/environment-harness/blob/main/docs/TRAINING.md) · [Decision runtime](https://github.com/kimpton-ai/environment-harness/blob/main/docs/DECISION-RUNTIME.md) · [Connect an agent](https://github.com/kimpton-ai/environment-harness/blob/main/docs/AGENT-INTEGRATION.md) · [Implement an environment](https://github.com/kimpton-ai/environment-harness/blob/main/docs/AUTHORING.md) · [API reference](https://github.com/kimpton-ai/environment-harness/blob/main/docs/API-REFERENCE.md)
 
 ## What you can do
 
@@ -209,9 +209,36 @@ acknowledged position/hash, backlog, gaps, and capture failures. See
 [Trajectories and historical evidence](docs/TRAJECTORIES.md) for the Python, CLI, and authenticated
 HTTP workflow.
 
+Run the complete synthetic walkthrough to record a multi-segment native session, import a separate
+historical source, finalize its independent states, freeze it, and stream the snapshot:
+
+```sh
+python examples/trajectory_walkthrough.py --store .local/trajectory-walkthrough
+environment-harness --store .local/trajectory-walkthrough serve --open
+```
+
 Training datasets are immutable ordered snapshot selections and require complete, terminal,
 training-entitled evidence with resolved reward chains. Trainer instances are injected locally;
 the browser server never executes them. See [Frozen datasets and local training integrations](docs/TRAINING.md).
+
+Decisions are recorded as evidence here, but the decision runtime is not. `decision.requested` and
+`decision.selected` are core record types with a frozen minimum payload and zero/one/many operation
+links; the selector runtime, candidate registry, and optional adapters are separately owned and are
+not part of this release. See [Decision runtime](docs/DECISION-RUNTIME.md).
+
+## Scope of this SDK
+
+This repository is the standalone public EnvironmentHarness SDK. It supplies the environment
+boundary — sessions, evidence, trajectories, snapshots, datasets, and the authenticated local
+service — and nothing above it. Private suppliers, marketplace behavior, catalog admission,
+tenancy, billing, supplier settlement, hosted trainer orchestration, GPU allocation, deployment
+state, credentials, and customer data are not in this package and are not SDK contracts.
+
+An embedding product authenticates its own users and calls the trusted administrative seam in
+process; EnvironmentHarness owns only the credential's policy and constraints. Adopting these
+contracts may require a downstream pin, adapter, or intentional breaking migration, and product
+storage or APIs do not become SDK contracts merely to avoid that migration. See
+[Authentication](docs/AUTHENTICATION.md) and [Compatibility](docs/COMPATIBILITY.md).
 
 ## Documentation
 
@@ -220,6 +247,7 @@ the browser server never executes them. See [Frozen datasets and local training 
 | Look up a resource, command, protocol, or status dimension | [Data models](https://github.com/kimpton-ai/environment-harness/blob/main/docs/DATA-MODELS.md) |
 | Import, inspect, snapshot, and export trajectories | [Trajectories](https://github.com/kimpton-ai/environment-harness/blob/main/docs/TRAJECTORIES.md) |
 | Freeze datasets and invoke local training integrations | [Training](https://github.com/kimpton-ai/environment-harness/blob/main/docs/TRAINING.md) |
+| Record decisions and understand the deferred selector runtime | [Decision runtime](https://github.com/kimpton-ai/environment-harness/blob/main/docs/DECISION-RUNTIME.md) |
 | Connect a Python agent, model integration, or JSON program | [Agent integration](https://github.com/kimpton-ai/environment-harness/blob/main/docs/AGENT-INTEGRATION.md) |
 | Implement environment rules and custom operation classes | [Environment authoring](https://github.com/kimpton-ai/environment-harness/blob/main/docs/AUTHORING.md) · [Complete experiment](https://github.com/kimpton-ai/environment-harness/blob/main/examples/custom_environment_experiment.py) |
 | Connect an external simulator or engine | [External simulator experiment](https://github.com/kimpton-ai/environment-harness/blob/main/examples/external_environment_experiment.py) |
