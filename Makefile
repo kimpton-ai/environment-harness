@@ -3,7 +3,7 @@ setup:
 	uv sync --extra server
 	npm ci --ignore-scripts --prefix packages/typescript
 check:
-	uv run --no-sync pytest --cov --cov-branch --cov-report=term-missing --cov-report=json --cov-report=xml
+	uv run --no-sync pytest -n auto --cov --cov-branch --cov-report=term-missing --cov-report=json --cov-report=xml
 	uv run --no-sync python scripts/check_coverage.py
 	uv run --no-sync diff-cover coverage.xml --compare-branch=origin/main --fail-under=100
 	uv run --no-sync ruff format --check src tests scripts examples
