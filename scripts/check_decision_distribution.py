@@ -29,17 +29,14 @@ def main():
         smoke = """
 import importlib.util
 import tempfile
-from environment_harness import AgentSpec, EnvironmentSession, EvidenceStore, ExperimentSpec, Principal
-from environment_harness.fixtures import SyntheticEnvironment
+from environment_harness import EnvironmentHarness, Scenario
+from environment_harness.fixtures import SyntheticAgent, SyntheticEnvironment
 assert importlib.util.find_spec('environment_harness_decisions') is None
 assert importlib.util.find_spec('httpx') is None
 with tempfile.TemporaryDirectory() as directory:
-    environment = SyntheticEnvironment()
-    session = EnvironmentSession(EvidenceStore(directory), environment)
-    principal = Principal(tenant='fixture', subject='fixture', role='researcher')
-    spec = ExperimentSpec(environment=environment.spec, participants=(AgentSpec(id='a', implementation='synthetic', policy_version='1'),))
-    created = session.create(spec, principal)
-    assert session.get(created['id'], principal)['status'] == 'running'
+    harness = EnvironmentHarness(directory, environment=SyntheticEnvironment, agents={'alice': SyntheticAgent})
+    session = harness.run(Scenario(id='distribution', input={'starting_total': 1}), turns=1)
+    assert session.status == 'succeeded'
 """
         subprocess.run([str(python), "-I", "-c", smoke], check=True, cwd=root, env=env)
         subprocess.run(
