@@ -353,6 +353,7 @@ needed.
 | Failure | Response |
 | --- | --- |
 | A release check fails before merge | Fix it in the release pull request and rerun all affected checks |
+| The upstream Action metadata audit is rate-limited | Authenticate it with the build job's contents-read `GITHUB_TOKEN`; do not skip or weaken the audit |
 | The protected tag lookup reports a missing ref | Create the tag only after validating GitHub's `404 Not Found` response; any other lookup failure must stop publication |
 | A manually created tag points at the wrong commit | It cannot start publication; leave it immutable and prepare the next candidate |
 | Reviewed work lands after the release PR | Retry with the version-introducing PR only while its merge remains on `main`'s first-parent history and current coordinated metadata still names that version |
