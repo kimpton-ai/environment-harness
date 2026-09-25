@@ -335,6 +335,8 @@ def check_release_workflow_binding() -> None:
         'git merge-base --is-ancestor "$RELEASE_SHA" origin/main': "main ancestry",
         '--release-tag "$RELEASE_TAG"': "tag-to-package version binding",
         "environment: release-tag": "protected tag environment",
+        'tag_response="$RUNNER_TEMP/tag-ref.json"': "fail-closed tag lookup response",
+        '\'.status == "404" and .message == "Not Found"\'': "validated missing tag response",
         '--field ref="refs/tags/$RELEASE_TAG"': "protected tag creation",
         "uv build --no-build-isolation": "frozen build environment",
         'gh attestation verify "$artifact"': "per-artifact provenance verification",
@@ -348,6 +350,13 @@ def check_release_workflow_binding() -> None:
     missing = [description for snippet, description in release_required.items() if snippet not in release]
     if missing:
         raise PolicyError("release workflow lacks " + ", ".join(missing))
+    tag_lookup = re.search(
+        r'if gh api "repos/\$GITHUB_REPOSITORY/git/ref/tags/\$RELEASE_TAG".*?; then',
+        release,
+        flags=re.DOTALL,
+    )
+    if tag_lookup is None or "|| true" in tag_lookup.group(0):
+        raise PolicyError("release tag lookup must fail closed")
     prepare_required = {
         "workflow_dispatch:": "manual preparation dispatch",
         "bump:": "release bump input",

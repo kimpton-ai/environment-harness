@@ -161,10 +161,20 @@ jobs:
           RELEASE_SHA: ${{ needs.resolve.outputs.release_sha }}
           RELEASE_TAG: ${{ needs.resolve.outputs.release_tag }}
         run: |
-          existing="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.object.sha' 2>/dev/null || true)"
-          if [ -n "$existing" ]; then
+          tag_response="$RUNNER_TEMP/tag-ref.json"
+          tag_error="$RUNNER_TEMP/tag-ref.err"
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" \
+            --jq '.object.sha' >"$tag_response" 2>"$tag_error"; then
+            existing="$(<"$tag_response")"
+            [[ "$existing" =~ ^[0-9a-f]{40}$ ]]
             test "$existing" = "$RELEASE_SHA"
           else
+            if ! jq -e '.status == "404" and .message == "Not Found"' \
+              "$tag_response" >/dev/null; then
+              sed -n '1,20p' "$tag_error" >&2
+              sed -n '1,20p' "$tag_response" >&2
+              exit 1
+            fi
             gh api "repos/$GITHUB_REPOSITORY/git/refs" \
               --method POST \
               --field ref="refs/tags/$RELEASE_TAG" \

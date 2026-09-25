@@ -222,6 +222,8 @@ def test_dependabot_routine_update_policy_fails_closed(tmp_path, monkeypatch, co
         ("release_pr:", "merged release PR input"),
         ("python scripts/release_version.py resolve", "release PR resolution"),
         ("environment: release-tag", "protected tag environment"),
+        ('tag_response="$RUNNER_TEMP/tag-ref.json"', "fail-closed tag lookup response"),
+        ('\'.status == "404" and .message == "Not Found"\'', "validated missing tag response"),
         ('--field ref="refs/tags/$RELEASE_TAG"', "protected tag creation"),
         ('cache: ""', "disabled setup-node package cache"),
         ("cd dist && sha256sum -- * > SHA256SUMS", "download-friendly checksum paths"),
@@ -234,6 +236,21 @@ def test_release_workflow_requires_reviewed_dispatch_binding(tmp_path, monkeypat
     monkeypatch.setattr(check_repository, "ROOT", tmp_path)
 
     with pytest.raises(check_repository.PolicyError, match=description):
+        check_repository.check_release_workflow_binding()
+
+
+def test_release_workflow_rejects_error_swallowing_tag_lookup(tmp_path, monkeypatch):
+    workflows = configure_release_workflows(tmp_path)
+    release = workflows / "release.yml"
+    release.write_text(
+        release.read_text().replace(
+            '>"$tag_response" 2>"$tag_error"; then',
+            '>"$tag_response" 2>"$tag_error" || true; then',
+        )
+    )
+    monkeypatch.setattr(check_repository, "ROOT", tmp_path)
+
+    with pytest.raises(check_repository.PolicyError, match="tag lookup must fail closed"):
         check_repository.check_release_workflow_binding()
 
 

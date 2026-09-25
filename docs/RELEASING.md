@@ -348,6 +348,7 @@ needed.
 | Failure | Response |
 | --- | --- |
 | A release check fails before merge | Fix it in the release pull request and rerun all affected checks |
+| The protected tag lookup reports a missing ref | Create the tag only after validating GitHub's `404 Not Found` response; any other lookup failure must stop publication |
 | A manually created tag points at the wrong commit | It cannot start publication; leave it immutable and prepare the next candidate |
 | The release PR is no longer the current `main` commit | Merge no unrelated commit into the release; prepare the next candidate through a new release PR |
 | GitHub publication fails before creating a release | Fix the workflow or environment and rerun only after confirming the artifact identity contract |
