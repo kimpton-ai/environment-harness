@@ -4881,7 +4881,7 @@
     "securitySchemes": {
       "BearerAuth": {
         "bearerFormat": "opaque",
-        "description": "Opaque EnvironmentHarness credential. The server resolves it to an identity and one of its fixed management, viewer, or participant access policies.",
+        "description": "Opaque EnvironmentHarness credential. The server resolves it to an identity and one of its fixed admin, viewer, or participant access policies.",
         "scheme": "bearer",
         "type": "http"
       }

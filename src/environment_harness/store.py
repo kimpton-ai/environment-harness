@@ -589,12 +589,12 @@ class EvidenceStore:
             )
         return token
 
-    def issue_management(self, tenant, subject="management", *, ttl=3600):
+    def issue_admin(self, tenant, subject="admin", *, ttl=3600):
         """Trusted embedding API and ``environment-harness token`` only."""
 
         from .access import _AccessContext
 
-        return self._issue(_AccessContext(tenant=tenant, subject=subject, policy="management"), ttl)
+        return self._issue(_AccessContext(tenant=tenant, subject=subject, policy="admin"), ttl)
 
     def issue_viewer(self, tenant, subject="loopback-viewer", *, ttl=3600):
         """Read-only credential delivered to the loopback viewer page."""

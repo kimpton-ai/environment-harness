@@ -7,7 +7,7 @@ family replaces or rewrites environment-session evidence.
 
 ## Authority and transport
 
-The supplier service owns the environment. HTTPS requests carry only an opaque bearer credential; the server resolves it to an identity plus one of its fixed management, viewer, or participant access policies. Loopback HTTP is an explicit development option. There is no public role model and requests never assert permissions. A participant credential is bound to one session, participant, and authority generation, and is issued only through the purpose-specific participant-credential operation. Invalid, expired, or revoked credentials return `401`; a valid credential denied by its policy or constraint returns a non-enumerating `403`. Authority transfer increments the generation and invalidates the old controller. See [Authentication](AUTHENTICATION.md).
+The supplier service owns the environment. HTTPS requests carry only an opaque bearer credential; the server resolves it to an identity plus one of its fixed admin, viewer, or participant access policies. Loopback HTTP is an explicit development option. There is no public role model and requests never assert permissions. A participant credential is bound to one session, participant, and authority generation, and is issued only through the purpose-specific participant-credential operation. Invalid, expired, or revoked credentials return `401`; a valid credential denied by its policy or constraint returns a non-enumerating `403`. Authority transfer increments the generation and invalidates the old controller. See [Authentication](AUTHENTICATION.md).
 
 Administrative Python methods are trusted embedding APIs. They must not be exposed directly to untrusted agents. Store directories are private to the operating-system account. SQL credentials, signing keys, model credentials and resource handles belong to the server or worker scope.
 
@@ -104,7 +104,7 @@ Branches copy checkpoint state into a new environment and retain lineage. Parent
 
 ## Evidence and limitations
 
-Local evidence uses sorted, compact ASCII JSON with finite numbers and a SHA-256 hash chain. This is an explicitly specified encoding, not a claim of RFC 8785 conformance. Events, checkpoints and report revisions are append-only. Participant projections cannot verify hidden portions of a hash chain; trusted-local and management authority can verify the complete chain. Optional Ed25519 receipts establish supplier provenance, not independent reproduction of hidden mechanics.
+Local evidence uses sorted, compact ASCII JSON with finite numbers and a SHA-256 hash chain. This is an explicitly specified encoding, not a claim of RFC 8785 conformance. Events, checkpoints and report revisions are append-only. Participant projections cannot verify hidden portions of a hash chain; trusted-local and admin authority can verify the complete chain. Optional Ed25519 receipts establish supplier provenance, not independent reproduction of hidden mechanics.
 
 Findings validate participant/action/observation links and existence of referenced outcome/consequence events. The runtime does not adjudicate the scientific truth of a grader's judgment. Comparisons aggregate lineage means and do not treat turns or related branches as independent experiments. Unknown uncertainty remains explicit.
 

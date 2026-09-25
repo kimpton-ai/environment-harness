@@ -22,13 +22,13 @@
   "authorizationModel": {
     "current": {
       "issuable": [
-        "management",
+        "admin",
         "viewer",
         "participant"
       ],
       "kind": "server-owned credential policies",
       "policies": {
-        "management": [
+        "admin": [
           "activity.read",
           "artifact.read",
           "artifact.write",
@@ -118,7 +118,7 @@
       ]
     }
   },
-  "authorizationRegistryFingerprint": "sha256:07ffb8d6-489e1f56-e824cf1e-8850c72a-fd6ffdfb-9237a6b4-c12e4cf6-8a5a709a",
+  "authorizationRegistryFingerprint": "sha256:6841bebd-f152fdc1-4d31fe3d-849afe4b-1f859b68-497a1eb7-90dbd352-9c419307",
   "candidateFingerprint": "sha256:f3a7fac1-360cb32e-7754e455-cce9fc42-e6f81ef4-a6215bea-34897c14-a390f29f",
   "contract": "environmentharness.dev/v1alpha1",
   "from": "0.2.4rc2",

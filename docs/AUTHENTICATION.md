@@ -38,7 +38,7 @@ Authorization: Bearer <opaque-credential>
 
 The credential is an opaque random string. The server stores its SHA-256 hash beside the policy and
 resource constraints it was issued with, and never trusts a policy, permission, role, or scope
-supplied in a request body, query parameter, or header. Adding `{"policy": "management"}` to a
+supplied in a request body, query parameter, or header. Adding `{"policy": "admin"}` to a
 request cannot widen access: strict command models reject unknown fields, and the persisted policy
 is the only input to the check. OpenAPI publishes only the standard HTTP bearer security scheme —
 no `x-roles`, `x-principal-kinds`, or other custom caller taxonomy.
@@ -49,7 +49,7 @@ These name credential behavior. They are not users, organization membership, or 
 
 | Policy | Issued by | May do |
 | --- | --- | --- |
-| `management` | `environment-harness token`, or `EnvironmentHarness.management_credential()` | Create experiments and sessions, run lifecycle commands, read full evidence, register and ingest sources, freeze snapshots and datasets, read recorded training results, and issue participant credentials |
+| `admin` | `environment-harness token`, or `EnvironmentHarness.admin_credential()` | Create experiments and sessions, run lifecycle commands, read full evidence, register and ingest sources, freeze snapshots and datasets, read recorded training results, and issue participant credentials |
 | `viewer` | the loopback viewer handshake, or `EnvironmentHarness.viewer_credential()` | Read-only inspection. It cannot mutate anything, ingest evidence, create a dataset, or issue a credential |
 | `participant` | only `POST /v1/sessions/{id}/participants/{participant}/credentials`, or `EnvironmentSession.participant_credential()` | Observation reads and action submission for **one** session, participant, and generation, plus its own artifacts |
 
@@ -64,11 +64,11 @@ Each exists for a specific reason:
   evidence outside its turn, the experiment would measure the wrong thing. It is therefore scoped to
   a `(session, participant, generation)` triple rather than to a caller, and transferring
   participant authority increments the generation and invalidates the previous token mid-session.
-- **`management` is the ordinary "I own this store" credential** — the closest thing here to a
+- **`admin` is the ordinary "I own this store" credential** — the closest thing here to a
   conventional API key.
 
 Training integrations never execute over HTTP, so no issuable policy carries `training.execute`.
-The participant surface is likewise unreachable from a management credential: acting as a
+The participant surface is likewise unreachable from a admin credential: acting as a
 participant always requires a participant-scoped context.
 
 ## Issuing and constraining participant credentials

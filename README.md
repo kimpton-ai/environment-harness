@@ -200,7 +200,7 @@ for row in harness.sources().export_snapshot(snapshot.metadata.id):
 ```
 
 The in-process SDK is a trusted local interface and needs no credential. Remote callers send only
-an opaque bearer credential; the server resolves it to one of its fixed management, viewer, or
+an opaque bearer credential; the server resolves it to one of its fixed admin, viewer, or
 participant policies. See [Authentication](docs/AUTHENTICATION.md).
 
 The same interface accepts hash-chained historical records from a namespaced external source.

@@ -180,7 +180,7 @@ harness = EnvironmentHarness(
 app = create_app(harness)
 ```
 
-Issue management credentials with `harness.management_credential()`. The server never accepts a
+Issue admin credentials with `harness.admin_credential()`. The server never accepts a
 policy, role, or permission from a request. See [Authentication](AUTHENTICATION.md).
 
 Save that module as `app.py`, then run it behind Uvicorn during development:
@@ -208,7 +208,7 @@ record ingestion, and status mutation. An explicitly managed ingestion service m
 app = create_app(session, trajectory_ingestion=True)
 ```
 
-That flag adds only bearer-authenticated management routes. It does not make ingestion
+That flag adds only bearer-authenticated admin routes. It does not make ingestion
 public, authorize environment actions, run selectors, or execute trainer plugins. Keep a source's
 domain journal as the delivery backlog during service outages and resume from its last acknowledged
 position and hash. Do not configure ingestion on a supplier/viewer process that is intended to be

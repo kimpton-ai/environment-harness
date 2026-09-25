@@ -233,7 +233,7 @@ def test_postgres_credential_and_scheduler_migrations_apply_and_force_reissue():
         with store.transaction() as database:
             database.execute(
                 "INSERT INTO credentials (hash,tenant,subject,policy,expires) VALUES (?,?,?,?,?)",
-                ("a" * 64, "tenant", "ops", "management", 9.9e9),
+                ("a" * 64, "tenant", "ops", "admin", 9.9e9),
             )
             columns = {
                 row["column_name"]

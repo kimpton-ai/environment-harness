@@ -14,7 +14,7 @@ operation-link representation are core EnvironmentHarness contracts; the selecto
 produces them is owned by **Pluggable Decision-Selection Seam**. See
 [Decision runtime](DECISION-RUNTIME.md).
 
-`EnvironmentSpec.phase_deadline` defaults to `wall`. An environment may declare `coordinator` when only explicit phase closure advances execution. For that mode, the management caller or worker holding the current writer lease closes the phase before `resolve`, through the `close_phase` lifecycle command over HTTP or the `environment_harness.coordinator.advance` supervisor loop. Closure is interleaved with action submission inside one turn, so it belongs to that supervisor rather than to a custom `SessionRunner`. Closure is durable and idempotent. Actions submitted after closure are rejected. Waiting for inference or reconnecting does not change simulation time.
+`EnvironmentSpec.phase_deadline` defaults to `wall`. An environment may declare `coordinator` when only explicit phase closure advances execution. For that mode, the admin caller or worker holding the current writer lease closes the phase before `resolve`, through the `close_phase` lifecycle command over HTTP or the `environment_harness.coordinator.advance` supervisor loop. Closure is interleaved with action submission inside one turn, so it belongs to that supervisor rather than to a custom `SessionRunner`. Closure is durable and idempotent. Actions submitted after closure are rejected. Waiting for inference or reconnecting does not change simulation time.
 
 `AgentJournal` stores serializable, revision-scoped work through the participant checkpoint hook. A program can preserve tool responses and final decisions before submitting an action. State writes check participant authority and the expected environment revision. External operations still use the operation journal and receipt reconciliation; agent memory does not authorize redispatch of an ambiguous effect.
 
@@ -32,7 +32,7 @@ A restarted runner reuses accepted actions and saved responses. Ambiguous work
 stops with a reconciliation error instead of repeating an agent call.
 
 Management and scoped participant credentials can inspect
-`/v1/sessions/{session_id}/invocations`. A management caller can recover a
+`/v1/sessions/{session_id}/invocations`. An admin caller can recover a
 known completed result using the
 `reconcile_agent` command with its operation ID, response, continuation state
 and lookup or operator evidence. Recovery is audited. It does not make another

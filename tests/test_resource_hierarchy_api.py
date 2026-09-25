@@ -38,7 +38,7 @@ def service(tmp_path, *, trajectory_ingestion=False):
     )
     headers = {
         "Authorization": "Bearer "
-        + bearer(store, _AccessContext(tenant="tenant", subject="ops", policy="management"))
+        + bearer(store, _AccessContext(tenant="tenant", subject="ops", policy="admin"))
     }
     return client, harness, experiment, result, headers
 
@@ -215,7 +215,7 @@ def test_training_dataset_records_page_and_stream(tmp_path):
     client = TestClient(create_app(harness), base_url="http://testserver")
     headers = {
         "Authorization": "Bearer "
-        + bearer(store, _AccessContext(tenant="tenant", subject="ops", policy="management"))
+        + bearer(store, _AccessContext(tenant="tenant", subject="ops", policy="admin"))
     }
     created = client.post(
         "/v1/datasets", headers=headers, json={"name": "hierarchy", "trajectories": [identity]}

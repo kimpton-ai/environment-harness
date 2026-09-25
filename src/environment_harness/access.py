@@ -81,7 +81,7 @@ _PARTICIPANT_ACTIONS = frozenset(
     }
 )
 
-PolicyName = Literal["trusted-local", "management", "viewer", "participant"]
+PolicyName = Literal["trusted-local", "admin", "viewer", "participant"]
 
 #: Fixed server-owned credential policies. These names describe internal
 #: credential behavior, not users, organization membership, or public roles.
@@ -91,7 +91,7 @@ POLICY_ACTIONS: dict[str, frozenset[str]] = {
     # Issued through the trusted ``environment-harness token`` command or the
     # embedding API. Training integrations are never executed over HTTP, and the
     # participant surface is reachable only through a participant credential.
-    "management": frozenset(ACTIONS)
+    "admin": frozenset(ACTIONS)
     - {
         "training.execute",
         "participant.act",
@@ -108,7 +108,7 @@ POLICY_ACTIONS: dict[str, frozenset[str]] = {
 
 #: Policies a credential may carry. ``trusted-local`` is never issuable: it
 #: exists only for the in-process facade.
-ISSUABLE_POLICIES = ("management", "viewer", "participant")
+ISSUABLE_POLICIES = ("admin", "viewer", "participant")
 
 #: Policies that are constrained to a single session, participant, generation.
 PARTICIPANT_SCOPED = ("participant",)

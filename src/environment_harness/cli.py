@@ -239,7 +239,7 @@ def main():
                 )
             )
         else:
-            print(store.issue_management(args.tenant))
+            print(store.issue_admin(args.tenant))
         return
     if args.command == "attach":
         result = session.get(args.environment, who)

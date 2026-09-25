@@ -56,7 +56,7 @@ def session_fixture(tmp_path):
     identity = runtime.create(spec, local)["id"]
     contexts = {
         "trusted-local": local,
-        "management": _AccessContext(tenant="tenant", subject="ops", policy="management"),
+        "admin": _AccessContext(tenant="tenant", subject="ops", policy="admin"),
         "viewer": _AccessContext(tenant="tenant", subject="viewer", policy="viewer"),
         "participant": runtime.participant_context(identity, local, "alice"),
     }
@@ -108,7 +108,7 @@ def test_access_contexts_fail_closed_on_unknown_policies_and_actions():
         # Acting as a participant always requires a participant-scoped context,
         # even for the trusted in-process facade.
         ("trusted-local", True, True, True, False, True),
-        ("management", True, True, True, False, True),
+        ("admin", True, True, True, False, True),
         ("viewer", False, False, False, False, True),
         ("participant", False, False, False, True, False),
     ],
@@ -302,11 +302,11 @@ def test_trusted_local_sdk_requires_no_credential_and_issues_scoped_ones(tmp_pat
     assert session.verify()["events"] > 0
     assert session.records(limit=5).records
 
-    management = harness.management_credential()
+    management = harness.admin_credential()
     viewer = harness.viewer_credential()
     participant = session.participant_credential("alice")
     resolved = {token: harness.store.authenticate(token) for token in (management, viewer, participant)}
-    assert [context.policy for context in resolved.values()] == ["management", "viewer", "participant"]
+    assert [context.policy for context in resolved.values()] == ["admin", "viewer", "participant"]
     assert resolved[participant].session == session.id
     assert resolved[participant].participant == "alice"
 
@@ -318,7 +318,7 @@ def test_participant_credentials_are_bound_and_do_not_enumerate(tmp_path):
     store, runtime, identity, spec, contexts = session_fixture(tmp_path)
     client = TestClient(create_app(runtime), base_url="http://testserver")
     scoped = {"Authorization": "Bearer " + bearer(store, contexts["participant"])}
-    management = {"Authorization": "Bearer " + bearer(store, contexts["management"])}
+    management = {"Authorization": "Bearer " + bearer(store, contexts["admin"])}
 
     assert client.get(f"/v1/sessions/{identity}", headers=scoped).status_code == 200
     other = runtime.create(spec, contexts["trusted-local"], environment_id="d" * 32)["id"]
@@ -346,7 +346,7 @@ def test_requests_cannot_assert_a_policy_or_permission(tmp_path):
     client = TestClient(create_app(runtime), base_url="http://testserver")
     scoped = {"Authorization": "Bearer " + bearer(store, contexts["participant"])}
     for attempt in (
-        {"policy": "management"},
+        {"policy": "admin"},
         {"permissions": ["session.create"]},
         {"role": "researcher"},
     ):
@@ -364,13 +364,13 @@ def test_credential_store_never_trusts_a_client_supplied_policy(tmp_path):
     with pytest.raises(Forbidden, match="cannot be issued"):
         store._issue(trusted_local("tenant"), 60)
     with pytest.raises(ValueError, match="token lifetime"):
-        store.issue_management("tenant", ttl=0)
-    token = store.issue_management("tenant", "ops")
+        store.issue_admin("tenant", ttl=0)
+    token = store.issue_admin("tenant", "ops")
     with store.transaction() as db:
         row = db.execute(
             "SELECT * FROM credentials WHERE hash=?", (hashlib.sha256(token.encode()).hexdigest(),)
         ).fetchone()
-    assert row["policy"] == "management" and row["session"] is None
+    assert row["policy"] == "admin" and row["session"] is None
     with pytest.raises(Unauthenticated, match="expired or invalid"):
         store.authenticate("not-a-credential")
 
@@ -421,8 +421,8 @@ def test_numbered_credential_migration_deletes_legacy_rows_and_forces_reissue(tm
 
     with pytest.raises(Unauthenticated):
         store.authenticate("legacy-token")
-    reissued = store.issue_management("local")
-    assert store.authenticate(reissued).policy == "management"
+    reissued = store.issue_admin("local")
+    assert store.authenticate(reissued).policy == "admin"
 
     # Reconciliation is idempotent: a second open applies nothing further.
     with store.transaction() as db:

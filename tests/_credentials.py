@@ -18,11 +18,11 @@ def bearer(store, access: _AccessContext, *, ttl: int = 3600) -> str:
         )
     if access.policy == "viewer":
         return store.issue_viewer(access.tenant, access.subject, ttl=ttl)
-    return store.issue_management(access.tenant, access.subject, ttl=ttl)
+    return store.issue_admin(access.tenant, access.subject, ttl=ttl)
 
 
-def management(tenant="tenant", subject="management") -> _AccessContext:
-    return _AccessContext(tenant=tenant, subject=subject, policy="management")
+def management(tenant="tenant", subject="admin") -> _AccessContext:
+    return _AccessContext(tenant=tenant, subject=subject, policy="admin")
 
 
 def viewer(tenant="tenant", subject="loopback-viewer") -> _AccessContext:

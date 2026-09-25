@@ -320,7 +320,7 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         bearerFormat="opaque",
         description=(
             "Opaque EnvironmentHarness credential. The server resolves it to an identity and one "
-            "of its fixed management, viewer, or participant access policies."
+            "of its fixed admin, viewer, or participant access policies."
         ),
     )
 

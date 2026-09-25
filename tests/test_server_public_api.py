@@ -51,36 +51,36 @@ def service(tmp_path):
 # There is no public role model: a caller sends only a bearer credential and the
 # server decides from the policy it persisted beside that credential's hash.
 ROUTE_POLICY_MATRIX = {
-    "health": {"management": 200, "viewer": 200, "participant": 200},
-    "capabilities": {"management": 200, "viewer": 200, "participant": 200},
-    "create": {"management": 201, "viewer": 403, "participant": 403},
-    "list": {"management": 200, "viewer": 200, "participant": 200},
-    "experiment-list": {"management": 200, "viewer": 200, "participant": 403},
-    "scenario-set-list": {"management": 200, "viewer": 200, "participant": 403},
-    "policy-list": {"management": 200, "viewer": 200, "participant": 200},
-    "snapshot-list": {"management": 200, "viewer": 200, "participant": 403},
-    "source-list": {"management": 200, "viewer": 200, "participant": 403},
-    "checkpoint-list": {"management": 200, "viewer": 200, "participant": 200},
-    "trajectory-list": {"management": 200, "viewer": 200, "participant": 403},
-    "trajectory-get": {"management": 200, "viewer": 200, "participant": 403},
-    "get": {"management": 200, "viewer": 200, "participant": 200},
-    "observation": {"management": 200, "viewer": 200, "participant": 200},
-    "actions": {"management": 403, "viewer": 403, "participant": 200},
-    "events": {"management": 200, "viewer": 200, "participant": 200},
-    "turn-series": {"management": 200, "viewer": 200, "participant": 403},
-    "agent-work": {"management": 200, "viewer": 200, "participant": 200},
-    "commands": {"management": 202, "viewer": 403, "participant": 403},
-    "credentials": {"management": 200, "viewer": 403, "participant": 403},
-    "operations": {"management": 403, "viewer": 403, "participant": 200},
-    "artifacts": {"management": 200, "viewer": 403, "participant": 200},
-    "artifact-read": {"management": 200, "viewer": 200, "participant": 200},
-    "reports": {"management": 200, "viewer": 200, "participant": 403},
-    "report": {"management": 201, "viewer": 403, "participant": 403},
-    "compare": {"management": 200, "viewer": 200, "participant": 403},
-    "viewer": {"management": 200, "viewer": 200, "participant": 200},
-    "viewer-asset": {"management": 200, "viewer": 200, "participant": 200},
+    "health": {"admin": 200, "viewer": 200, "participant": 200},
+    "capabilities": {"admin": 200, "viewer": 200, "participant": 200},
+    "create": {"admin": 201, "viewer": 403, "participant": 403},
+    "list": {"admin": 200, "viewer": 200, "participant": 200},
+    "experiment-list": {"admin": 200, "viewer": 200, "participant": 403},
+    "scenario-set-list": {"admin": 200, "viewer": 200, "participant": 403},
+    "policy-list": {"admin": 200, "viewer": 200, "participant": 200},
+    "snapshot-list": {"admin": 200, "viewer": 200, "participant": 403},
+    "source-list": {"admin": 200, "viewer": 200, "participant": 403},
+    "checkpoint-list": {"admin": 200, "viewer": 200, "participant": 200},
+    "trajectory-list": {"admin": 200, "viewer": 200, "participant": 403},
+    "trajectory-get": {"admin": 200, "viewer": 200, "participant": 403},
+    "get": {"admin": 200, "viewer": 200, "participant": 200},
+    "observation": {"admin": 200, "viewer": 200, "participant": 200},
+    "actions": {"admin": 403, "viewer": 403, "participant": 200},
+    "events": {"admin": 200, "viewer": 200, "participant": 200},
+    "turn-series": {"admin": 200, "viewer": 200, "participant": 403},
+    "agent-work": {"admin": 200, "viewer": 200, "participant": 200},
+    "commands": {"admin": 202, "viewer": 403, "participant": 403},
+    "credentials": {"admin": 200, "viewer": 403, "participant": 403},
+    "operations": {"admin": 403, "viewer": 403, "participant": 200},
+    "artifacts": {"admin": 200, "viewer": 403, "participant": 200},
+    "artifact-read": {"admin": 200, "viewer": 200, "participant": 200},
+    "reports": {"admin": 200, "viewer": 200, "participant": 403},
+    "report": {"admin": 201, "viewer": 403, "participant": 403},
+    "compare": {"admin": 200, "viewer": 200, "participant": 403},
+    "viewer": {"admin": 200, "viewer": 200, "participant": 200},
+    "viewer-asset": {"admin": 200, "viewer": 200, "participant": 200},
 }
-POLICIES = ("management", "viewer", "participant")
+POLICIES = ("admin", "viewer", "participant")
 
 
 @pytest.mark.parametrize("case", ROUTE_POLICY_MATRIX)
@@ -342,7 +342,7 @@ def test_openapi_is_a_public_authenticated_api_reference(tmp_path):
         "type": "http",
         "description": (
             "Opaque EnvironmentHarness credential. The server resolves it to an identity and "
-            "one of its fixed management, viewer, or participant access policies."
+            "one of its fixed admin, viewer, or participant access policies."
         ),
         "scheme": "bearer",
         "bearerFormat": "opaque",

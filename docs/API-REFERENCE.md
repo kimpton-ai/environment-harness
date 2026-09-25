@@ -6,7 +6,7 @@ The canonical machine-readable contract is [`contracts/openapi.json`](../contrac
 
 ## Base URL and authentication
 
-The local CLI listens on `http://127.0.0.1:8765` by default. Remote services must use HTTPS. Generate a local management credential from the same evidence store that the service uses:
+The local CLI listens on `http://127.0.0.1:8765` by default. Remote services must use HTTPS. Generate a local admin credential from the same evidence store that the service uses:
 
 ```sh
 export EH_TOKEN="$(environment-harness --store .local/demo token)"
@@ -22,13 +22,13 @@ Authorization: Bearer <credential>
 ```
 
 Callers send only an opaque bearer credential. The server resolves it to an identity plus one of
-three fixed access policies — `management`, `viewer`, or `participant` — and never accepts a policy,
+three fixed access policies — `admin`, `viewer`, or `participant` — and never accepts a policy,
 role, or permission from a request. A participant credential is additionally constrained to one
 environment session, participant, and authority generation. See [Authentication](AUTHENTICATION.md).
 
 | Credential policy | Server-assigned authority |
 | --- | --- |
-| `management` | Create and inspect environment sessions, run lifecycle commands, read full evidence, publish score reports, register and ingest sources, freeze snapshots and datasets, and issue participant credentials. |
+| `admin` | Create and inspect environment sessions, run lifecycle commands, read full evidence, publish score reports, register and ingest sources, freeze snapshots and datasets, and issue participant credentials. |
 | `viewer` | Read-only inspection. It cannot mutate anything, ingest evidence, create a dataset, or issue a credential. |
 | `participant` | Observe and act only as the credential's bound session, participant, and authority generation. |
 
@@ -237,7 +237,7 @@ The response includes the current status, revision, frozen manifest, participant
 
 ### Read an observation
 
-A participant credential is already bound to its participant. A management or viewer credential can select a participant explicitly.
+A participant credential is already bound to its participant. An admin or viewer credential can select a participant explicitly.
 
 ```sh
 curl --fail-with-body -H "Authorization: Bearer $EH_TOKEN" \

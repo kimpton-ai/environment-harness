@@ -11,7 +11,7 @@ A trajectory can enter a dataset only when all of these are true:
 - its frozen purpose and split are both `training`;
 - collection is complete and execution is completed;
 - it is terminated or truncated with a resolved outcome;
-- the caller holds trusted-local or management authority over the selected evidence;
+- the caller holds trusted-local or admin authority over the selected evidence;
 - every reward supersession chain is complete, acyclic, unambiguous, and finite; and
 - every member uses the same source schema version.
 
@@ -78,7 +78,7 @@ for row in trajectories.export_dataset(dataset.metadata.id):
     process(row)
 ```
 
-`harness.sources()` is the trusted local management surface. It requires no credential because the
+`harness.sources()` is the trusted local admin surface. It requires no credential because the
 in-process SDK is a trusted interface; the authenticated HTTP API never executes a training
 integration. See [Authentication](AUTHENTICATION.md).
 

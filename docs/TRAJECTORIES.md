@@ -64,7 +64,7 @@ backlog, or unacknowledged terminal boundary remains.
 
 ## Register and import a historical source
 
-Historical ingestion is a management capability. It is disabled in `create_app()` unless the
+Historical ingestion is an admin capability. It is disabled in `create_app()` unless the
 embedding application explicitly passes `trajectory_ingestion=True`; read-only inspection stays
 available. Source namespaces are stable namespaced identifiers, and `(tenant, namespace, run_id)`
 is immutable.

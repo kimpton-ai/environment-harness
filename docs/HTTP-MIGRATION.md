@@ -61,12 +61,12 @@ role, or permission. See [Authentication](AUTHENTICATION.md).
 
 | Credential policy | Issuable | Registered actions |
 | --- | --- | --- |
-| `management` | yes | 22 |
+| `admin` | yes | 22 |
 | `participant` | yes | 9 |
 | `trusted-local` | no | 27 |
 | `viewer` | yes | 11 |
 
-Authorization-registry fingerprint: `sha256:07ffb8d6-489e1f56-e824cf1e-8850c72a-fd6ffdfb-9237a6b4-c12e4cf6-8a5a709a`.
+Authorization-registry fingerprint: `sha256:6841bebd-f152fdc1-4d31fe3d-849afe4b-1f859b68-497a1eb7-90dbd352-9c419307`.
 
 Every old operation's authorization behavior changed, because the roles it accepted no
 longer exist. All pre-`0.3.0rc1` credentials are deleted by migration

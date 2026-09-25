@@ -7,7 +7,7 @@
 - **The public four-role authorization model is removed.** `Principal`,
   `Principal.role`, and the `researcher`/`agent`/`scorer`/`worker` vocabulary are gone from the
   SDK, HTTP API, OpenAPI (`x-roles`), generated artifacts, and examples. A remote caller sends only
-  an opaque bearer credential; the server resolves it to a `management`, `viewer`, or `participant`
+  an opaque bearer credential; the server resolves it to an `admin`, `viewer`, or `participant`
   policy it owns. Requests can never assert a policy, role, or permission.
 - **Every pre-`0.3.0rc1` credential is deleted.** Numbered migration `005_credential_policies`
   drops all legacy principal rows transactionally. Old bearer tokens return `401`; reissue through

@@ -731,10 +731,10 @@ class EnvironmentHarness:
     def _runtime(self, factory: Callable[[], Any] | None = None) -> _SessionRuntime:
         return _SessionRuntime(self.store, (factory or self.environments.default)())
 
-    def management_credential(self, *, subject: str = "management", ttl: int = 3600) -> str:
-        """Issue an opaque management credential for the authenticated HTTP API."""
+    def admin_credential(self, *, subject: str = "admin", ttl: int = 3600) -> str:
+        """Issue an opaque admin credential for the authenticated HTTP API."""
 
-        return self.store.issue_management(self.tenant, subject, ttl=ttl)
+        return self.store.issue_admin(self.tenant, subject, ttl=ttl)
 
     def viewer_credential(self, *, ttl: int = 3600) -> str:
         """Issue the read-only loopback viewer credential."""
