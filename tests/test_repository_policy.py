@@ -411,6 +411,31 @@ def test_prepare_release_candidate_increment_and_finalization(tmp_path):
     assert json.loads((tmp_path / "packages/typescript/package.json").read_text())["version"] == "0.2.3"
 
 
+def test_prepare_first_candidate_on_new_line_after_prerelease(tmp_path):
+    release_version = load_script("release_version")
+    configure_release_tree(tmp_path)
+
+    previous = release_version.prepare_release(
+        tmp_path,
+        "patch",
+        date(2026, 9, 18),
+        prerelease="rc",
+    )
+    candidate = release_version.prepare_release(
+        tmp_path,
+        "minor",
+        date(2026, 9, 19),
+        prerelease="rc",
+    )
+
+    assert previous == "0.2.3rc1"
+    assert candidate == "0.3.0rc1"
+    assert release_version.current_version(tmp_path) == candidate
+    assert json.loads((tmp_path / "packages/typescript/package.json").read_text())["version"] == (
+        "0.3.0-rc.1"
+    )
+
+
 def test_contributing_names_supported_uv_version():
     root = Path(__file__).resolve().parents[1]
 

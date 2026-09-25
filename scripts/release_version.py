@@ -117,10 +117,7 @@ def current_version(root: Path = ROOT) -> str:
     return version
 
 
-def bumped_version(version: str, bump: str) -> str:
-    parsed = parse_version(version)
-    if parsed.stage is not None:
-        raise ReleaseError("finalize the current prerelease before choosing a new version bump")
+def _bumped_release_line(parsed: ReleaseVersion, bump: str) -> str:
     major, minor, patch = parsed.major, parsed.minor, parsed.patch
     if bump == "major":
         major, minor, patch = major + 1, 0, 0
@@ -131,6 +128,13 @@ def bumped_version(version: str, bump: str) -> str:
     else:
         raise ReleaseError(f"unsupported version bump: {bump!r}")
     return f"{major}.{minor}.{patch}"
+
+
+def bumped_version(version: str, bump: str) -> str:
+    parsed = parse_version(version)
+    if parsed.stage is not None:
+        raise ReleaseError("finalize the current prerelease before choosing a new version bump")
+    return _bumped_release_line(parsed, bump)
 
 
 def next_version(
@@ -148,12 +152,10 @@ def next_version(
         return parsed.base
     if prerelease:
         stage = STAGE_NAMES[prerelease]
-        if parsed.stage is None:
-            if not bump:
-                raise ReleaseError("the first prerelease for a release line requires --bump")
-            return f"{bumped_version(previous, bump)}{stage}1"
         if bump:
-            raise ReleaseError("advancing a prerelease cannot also change its release line")
+            return f"{_bumped_release_line(parsed, bump)}{stage}1"
+        if parsed.stage is None:
+            raise ReleaseError("the first prerelease for a release line requires --bump")
         if STAGE_ORDER[stage] < STAGE_ORDER[parsed.stage]:
             raise ReleaseError("a prerelease stage cannot move backwards")
         serial = (parsed.serial or 0) + 1 if stage == parsed.stage else 1
