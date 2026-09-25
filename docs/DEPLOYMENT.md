@@ -147,8 +147,8 @@ Recovered work resolves executable code through typed factories configured once 
 ```python
 harness = EnvironmentHarness(
     store,
-    environments=(WarehouseEnvironment, BrowserEnvironment),
-    agent_factories={"alice": MyAgent},
+    environment=(WarehouseEnvironment, BrowserEnvironment),
+    agents={"alice": MyAgent},
 )
 experiment = harness.experiment("study", scenarios, environment=WarehouseEnvironment)
 ```
@@ -174,8 +174,8 @@ from environment_harness.server import create_app
 
 harness = EnvironmentHarness(
     EvidenceStore("./environment-sessions"),
-    environment_factory=SyntheticEnvironment,
-    agent_factories={"alice": SyntheticAgent},
+    environment=SyntheticEnvironment,
+    agents={"alice": SyntheticAgent},
 )
 app = create_app(harness)
 ```

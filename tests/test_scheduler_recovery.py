@@ -83,19 +83,19 @@ class Agent:
         return {"value": 1}
 
 
-def harness(store, environments=(Counter,), **options):
+def harness(store, environment=(Counter,), **options):
     return EnvironmentHarness(
         store,
-        environments=environments,
-        agent_factories={"agent": Agent},
+        environment=environment,
+        agents={"agent": Agent},
         **options,
     )
 
 
 def test_registry_requires_supplied_typed_factories(tmp_path):
-    with pytest.raises(ValueError, match="at least one environment factory"):
+    with pytest.raises(ValueError, match="at least one environment is required"):
         _EnvironmentRegistry([])
-    with pytest.raises(TypeError, match="callable objects or classes"):
+    with pytest.raises(TypeError, match="not an instance"):
         _EnvironmentRegistry(["environment_harness.fixtures:SyntheticEnvironment"])
     with pytest.raises(ValueError, match="duplicate environment factory"):
         _EnvironmentRegistry([Counter, Counter])
@@ -112,7 +112,7 @@ def test_registry_requires_supplied_typed_factories(tmp_path):
 
 
 def test_experiments_select_one_supplied_implementation(tmp_path):
-    local = harness(tmp_path, environments=(Counter, Other))
+    local = harness(tmp_path, environment=(Counter, Other))
     with pytest.raises(ValueError, match="explicitly"):
         local.experiment("ambiguous", [Scenario(id="a", input={})], turns=1)
     with pytest.raises(ValueError, match="was not supplied"):
@@ -297,13 +297,13 @@ def test_missing_or_mismatched_factories_block_before_any_code_runs(tmp_path):
     experiment.start()
 
     # A new default that differs from the frozen reference never substitutes.
-    absent = harness(store, environments=(Other,))
+    absent = harness(store, environment=(Other,))
     identity = absent.sessions()[0].id
     absent.session(identity).wait(15)
     assert absent.session(identity).status == "blocked"
     with store.transaction() as db:
         row = db.execute("SELECT * FROM session_runs WHERE environment=?", (identity,)).fetchone()
-        assert row["error"] == "environment_factory_unavailable"
+        assert row["error"] == "environment_not_configured"
         assert "counter@1" in row["blocked_reason"]
         # Nothing executed: no environment row and no evidence.
         assert db.execute("SELECT count(*) FROM environments").fetchone()[0] == 0
@@ -311,7 +311,7 @@ def test_missing_or_mismatched_factories_block_before_any_code_runs(tmp_path):
 
     # Changed versions and changed schemas are both mismatches.
     for substitute in (Renamed, Reconfigured):
-        mismatch = harness(store, environments=(substitute,))
+        mismatch = harness(store, environment=(substitute,))
         mismatch.session(identity).resume().wait(15)
         assert mismatch.session(identity).status == "blocked"
 
@@ -337,7 +337,7 @@ def test_a_factory_that_lies_about_its_identity_is_rejected(tmp_path):
             if calls["count"] > 1:
                 self.spec = self.spec.model_copy(update={"modalities": ("json",)})
 
-    local = harness(store, environments=(Drifting,))
+    local = harness(store, environment=(Drifting,))
     session = local.start(Scenario(id="drift", input={}), turns=1)
     session.wait(15)
     assert session.status == "blocked"
@@ -346,11 +346,11 @@ def test_a_factory_that_lies_about_its_identity_is_rejected(tmp_path):
 
 
 def test_public_python_calls_never_select_code_by_import_path(tmp_path):
-    with pytest.raises(TypeError, match="callable objects or classes"):
+    with pytest.raises(TypeError, match="not an instance"):
         EnvironmentHarness(
             tmp_path,
-            environments=("environment_harness.fixtures:SyntheticEnvironment",),
-            agent_factories={"agent": Agent},
+            environment=("environment_harness.fixtures:SyntheticEnvironment",),
+            agents={"agent": Agent},
         )
     local = harness(tmp_path)
     with pytest.raises(ValueError, match="was not supplied"):

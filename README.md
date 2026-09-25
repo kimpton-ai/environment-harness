@@ -79,8 +79,8 @@ class IncrementAgent:
 
 harness = EnvironmentHarness(
     ".local/my-environment",
-    environment_factory=SyntheticEnvironment,
-    agent_factories={"alice": IncrementAgent},
+    environment=SyntheticEnvironment,
+    agents={"alice": IncrementAgent},
 )
 
 environment_session = harness.run(
@@ -113,8 +113,8 @@ from environment_harness.fixtures import SyntheticAgent, SyntheticEnvironment, S
 
 harness = EnvironmentHarness(
     ".local/experiment",
-    environment_factory=SyntheticEnvironment,
-    agent_factories={"agent": SyntheticAgent},
+    environment=SyntheticEnvironment,
+    agents={"agent": SyntheticAgent},
     max_concurrency=4,
 )
 

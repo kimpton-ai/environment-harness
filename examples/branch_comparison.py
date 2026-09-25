@@ -19,8 +19,8 @@ def experiment(directory):
     store = EvidenceStore(directory)
     harness = EnvironmentHarness(
         store,
-        environment_factory=SyntheticEnvironment,
-        agent_factories={"alice": SyntheticAgent, "bob": SyntheticAgent},
+        environment=SyntheticEnvironment,
+        agents={"alice": SyntheticAgent, "bob": SyntheticAgent},
         scoring_versions=("synthetic-total@1",),
         policy=RunPolicy(max_turns=5),
         session_runner=first_three_turns,

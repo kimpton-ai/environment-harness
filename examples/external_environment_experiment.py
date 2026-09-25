@@ -224,8 +224,8 @@ def run_experiment(store, *, turns: int = 3):
     try:
         harness = EnvironmentHarness(
             store,
-            environment_factory=lambda: ExternalReviewEnvironment(client),
-            agent_factories={
+            environment=lambda: ExternalReviewEnvironment(client),
+            agents={
                 "alice": lambda: SyntheticShowcaseAgent(0),
                 "bob": lambda: SyntheticShowcaseAgent(1),
             },

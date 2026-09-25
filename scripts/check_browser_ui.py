@@ -66,8 +66,8 @@ def create_sessions(root: Path) -> tuple[str, str]:
             trajectory = created["id"]
     harness = EnvironmentHarness(
         store,
-        environment_factory=SyntheticEnvironment,
-        agent_factories={"agent": SyntheticAgent},
+        environment=SyntheticEnvironment,
+        agents={"agent": SyntheticAgent},
         max_concurrency=2,
     )
     harness.experiment(

@@ -175,8 +175,8 @@ def run_experiment(store, *, turns: int = 3):
         raise ValueError("the operation example requires at least two turns")
     harness = EnvironmentHarness(
         store,
-        environment_factory=ReviewEnvironment,
-        agent_factories={
+        environment=ReviewEnvironment,
+        agents={
             "alice": lambda: SyntheticShowcaseAgent(0),
             "bob": lambda: SyntheticShowcaseAgent(1),
         },

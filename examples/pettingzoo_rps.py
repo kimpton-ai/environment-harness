@@ -20,10 +20,8 @@ with TemporaryDirectory(prefix="environment-harness-public-") as root:
     try:
         harness = EnvironmentHarness(
             EvidenceStore(root),
-            environment_factory=lambda: PettingZooParallel(
-                native, name="public-rps", version="pettingzoo-1.25.0"
-            ),
-            agent_factories={player: Rock for player in native.possible_agents},
+            environment=lambda: PettingZooParallel(native, name="public-rps", version="pettingzoo-1.25.0"),
+            agents={player: Rock for player in native.possible_agents},
         )
         session = harness.run(Scenario(id="public-rps", input={}), turns=3)
         record = session.record()

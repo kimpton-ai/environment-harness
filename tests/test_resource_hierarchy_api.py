@@ -18,8 +18,8 @@ def service(tmp_path, *, trajectory_ingestion=False):
     store = EvidenceStore(tmp_path)
     harness = EnvironmentHarness(
         store,
-        environment_factory=SyntheticEnvironment,
-        agent_factories={"alice": SyntheticAgent, "bob": SyntheticAgent},
+        environment=SyntheticEnvironment,
+        agents={"alice": SyntheticAgent, "bob": SyntheticAgent},
         scoring_versions=("hierarchy@1",),
         tenant="tenant",
     )
@@ -188,8 +188,8 @@ def test_training_dataset_records_page_and_stream(tmp_path):
     store = EvidenceStore(tmp_path)
     harness = EnvironmentHarness(
         store,
-        environment_factory=SyntheticEnvironment,
-        agent_factories={"alice": SyntheticAgent},
+        environment=SyntheticEnvironment,
+        agents={"alice": SyntheticAgent},
         tenant="tenant",
     )
     # Training datasets require complete, terminal, training-entitled evidence.

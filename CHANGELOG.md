@@ -41,6 +41,19 @@
   `control.lease`, `control.release`, `control.prepare_operation`, and
   `control.dispatch_operation`. The default runner is the exported `run_session`. See
   [Environment authoring](docs/AUTHORING.md).
+- **`EnvironmentHarness` constructor arguments are renamed and one is removed.**
+  `environment_factory=` becomes `environment=`, `agent_factories=` becomes `agents=`, and the
+  separate `environments=` sequence parameter is gone — `environment=` accepts one class or a
+  sequence of them. Passing both previously dropped `environment_factory` silently. Passing an
+  instance now explains that the harness builds a fresh environment per session. The durable
+  blocked reason `environment_factory_unavailable` becomes `environment_not_configured`.
+
+  ```python
+  # before
+  EnvironmentHarness(store, environment_factory=MyEnvironment, agent_factories={"alice": MyAgent})
+  # after
+  EnvironmentHarness(store, environment=MyEnvironment, agents={"alice": MyAgent})
+  ```
 - **`GET /v1/sessions/{id}/invocations` returns `items`**, replacing the `work` key on the removed
   `/v1/environments/{environment}/agent-work` route.
 - **Token-faithful inference capture is now entitled and budgeted.** `RunPolicy.inference_capture`

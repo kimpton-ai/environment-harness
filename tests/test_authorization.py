@@ -241,8 +241,8 @@ def test_the_session_runner_seam_receives_no_runtime_or_access_context(tmp_path)
 
     harness = EnvironmentHarness(
         tmp_path,
-        environment_factory=SyntheticEnvironment,
-        agent_factories={"alice": SyntheticAgent},
+        environment=SyntheticEnvironment,
+        agents={"alice": SyntheticAgent},
         session_runner=inspecting_runner,
     )
     session = harness.run(Scenario(id="seam", input={}), turns=1)
@@ -293,8 +293,8 @@ def test_the_session_runner_seam_receives_no_runtime_or_access_context(tmp_path)
 def test_trusted_local_sdk_requires_no_credential_and_issues_scoped_ones(tmp_path):
     harness = EnvironmentHarness(
         tmp_path,
-        environment_factory=SyntheticEnvironment,
-        agent_factories={"alice": SyntheticAgent},
+        environment=SyntheticEnvironment,
+        agents={"alice": SyntheticAgent},
     )
     session = harness.run(Scenario(id="local", input={}), turns=2)
     assert session.status == "succeeded"
@@ -448,8 +448,8 @@ def test_branch_request_creates_a_child_session_with_lineage(tmp_path):
 
     harness = EnvironmentHarness(
         tmp_path,
-        environment_factory=SyntheticEnvironment,
-        agent_factories={"alice": SyntheticAgent},
+        environment=SyntheticEnvironment,
+        agents={"alice": SyntheticAgent},
         session_runner=three,
     )
     parent = harness.run(Scenario(id="lineage", input={}), turns=4)

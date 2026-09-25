@@ -156,8 +156,8 @@ def test_inexact_continuation_and_unavailable_data_stay_explicit(tmp_path):
 
     harness = EnvironmentHarness(
         tmp_path,
-        environment_factory=SyntheticEnvironment,
-        agent_factories={"alice": Stateless},
+        environment=SyntheticEnvironment,
+        agents={"alice": Stateless},
     )
     session = harness.run(Scenario(id="inexact", input=SyntheticScenarioInput()), turns=1)
     identity = session.checkpoint()["id"]
@@ -367,8 +367,8 @@ def test_legacy_action_row_export_remains_readable(shared):
 
     harness = EnvironmentHarness(
         shared["harness"].store.root / "training",
-        environment_factory=SyntheticEnvironment,
-        agent_factories={"alice": SyntheticAgent},
+        environment=SyntheticEnvironment,
+        agents={"alice": SyntheticAgent},
         tenant="training",
     )
     from environment_harness.contracts import RunPolicy

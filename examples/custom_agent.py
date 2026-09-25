@@ -15,10 +15,8 @@ def main(directory):
     program = Path(__file__).with_name("command_agent.py").resolve()
     harness = EnvironmentHarness(
         EvidenceStore(directory),
-        environment_factory=SyntheticEnvironment,
-        agent_factories={
-            "custom": lambda: CommandAgent([sys.executable, str(program)], "threshold-command@1")
-        },
+        environment=SyntheticEnvironment,
+        agents={"custom": lambda: CommandAgent([sys.executable, str(program)], "threshold-command@1")},
         policy=RunPolicy(max_turns=4),
     )
     session = harness.run(Scenario(id="command-agent", input={}), turns=4)

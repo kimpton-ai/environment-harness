@@ -80,8 +80,8 @@ class ScenarioAgent:
 def test_harness_runs_a_standalone_environment_session(tmp_path):
     harness = EnvironmentHarness(
         tmp_path,
-        environment_factory=ScenarioEnvironment,
-        agent_factories={"agent": ScenarioAgent},
+        environment=ScenarioEnvironment,
+        agents={"agent": ScenarioAgent},
     )
 
     session = harness.run(Scenario(id="standalone", input={"difficulty": 2}), turns=1)
@@ -98,8 +98,8 @@ def test_harness_rejects_a_session_runner_that_does_not_return_the_current_recor
 
     harness = EnvironmentHarness(
         tmp_path,
-        environment_factory=ScenarioEnvironment,
-        agent_factories={"agent": ScenarioAgent},
+        environment=ScenarioEnvironment,
+        agents={"agent": ScenarioAgent},
         session_runner=invalid_runner,
     )
 
@@ -148,8 +148,8 @@ def test_harness_freezes_environment_supplied_operation_specs(tmp_path):
 
     harness = EnvironmentHarness(
         tmp_path,
-        environment_factory=OperableEnvironment,
-        agent_factories={"agent": ScenarioAgent},
+        environment=OperableEnvironment,
+        agents={"agent": ScenarioAgent},
         session_runner=run_with_inspection,
     )
 
@@ -176,8 +176,8 @@ def test_experiment_rejects_invalid_environment_operations_before_queueing(tmp_p
 
     harness = EnvironmentHarness(
         tmp_path,
-        environment_factory=BrokenEnvironment,
-        agent_factories={"agent": ScenarioAgent},
+        environment=BrokenEnvironment,
+        agents={"agent": ScenarioAgent},
     )
     experiment = harness.experiment(
         "Broken operation",
@@ -198,8 +198,8 @@ def test_standalone_rejects_invalid_environment_operations_before_queueing(tmp_p
 
     harness = EnvironmentHarness(
         tmp_path,
-        environment_factory=BrokenEnvironment,
-        agent_factories={"agent": ScenarioAgent},
+        environment=BrokenEnvironment,
+        agents={"agent": ScenarioAgent},
     )
 
     with pytest.raises(Conflict, match="world.inspect.*runtime implementation"):
@@ -210,8 +210,8 @@ def test_standalone_rejects_invalid_environment_operations_before_queueing(tmp_p
 def test_experiment_expands_scenarios_and_trials_reproducibly(tmp_path):
     harness = EnvironmentHarness(
         tmp_path,
-        environment_factory=ScenarioEnvironment,
-        agent_factories={"agent": ScenarioAgent},
+        environment=ScenarioEnvironment,
+        agents={"agent": ScenarioAgent},
         max_concurrency=2,
     )
     scenarios = [
@@ -251,8 +251,8 @@ def test_experiments_share_a_fair_bounded_scheduler(tmp_path):
 
     harness = EnvironmentHarness(
         tmp_path,
-        environment_factory=ScenarioEnvironment,
-        agent_factories={"agent": OrderingAgent},
+        environment=ScenarioEnvironment,
+        agents={"agent": OrderingAgent},
         max_concurrency=1,
     )
     first = harness.experiment(
@@ -273,7 +273,7 @@ def test_experiments_share_a_fair_bounded_scheduler(tmp_path):
 def test_interrupted_experiment_requires_explicit_resume(tmp_path):
     interrupted = False
 
-    def environment_factory():
+    def build_environment():
         nonlocal interrupted
         if current_thread().name.startswith("environment-session") and not interrupted:
             interrupted = True
@@ -282,8 +282,8 @@ def test_interrupted_experiment_requires_explicit_resume(tmp_path):
 
     harness = EnvironmentHarness(
         tmp_path,
-        environment_factory=environment_factory,
-        agent_factories={"agent": ScenarioAgent},
+        environment=build_environment,
+        agents={"agent": ScenarioAgent},
     )
     experiment = harness.experiment("restart", [Scenario(id="recoverable", input={"difficulty": 2})], turns=1)
 
@@ -306,8 +306,8 @@ def test_interrupted_experiment_requires_explicit_resume(tmp_path):
 def test_activity_outbox_is_resumable_for_global_experiment_and_session_streams(tmp_path):
     harness = EnvironmentHarness(
         tmp_path,
-        environment_factory=ScenarioEnvironment,
-        agent_factories={"agent": ScenarioAgent},
+        environment=ScenarioEnvironment,
+        agents={"agent": ScenarioAgent},
     )
     result = harness.experiment("streamed", [Scenario(id="one", input={"difficulty": 1})], turns=1).run()
     token = bearer(harness.store, _AccessContext(tenant="local", subject="reader", policy="trusted-local"))
@@ -333,8 +333,8 @@ def test_activity_outbox_is_resumable_for_global_experiment_and_session_streams(
 def test_activity_snapshot_groups_experiments_and_keeps_standalone_sessions_top_level(tmp_path):
     harness = EnvironmentHarness(
         tmp_path,
-        environment_factory=ScenarioEnvironment,
-        agent_factories={"agent": ScenarioAgent},
+        environment=ScenarioEnvironment,
+        agents={"agent": ScenarioAgent},
     )
     grouped = harness.experiment(
         "grouped", [Scenario(id="one", input={"difficulty": 1})], trials=2, turns=1
@@ -458,8 +458,8 @@ def test_concurrent_progress_counts_and_failure_isolation(tmp_path):
 
     harness = EnvironmentHarness(
         tmp_path,
-        environment_factory=ScenarioEnvironment,
-        agent_factories={"agent": BlockingAgent},
+        environment=ScenarioEnvironment,
+        agents={"agent": BlockingAgent},
         max_concurrency=2,
     )
     experiment = harness.experiment(
@@ -495,8 +495,8 @@ def test_stopping_a_running_environment_session_is_terminal(tmp_path):
 
     harness = EnvironmentHarness(
         tmp_path,
-        environment_factory=ScenarioEnvironment,
-        agent_factories={"agent": BlockingAgent},
+        environment=ScenarioEnvironment,
+        agents={"agent": BlockingAgent},
     )
     session = harness.start(Scenario(id="stop", input={"difficulty": 1}), turns=2)
     assert started.wait(2)
@@ -521,17 +521,17 @@ def test_harness_lifecycle_guards_and_validation_edges(tmp_path):
     with pytest.raises(ValueError, match="limits must be positive"):
         EnvironmentHarness(
             tmp_path / "limits",
-            environment_factory=ScenarioEnvironment,
-            agent_factories={"agent": ScenarioAgent},
+            environment=ScenarioEnvironment,
+            agents={"agent": ScenarioAgent},
             max_concurrency=0,
         )
-    with pytest.raises(ValueError, match="agent factory"):
-        EnvironmentHarness(tmp_path / "agents", environment_factory=ScenarioEnvironment, agent_factories={})
+    with pytest.raises(ValueError, match="at least one agent is required"):
+        EnvironmentHarness(tmp_path / "agents", environment=ScenarioEnvironment, agents={})
 
     harness = EnvironmentHarness(
         tmp_path / "valid",
-        environment_factory=ScenarioEnvironment,
-        agent_factories={"agent": ScenarioAgent},
+        environment=ScenarioEnvironment,
+        agents={"agent": ScenarioAgent},
         max_sessions=2,
     )
     missing = EnvironmentSession(harness, "f" * 32)
@@ -585,8 +585,8 @@ def test_harness_lifecycle_guards_and_validation_edges(tmp_path):
 
     schema_harness = EnvironmentHarness(
         tmp_path / "schema",
-        environment_factory=SchemaEnvironment,
-        agent_factories={"agent": ScenarioAgent},
+        environment=SchemaEnvironment,
+        agents={"agent": ScenarioAgent},
     )
     assert schema_harness._validate_scenario(scenario) == scenario
 
@@ -603,8 +603,8 @@ def test_harness_stops_queued_work_and_enforces_active_limits(tmp_path):
 
     harness = EnvironmentHarness(
         tmp_path / "queued",
-        environment_factory=ScenarioEnvironment,
-        agent_factories={"agent": BlockingAgent},
+        environment=ScenarioEnvironment,
+        agents={"agent": BlockingAgent},
         max_concurrency=1,
         max_sessions=3,
     )
@@ -631,8 +631,8 @@ def test_harness_stops_queued_work_and_enforces_active_limits(tmp_path):
 
     limited = EnvironmentHarness(
         tmp_path / "limited",
-        environment_factory=ScenarioEnvironment,
-        agent_factories={"agent": LimitAgent},
+        environment=ScenarioEnvironment,
+        agents={"agent": LimitAgent},
         max_concurrency=1,
         max_sessions=1,
     )

@@ -293,7 +293,8 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
     construct an authorization-aware object themselves.
     """
 
-    if hasattr(session, "environment_factory"):
+    # Only the harness carries the typed registry; a runtime has a single .environment.
+    if hasattr(session, "environments"):
         session = session._runtime()
     store = session.store
     trajectories = TrajectoryRepository(store)

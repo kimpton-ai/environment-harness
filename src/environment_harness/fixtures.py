@@ -123,8 +123,8 @@ def shared_experiment(store, *, turns: int = 2, tenant: str = "fixture"):
 
     harness = EnvironmentHarness(
         store,
-        environments=(SyntheticEnvironment,),
-        agent_factories={"alice": SyntheticAgent, "bob": SyntheticAgent},
+        environment=(SyntheticEnvironment,),
+        agents={"alice": SyntheticAgent, "bob": SyntheticAgent},
         scoring_versions=("shared-fixture@1",),
         max_concurrency=1,
         tenant=tenant,

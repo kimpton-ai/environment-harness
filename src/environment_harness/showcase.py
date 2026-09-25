@@ -95,8 +95,8 @@ def create_synthetic_experiment_showcase(
     )
     harness = EnvironmentHarness(
         store,
-        environment_factory=SyntheticEnvironment,
-        agent_factories={
+        environment=SyntheticEnvironment,
+        agents={
             "alice": lambda: SyntheticShowcaseAgent(0),
             "bob": lambda: SyntheticShowcaseAgent(1),
         },

@@ -14,8 +14,8 @@ issue constrained EnvironmentHarness credentials.
 ## Local access is not authenticated
 
 ```python
-harness = EnvironmentHarness(".environment-harness", environment_factory=MyEnvironment,
-                             agent_factories={"alice": MyAgent})
+harness = EnvironmentHarness(".environment-harness", environment=MyEnvironment,
+                             agents={"alice": MyAgent})
 ```
 
 No token, configuration file, keychain, or credential chain is consulted. Internally this path

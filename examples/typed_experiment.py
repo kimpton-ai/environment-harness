@@ -14,8 +14,8 @@ from environment_harness.fixtures import (
 def run_experiment(store, *, turns: int = 3):
     harness = EnvironmentHarness(
         store,
-        environment_factory=SyntheticEnvironment,
-        agent_factories={
+        environment=SyntheticEnvironment,
+        agents={
             "alice": lambda: SyntheticShowcaseAgent(0),
             "bob": lambda: SyntheticShowcaseAgent(1),
         },

@@ -154,7 +154,7 @@ The `verifiers` extra is bounded to `>=0.3.1,<0.4`. Its legacy rollout invocatio
 and authorized rows now derive from the canonical trajectory resource rather than the removed
 action-row authority. CI installs the bounded extra and checks that bridge independently.
 
-RLlib episode conversion, RLlib external environments, TRL `environment_factory`, live OpenEnv
+RLlib episode conversion, RLlib external environments, TRL `environment`, live OpenEnv
 training, and a native Verifiers v1 `Episode` converter are intentionally not in the frozen
 `0.3.0rc1` manifest. Those APIs own different execution loops and change independently. They must
 land as optional integrations with real-version fixture tests; EnvironmentHarness must not claim

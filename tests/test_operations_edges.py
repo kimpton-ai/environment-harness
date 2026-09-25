@@ -222,8 +222,8 @@ def test_operation_supporting_guards_and_presentation(tmp_path):
     with pytest.raises(TypeError, match="session_runner must be callable"):
         EnvironmentHarness(
             tmp_path,
-            environment_factory=SyntheticEnvironment,
-            agent_factories={"agent": object},
+            environment=SyntheticEnvironment,
+            agents={"agent": object},
             session_runner=None,
         )
     assert (

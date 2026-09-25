@@ -22,8 +22,8 @@ def main() -> None:
     store = EvidenceStore(args.store)
     harness = EnvironmentHarness(
         store,
-        environment_factory=SyntheticEnvironment,
-        agent_factories={"alice": SyntheticAgent},
+        environment=SyntheticEnvironment,
+        agents={"alice": SyntheticAgent},
     )
     native = harness.run(Scenario(id="walkthrough", input={}), turns=2)
 

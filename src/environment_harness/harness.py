@@ -69,6 +69,26 @@ class EnvironmentReference:
     spec_digest: str
 
 
+def _supplied_environments(environment) -> list[Any]:
+    """Accept one environment class or a sequence of them.
+
+    A class or zero-argument callable is required rather than an instance: the
+    harness builds a fresh environment for each session, so concurrent and
+    sequential runs never share environment state.
+    """
+
+    if environment is None:
+        return []
+    if callable(environment):
+        return [environment]
+    if isinstance(environment, (list, tuple)):
+        return list(environment)
+    raise TypeError(
+        "environment must be a class or zero-argument callable, or a sequence of them, "
+        "not an instance: the harness builds a fresh environment for each session"
+    )
+
+
 class _EnvironmentRegistry:
     """Typed environment factories configured once on one harness instance.
 
@@ -84,7 +104,7 @@ class _EnvironmentRegistry:
         self._order: list[Any] = []
         for factory in factories:
             if not callable(factory):
-                raise TypeError("environment factories must be callable objects or classes")
+                raise TypeError("each environment must be a class or zero-argument callable, not an instance")
             spec = factory().spec  # pyright: ignore[reportAttributeAccessIssue]
             reference = EnvironmentReference(
                 id=spec.id,
@@ -97,7 +117,7 @@ class _EnvironmentRegistry:
             self._by_reference[reference] = factory
             self._order.append(factory)
         if not self._order:
-            raise ValueError("at least one environment factory is required")
+            raise ValueError("at least one environment is required")
 
     @property
     def default(self):
@@ -605,9 +625,8 @@ class EnvironmentHarness:
         self,
         store: EvidenceStore | str | Path,
         *,
-        environment_factory: Callable[[], Any] | None = None,
-        environments: Sequence[Callable[[], Any]] = (),
-        agent_factories: Mapping[str, Callable[[], Any]],
+        environment: Callable[[], Any] | Sequence[Callable[[], Any]] | None = None,
+        agents: Mapping[str, Callable[[], Any]],
         scoring_versions: tuple[str, ...] = (),
         policy: RunPolicy | None = None,
         session_runner: SessionRunner = run_session,
@@ -619,11 +638,10 @@ class EnvironmentHarness:
         if max_sessions < 1 or max_concurrency < 1:
             raise ValueError("session and concurrency limits must be positive")
         self.store = store if isinstance(store, EvidenceStore) else EvidenceStore(store)
-        supplied = list(environments) or ([environment_factory] if environment_factory else [])
-        self.environments = _EnvironmentRegistry(supplied)
-        self.agent_factories = dict(agent_factories)
-        if not self.agent_factories:
-            raise ValueError("at least one agent factory is required")
+        self.environments = _EnvironmentRegistry(_supplied_environments(environment))
+        self.agents = dict(agents)
+        if not self.agents:
+            raise ValueError("at least one agent is required")
         if not callable(session_runner):
             raise TypeError("session_runner must be callable")
         self.scoring_versions = tuple(scoring_versions)
@@ -646,7 +664,7 @@ class EnvironmentHarness:
             self.reconcile()
 
     @property
-    def environment_factory(self) -> Callable[[], Any]:
+    def environment(self) -> Callable[[], Any]:
         """The single configured implementation, when exactly one is supplied."""
 
         return self.environments.default
@@ -744,7 +762,7 @@ class EnvironmentHarness:
     def _advance(self, session: str, turns: int) -> Mapping[str, Any]:
         if turns < 1:
             raise ValueError("turns must be positive")
-        agents = {participant: factory() for participant, factory in self.agent_factories.items()}
+        agents = {participant: factory() for participant, factory in self.agents.items()}
         runtime = _SessionRuntime(self.store, self._session_factory(session)())
         control = SessionControl(runtime, session, self._access)
         return self.session_runner(control, agents, turns=turns)
@@ -768,7 +786,7 @@ class EnvironmentHarness:
         factory = self.environments.resolve(reference)
         if factory is None:
             raise Conflict(
-                "no supplied environment factory reproduces "
+                "no configured environment reproduces "
                 f"{reference.id}@{reference.version} ({reference.spec_digest[:12]})"
             )
         return factory
@@ -1032,7 +1050,7 @@ class EnvironmentHarness:
         reference = self.environments.reference(experiment.factory)
         environment = experiment.factory()
         runtime_operations = environment_operations(environment)
-        preview_agents = {participant: factory() for participant, factory in self.agent_factories.items()}
+        preview_agents = {participant: factory() for participant, factory in self.agents.items()}
         operations = [
             runtime_operations[declaration.name].spec for declaration in environment.spec.operations
         ]
@@ -1263,7 +1281,7 @@ class EnvironmentHarness:
                 # runs; the Session stays blocked for inspection.
                 self._block(job, reference)
                 return
-            agents = {participant: factory_() for participant, factory_ in self.agent_factories.items()}
+            agents = {participant: factory_() for participant, factory_ in self.agents.items()}
             scenario: Scenario[Any] = job["scenario"]
             runtime_operations = environment_operations(environment)
             operations = tuple(
@@ -1335,14 +1353,14 @@ class EnvironmentHarness:
         """Leave a Session durably blocked rather than running substitute code."""
 
         detail = (
-            "no supplied environment factory reproduces "
+            "no configured environment reproduces "
             f"{reference.id}@{reference.version} ({reference.spec_digest[:12]})"
         )
         with self.store.transaction() as db:
             db.execute(
                 "UPDATE session_runs SET status='blocked',error=?,blocked_reason=?,"
                 "latest_activity=?,updated=? WHERE environment=?",
-                ("environment_factory_unavailable", detail, "Blocked", time.time(), job["id"]),
+                ("environment_not_configured", detail, "Blocked", time.time(), job["id"]),
             )
             self._outbox(
                 db,
@@ -1351,7 +1369,7 @@ class EnvironmentHarness:
                     "status": "blocked",
                     "scenario_id": job["scenario"].id,
                     "trial": job["trial"],
-                    "error": "environment_factory_unavailable",
+                    "error": "environment_not_configured",
                     "reason": detail,
                 },
                 experiment=job["experiment"],

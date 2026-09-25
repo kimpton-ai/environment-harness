@@ -71,8 +71,8 @@ def first_turn_only(control, agents, *, turns):
 
 harness = EnvironmentHarness(
     "environments",
-    environment_factory=SyntheticEnvironment,
-    agent_factories={"alice": SyntheticAgent, "bob": SyntheticAgent},
+    environment=SyntheticEnvironment,
+    agents={"alice": SyntheticAgent, "bob": SyntheticAgent},
     session_runner=first_turn_only,
 )
 native = harness.run(Scenario(id="walkthrough", input={}), turns=4)
@@ -123,8 +123,8 @@ RESUME = (
     "from environment_harness import EnvironmentHarness\\n"
     "from environment_harness.fixtures import SyntheticAgent, SyntheticEnvironment\\n"
     "from environment_harness.trajectories import SourceRecord, SourceStatusUpdate\\n"
-    "harness = EnvironmentHarness('environments', environment_factory=SyntheticEnvironment,"
-    " agent_factories={'alice': SyntheticAgent})\\n"
+    "harness = EnvironmentHarness('environments', environment=SyntheticEnvironment,"
+    " agents={'alice': SyntheticAgent})\\n"
     "sources = harness.sources()\\n"
     "status = sources.status(sys.argv[1])\\n"
     "record = SourceRecord.create(id='frame-2', position='2',"
