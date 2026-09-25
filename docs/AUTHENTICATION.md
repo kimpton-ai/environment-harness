@@ -1,34 +1,31 @@
 # Authentication and authorization
 
-EnvironmentHarness implements **no users, groups, organizations, OAuth, or
-RBAC**. It authenticates opaque bearer credentials and resolves each one to an
-identity plus a server-owned access policy. An embedding product such as a
-hosted control plane authenticates its own users and uses the trusted
-administrative seam described below to issue appropriately constrained
-EnvironmentHarness credentials.
+EnvironmentHarness implements **no users, groups, organizations, OAuth, or RBAC**. There are two
+access paths, and only one of them involves a credential:
 
-## Why the four-role model was removed
+| Path | Credential | Boundary |
+| --- | --- | --- |
+| In-process Python and the CLI | **none** | Filesystem permissions on the evidence store |
+| HTTP | opaque bearer token | The server-owned policy persisted beside that token |
 
-Before `0.3.0rc1`, `Principal.role` was a public `Literal` with the values
-`researcher`, `agent`, `scorer`, and `worker`. SDK callers constructed that
-value, examples printed it, requests carried it, and OpenAPI published it as
-`x-roles`.
+An embedding product authenticates its own users however it wishes and uses the in-process seam to
+issue constrained EnvironmentHarness credentials.
 
-That model was wrong in three ways:
+## Local access is not authenticated
 
-1. **They were never user roles.** `agent` described a participant transport,
-   `scorer` described provenance inside a `ScoreReport`, and `worker` described
-   a separate process with its own shared secret. Publishing them as a caller
-   taxonomy invited consumers to model identity around them.
-2. **Callers asserted their own authority.** A caller chose the role that its
-   credential would carry. Authorization belongs to the server.
-3. **It leaked into every surface.** Removing it later would have been a
-   breaking change across the SDK, HTTP API, generated clients, examples, and
-   documentation at once.
+```python
+harness = EnvironmentHarness(".environment-harness", environment_factory=MyEnvironment,
+                             agent_factories={"alice": MyAgent})
+```
 
-`Principal` and `Principal.role` are gone. They are not replaced by `kind`,
-`x-principal-kinds`, or another custom caller taxonomy. OpenAPI publishes only
-its standard HTTP bearer security scheme.
+No token, configuration file, keychain, or credential chain is consulted. Internally this path
+carries a `trusted-local` access context, which is **not a credential**: `EvidenceStore._issue`
+refuses to mint it, so it can never appear on the wire. Whoever can open the store file already has
+full authority over it, exactly as with SQLite, a local MLflow tracking directory, or a Jupyter
+kernel. Protect the store with file permissions; the SDK does not add a second boundary.
+
+The in-process API is also a trusted embedding boundary, not a sandbox. Run untrusted participants
+through scoped HTTP credentials and an isolated backend.
 
 ## The bearer-credential contract
 
@@ -39,185 +36,110 @@ GET /v1/sessions HTTP/1.1
 Authorization: Bearer <opaque-credential>
 ```
 
-The credential is an opaque random string. The server stores its SHA-256 hash
-beside the policy and resource constraints it was issued with; it never trusts
-a policy, permission, role, or scope supplied in a request body, query
-parameter, or header. Adding a field such as `{"policy": "management"}` to a
-request cannot widen access: unknown fields are rejected by the strict command
-models, and the persisted policy is the only input to the authorization check.
+The credential is an opaque random string. The server stores its SHA-256 hash beside the policy and
+resource constraints it was issued with, and never trusts a policy, permission, role, or scope
+supplied in a request body, query parameter, or header. Adding `{"policy": "management"}` to a
+request cannot widen access: strict command models reject unknown fields, and the persisted policy
+is the only input to the check. OpenAPI publishes only the standard HTTP bearer security scheme —
+no `x-roles`, `x-principal-kinds`, or other custom caller taxonomy.
 
-## The three server-owned credential policies
+## The three issuable policies
 
-These names describe internal credential behavior. They are not users,
-organization membership, or public roles.
+These name credential behavior. They are not users, organization membership, or public roles.
 
 | Policy | Issued by | May do |
 | --- | --- | --- |
-| `management` | `environment-harness token`, or `EnvironmentHarness.management_credential()` in an embedding process | The authenticated management surface: create experiments and sessions, run lifecycle commands, read full evidence, register and ingest sources, freeze snapshots and datasets, read recorded training results, and issue participant credentials |
+| `management` | `environment-harness token`, or `EnvironmentHarness.management_credential()` | Create experiments and sessions, run lifecycle commands, read full evidence, register and ingest sources, freeze snapshots and datasets, read recorded training results, and issue participant credentials |
 | `viewer` | the loopback viewer handshake, or `EnvironmentHarness.viewer_credential()` | Read-only inspection. It cannot mutate anything, ingest evidence, create a dataset, or issue a credential |
-| `participant` | only `POST /v1/sessions/{session_id}/participants/{participant_id}/credentials` (or `EnvironmentSession.participant_credential()`) | Observation reads and action submission for **one** session, participant, and generation, plus its own artifacts |
+| `participant` | only `POST /v1/sessions/{id}/participants/{participant}/credentials`, or `EnvironmentSession.participant_credential()` | Observation reads and action submission for **one** session, participant, and generation, plus its own artifacts |
 
-A fourth policy, `trusted-local`, exists only for the in-process Python facade.
-It is never issuable as a credential; `EvidenceStore._issue` rejects it.
+Each exists for a specific reason:
 
-Training integrations are never executed over HTTP, so no issuable policy
-carries `training.execute`. The participant surface is likewise unreachable
-from a management credential: acting as a participant always requires a
-participant-scoped context.
+- **`viewer` is read-only because it is handed out without proof of identity.** `POST /local/connect`
+  returns it to any loopback caller presenting the expected origin, so that the packaged browser UI
+  can connect with no user action. If that token could mutate, opening a browser tab would grant
+  write access to anything able to reach loopback.
+- **`participant` is an experimental-validity control, not only a security control.** The
+  participant is the agent under evaluation. If it could read another participant's observations or
+  evidence outside its turn, the experiment would measure the wrong thing. It is therefore scoped to
+  a `(session, participant, generation)` triple rather than to a caller, and transferring
+  participant authority increments the generation and invalidates the previous token mid-session.
+- **`management` is the ordinary "I own this store" credential** — the closest thing here to a
+  conventional API key.
 
-## The `401` versus `403` boundary
-
-- **`401 unauthorized`** — the credential is missing, malformed, expired,
-  revoked, or otherwise invalid. Authentication failed, so no policy was
-  consulted.
-- **`403 forbidden`** — the credential is valid but its server-owned policy, or
-  its session/participant/generation constraint, denies the operation.
-
-Authorization-sensitive lookups deliberately collapse *missing* and
-*inaccessible* into the same `403` with the same message, so an out-of-scope
-credential cannot enumerate resources. Neither response leaks credential
-material.
-
-## The unauthenticated in-process SDK
-
-The direct Python SDK is a trusted local interface and requires no
-authentication. `EnvironmentHarness` is its sole public execution facade:
-
-```python
-from environment_harness import EnvironmentHarness, Scenario
-
-harness = EnvironmentHarness(
-    ".environment-harness",
-    environment_factory=MyEnvironment,
-    agent_factories={"alice": MyAgent},
-)
-session = harness.run(Scenario(id="demo", input={}), turns=5)
-print(session.status, session.verify())
-```
-
-`harness.run(...)` returns an `EnvironmentSession` handle. The handle is a typed
-domain object: it does not inherit from, expose, or double as the
-authorization-aware runtime, and every public method accepts only domain
-inputs. No public callable accepts or returns a principal, an access context, a
-role, a kind, or a permission list.
-
-Behind the facade, a private `_SessionRuntime` requires a private
-`_AccessContext` on every operation that can observe or mutate session state:
-
-- `EnvironmentHarness` creates a trusted local context;
-- HTTP authentication resolves bearer credentials into policy-constrained
-  contexts; and
-- the session runner derives participant-scoped contexts through
-  `participant_context`, which is the same shape a remote participant
-  credential resolves to.
-
-Because all three paths drive one runtime, local, HTTP, and runner
-authorization cannot drift into separate implementations.
-
-The one public extension point that runs inside a session — a custom
-`SessionRunner` — receives a typed `SessionControl` rather than the runtime and
-the access context. The control binds both internally, so extension code cannot
-forge, widen, or forward an authorization value, and `SessionControl` exposes
-only domain operations. `EvidenceStore` is the exception by design: it is the
-private storage seam that `EnvironmentHarness` drives, not a domain facade, and
-its evidence readers still require an access context. A contract test enumerates
-the domain facades and fails if any of them grows an authorization parameter.
+Training integrations never execute over HTTP, so no issuable policy carries `training.execute`.
+The participant surface is likewise unreachable from a management credential: acting as a
+participant always requires a participant-scoped context.
 
 ## Issuing and constraining participant credentials
 
 ```python
-session = harness.run(scenario, turns=5)
 token = session.participant_credential("alice", ttl=1800)
 ```
 
-or over HTTP with a management credential:
+Issuing one is a separate, purpose-specific operation, so no other route — including authority
+transfer — can mint remote access.
 
-```http
-POST /v1/sessions/{session_id}/participants/alice/credentials
-Authorization: Bearer <management-credential>
+## The `401` versus `403` boundary
 
-{"ttl": 1800}
-```
+- **`401 unauthorized`** — the credential is missing, malformed, expired, revoked, or otherwise
+  invalid. Authentication failed, so no policy was consulted.
+- **`403 forbidden`** — the credential is valid but its policy, or its
+  session/participant/generation constraint, denies the operation.
 
-The issued credential is bound to that session, that participant, and the
-participant's current generation. It cannot read or act outside those bounds:
-transferring participant authority increments the generation and invalidates
-the previous credential. Issuing a participant credential is a separate,
-purpose-specific operation, so no other route — including authority transfer —
-can mint remote access.
+Authorization-sensitive lookups deliberately collapse *missing* and *inaccessible* into the same
+`403` with the same message, so an out-of-scope credential cannot enumerate resources. Neither
+response leaks credential material.
+
+## One runtime, three ways in
+
+A private `_SessionRuntime` requires a private `_AccessContext` on every operation that observes or
+mutates session state. `EnvironmentHarness` supplies a trusted local context, HTTP authentication
+resolves a bearer token into a policy-constrained one, and the session runner derives
+participant-scoped contexts that are the same shape a remote participant credential produces.
+Because all three drive one runtime, local, HTTP, and runner authorization cannot drift apart.
+
+No public callable accepts or returns a principal, access context, role, kind, or permission list.
+A custom `SessionRunner` receives a typed `SessionControl` that binds the runtime and context
+internally, so extension code cannot forge, widen, or forward an authorization value.
+`EvidenceStore` is the deliberate exception: it is the private storage seam, not a domain facade,
+and its evidence readers still take an access context. A contract test enumerates the domain facades
+and fails if any grows an authorization parameter.
 
 ## The worker-protocol secret
 
-The separate worker application created by `create_worker_app` keeps its own
-private shared secret, its own `environment-worker.v1` protocol, its own size
-boundary, and no OpenAPI document. It has no evidence-store access and does not
-become a principal on the public session API. `/v1/worker/call` is not part of
-the main HTTP migration inventory.
-
-## Credential-store migration and forced reissue
-
-Removing `Principal.role` is a **stored-shape** change, not only a wire change.
-The `credentials` table persisted the whole `Principal` as JSON and revalidated
-it on read against a strict `extra="forbid"` model, so every pre-change row
-fails to parse once the field is gone.
-
-The project treats all pre-`0.3.0rc1` stored credentials as disposable and
-accepts a breaking forced reissue rather than carrying the discarded role
-taxonomy into a compatibility mapper. Migration `005_credential_policies`:
-
-- deletes every legacy credential row inside one transaction; and
-- recreates `credentials` with `tenant`, `subject`, `policy`, `session`,
-  `participant`, `generation`, `expires`, and `revoked` columns.
-
-It runs automatically when a SQLite store is opened (recorded in
-`schema_migrations`) and as a numbered SQL migration for PostgreSQL. It is
-idempotent, and it changes no evidence, artifact, or session row.
-
-**After upgrade, every existing bearer token returns `401`.** Callers must
-reissue through `environment-harness token`, the embedding API, or the
-participant-credential operation.
-
-This is the general rule for this project: any change that alters a persisted
-row shape needs its own numbered migration and its own downstream-impact entry.
-Do not justify a credential break by claiming tokens are necessarily
-short-lived — the previous API allowed long TTLs.
-
-## The embedding-product delegation seam
-
-An embedding product may authenticate its own users however it wishes and then
-call the trusted administrative API in-process:
-
-```python
-token = harness.management_credential(subject="acme/user-42", ttl=900)
-```
-
-The product owns its user model, organization scoping, and audit trail.
-EnvironmentHarness owns only the credential's policy and constraints.
-
-Adding a new remote delegation policy later requires a concrete use case, a
-threat-model review, explicit resource and action constraints, and fail-closed
-tests. It does not require changing the public domain models.
+The separate worker application created by `create_worker_app` keeps its own private shared secret,
+its own `environment-worker.v1` protocol, its own size boundary, and no OpenAPI document. It has no
+evidence-store access and is not a caller on the public session API. `/v1/worker/call` is outside
+the HTTP migration inventory.
 
 ## The access registry fingerprint
 
 The registered action vocabulary, the three issuable policies, and their resource-constraint rules
-are digested into one fingerprint. The HTTP migration gate recomputes it, so an authorization change
+digest into one fingerprint. The HTTP migration gate recomputes it, so an authorization change
 cannot hide inside a route rename or a response migration:
 
 ```sh
 uv run python -c "from environment_harness.access import registry_fingerprint; print(registry_fingerprint())"
 ```
 
-Any deliberate change to whether authentication is required, which credential policies may call an
-operation, or how session and participant constraints are evaluated is classified as an
-authorization change. It requires a security rationale and policy-by-policy contract tests. The
-generated tables live in [HTTP migration](HTTP-MIGRATION.md).
+Any deliberate change to whether authentication is required, which policies may call an operation,
+or how session and participant constraints are evaluated is an authorization change. It requires a
+security rationale and policy-by-policy contract tests. The generated tables live in
+[HTTP migration](HTTP-MIGRATION.md).
 
 ## Digest threat model
 
-Canonical digests provide reproducible identity, change detection, and
-evidence-chain integrity when the verifier trusts its copy or source boundary.
-They do **not** authenticate data against an attacker who controls the store. An
-unsigned digest is not proof of provenance or tamper resistance against the
-store operator; authenticity requires the separately specified signature or
-attestation boundary in `docs/PROTOCOL.md`.
+Canonical digests provide reproducible identity, change detection, and evidence-chain integrity when
+the verifier trusts its copy or source boundary. They do **not** authenticate data against an
+attacker who controls the store. An unsigned digest is not proof of provenance or tamper resistance
+against the store operator; authenticity requires the separately specified signature or attestation
+boundary in [Protocol](PROTOCOL.md).
+
+## Upgrading from the removed role model
+
+`Principal` and its `researcher`/`agent`/`scorer`/`worker` values are gone, and every pre-`0.3.0rc1`
+credential row is deleted by migration `005_credential_policies`. See
+[Compatibility](COMPATIBILITY.md#what-upgrading-to-030rc1-does-and-does-not-change) for the
+migration and [the release appendix](RELEASING.md#downstream-impact-appendix) for the required
+consumer changes.
