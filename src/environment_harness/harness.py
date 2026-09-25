@@ -6,7 +6,7 @@ import hashlib
 import json
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import dataclass
@@ -28,6 +28,113 @@ from .store import EvidenceStore, digest, encode, uid
 def _session_seed(seed: int, scenario_id: str, trial: int) -> int:
     material = f"{seed}\0{scenario_id}\0{trial}".encode()
     return int.from_bytes(hashlib.sha256(material).digest()[:8], "big") & ((1 << 63) - 1)
+
+
+SESSION_RUN_COLUMNS = (
+    "environment",
+    "tenant",
+    "experiment",
+    "scenario",
+    "trial",
+    "seed",
+    "status",
+    "error",
+    "turns",
+    "target_turns",
+    "latest_activity",
+    "scenario_body",
+    "created",
+    "updated",
+    "environment_id",
+    "environment_version",
+    "spec_digest",
+    "blocked_reason",
+)
+_INSERT_SESSION_RUN = "INSERT INTO session_runs ({}) VALUES ({})".format(
+    ",".join(SESSION_RUN_COLUMNS), ",".join("?" * len(SESSION_RUN_COLUMNS))
+)
+
+
+@dataclass(frozen=True)
+class EnvironmentReference:
+    """The only environment identity that is ever serialized.
+
+    Recovery matches this frozen reference against the specs produced by the
+    currently supplied factories and verifies the schema/capability digest
+    before scheduling. It never imports persisted text.
+    """
+
+    id: str
+    version: str
+    spec_digest: str
+
+
+class _EnvironmentRegistry:
+    """Typed environment factories configured once on one harness instance.
+
+    This is explicit dependency injection, not a durable Environment resource,
+    mutable global registry, or entry-point discovery system. Factories are
+    selected by object or class identity; only ``(id, version, spec_digest)`` is
+    persisted.
+    """
+
+    def __init__(self, factories):
+        self._by_factory: dict[int, EnvironmentReference] = {}
+        self._by_reference: dict[EnvironmentReference, Any] = {}
+        self._order: list[Any] = []
+        for factory in factories:
+            if not callable(factory):
+                raise TypeError("environment factories must be callable objects or classes")
+            spec = factory().spec  # pyright: ignore[reportAttributeAccessIssue]
+            reference = EnvironmentReference(
+                id=spec.id,
+                version=spec.version,
+                spec_digest=digest(spec.model_dump(mode="json")),
+            )
+            if reference in self._by_reference:
+                raise ValueError(f"duplicate environment factory for {reference.id}@{reference.version}")
+            self._by_factory[id(factory)] = reference
+            self._by_reference[reference] = factory
+            self._order.append(factory)
+        if not self._order:
+            raise ValueError("at least one environment factory is required")
+
+    @property
+    def default(self):
+        if len(self._order) != 1:
+            raise ValueError("select one configured environment implementation explicitly")
+        return self._order[0]
+
+    def reference(self, factory) -> EnvironmentReference:
+        """Return the frozen reference for a supplied typed factory."""
+
+        try:
+            return self._by_factory[id(factory)]
+        except KeyError:
+            raise ValueError("environment implementation was not supplied to this harness") from None
+
+    def resolve(self, reference: EnvironmentReference):
+        """Return the factory registered under ``reference``, or ``None``.
+
+        The registry key is the reference computed from each factory's own spec,
+        so a hit already matches identity and schema digest. Callers verify a
+        freshly constructed instance with :meth:`verify` before execution, which
+        also catches a factory whose spec changes between calls.
+        """
+
+        return self._by_reference.get(reference)
+
+    @staticmethod
+    def verify(environment, reference: EnvironmentReference) -> bool:
+        spec = environment.spec
+        return (
+            EnvironmentReference(
+                id=spec.id,
+                version=spec.version,
+                spec_digest=digest(spec.model_dump(mode="json")),
+            )
+            == reference
+        )
 
 
 class SessionRunner(Protocol):
@@ -294,6 +401,7 @@ class Experiment:
         trials: int,
         seed: int,
         turns: int,
+        factory: Callable[[], Any] | None = None,
     ):
         self.harness = harness
         self.name = name
@@ -301,6 +409,8 @@ class Experiment:
         self.trials = trials
         self.seed = seed
         self.turns = turns
+        # One Experiment freezes exactly one supplied environment implementation.
+        self.factory = factory or harness.environments.default
         self.id = uid()
         self._started = False
 
@@ -378,7 +488,8 @@ class EnvironmentHarness:
         self,
         store: EvidenceStore | str | Path,
         *,
-        environment_factory: Callable[[], Any],
+        environment_factory: Callable[[], Any] | None = None,
+        environments: Sequence[Callable[[], Any]] = (),
         agent_factories: Mapping[str, Callable[[], Any]],
         scoring_versions: tuple[str, ...] = (),
         policy: RunPolicy | None = None,
@@ -386,11 +497,13 @@ class EnvironmentHarness:
         max_sessions: int = 1000,
         max_concurrency: int = 4,
         tenant: str = "local",
+        reconcile: bool = True,
     ):
         if max_sessions < 1 or max_concurrency < 1:
             raise ValueError("session and concurrency limits must be positive")
         self.store = store if isinstance(store, EvidenceStore) else EvidenceStore(store)
-        self.environment_factory = environment_factory
+        supplied = list(environments) or ([environment_factory] if environment_factory else [])
+        self.environments = _EnvironmentRegistry(supplied)
         self.agent_factories = dict(agent_factories)
         if not self.agent_factories:
             raise ValueError("at least one agent factory is required")
@@ -412,9 +525,94 @@ class EnvironmentHarness:
         self._served: dict[str, int] = {}
         self._running_jobs = 0
         self._lock = threading.RLock()
+        if reconcile:
+            self.reconcile()
 
-    def _runtime(self) -> _SessionRuntime:
-        return _SessionRuntime(self.store, self.environment_factory())
+    @property
+    def environment_factory(self) -> Callable[[], Any]:
+        """The single configured implementation, when exactly one is supplied."""
+
+        return self.environments.default
+
+    def reconcile(self) -> dict[str, Any]:
+        """Reconstruct durable work before this process accepts new work.
+
+        The database, not the thread pool, is the source of requested Session
+        work. Reconciliation is idempotent, runs under the store's normal
+        writer-concurrency mechanism, and produces durable activity evidence for
+        every state correction. It assumes no other live process is executing
+        this store's sessions; two processes reconciling concurrently converge
+        on the same corrections without duplicating a Session.
+        """
+
+        interrupted: list[str] = []
+        recovered: list[dict[str, Any]] = []
+        with self.store.transaction() as db:
+            orphaned = db.execute(
+                "SELECT environment,experiment,scenario,trial FROM session_runs "
+                "WHERE tenant=? AND status='running' ORDER BY created",
+                (self.tenant,),
+            ).fetchall()
+            for row in orphaned:
+                db.execute(
+                    "UPDATE session_runs SET status='interrupted',error=?,latest_activity=?,updated=? "
+                    "WHERE environment=? AND status='running'",
+                    ("process_loss", "Interrupted by process loss", time.time(), row["environment"]),
+                )
+                self._outbox(
+                    db,
+                    kind="environment_session.interrupted",
+                    body={
+                        "status": "interrupted",
+                        "scenario_id": row["scenario"],
+                        "trial": row["trial"],
+                        "error": "process_loss",
+                        "reason": "a previous process was lost; explicit resume is required",
+                    },
+                    experiment=row["experiment"],
+                    environment=row["environment"],
+                )
+                interrupted.append(row["environment"])
+            queued = db.execute(
+                "SELECT * FROM session_runs WHERE tenant=? AND status='queued' ORDER BY created,scenario,trial",
+                (self.tenant,),
+            ).fetchall()
+            experiments = {row["experiment"] for row in orphaned} | {row["experiment"] for row in queued}
+            for experiment in sorted(identity for identity in experiments if identity):
+                self._refresh_experiment(db, experiment)
+            candidates = [self._job_from_row(row) for row in queued]
+        with self._lock:
+            for job in candidates:
+                if job["id"] in self._jobs:
+                    continue
+                self._jobs[job["id"]] = job
+                self._schedule_locked(job)
+                recovered.append(job)
+        return {
+            "interrupted": interrupted,
+            "requeued": [job["id"] for job in recovered],
+        }
+
+    def _job_from_row(self, row) -> dict[str, Any]:
+        reference = None
+        if row["environment_id"] and row["spec_digest"]:
+            reference = EnvironmentReference(
+                id=row["environment_id"],
+                version=row["environment_version"],
+                spec_digest=row["spec_digest"],
+            )
+        return {
+            "id": row["environment"],
+            "scenario": Scenario[Any].model_validate_json(row["scenario_body"]),
+            "seed": row["seed"],
+            "turns": row["target_turns"],
+            "experiment": row["experiment"],
+            "trial": row["trial"],
+            "reference": reference,
+        }
+
+    def _runtime(self, factory: Callable[[], Any] | None = None) -> _SessionRuntime:
+        return _SessionRuntime(self.store, (factory or self.environments.default)())
 
     def management_credential(self, *, subject: str = "management", ttl: int = 3600) -> str:
         """Issue an opaque management credential for the authenticated HTTP API."""
@@ -429,13 +627,36 @@ class EnvironmentHarness:
     def _advance(self, session: str, turns: int) -> Mapping[str, Any]:
         if turns < 1:
             raise ValueError("turns must be positive")
-        environment = self.environment_factory()
         agents = {participant: factory() for participant, factory in self.agent_factories.items()}
-        runtime = _SessionRuntime(self.store, environment)
+        runtime = _SessionRuntime(self.store, self._session_factory(session)())
         return self.session_runner(runtime, session, self._access, agents, turns=turns)
 
+    def _session_factory(self, session: str) -> Callable[[], Any]:
+        """Resolve the typed factory that reproduces one Session's frozen reference."""
+
+        with self.store.transaction() as db:
+            row = db.execute(
+                "SELECT environment_id,environment_version,spec_digest FROM session_runs "
+                "WHERE environment=? AND tenant=?",
+                (session, self.tenant),
+            ).fetchone()
+        if row is None or not row["environment_id"]:
+            return self.environments.default
+        reference = EnvironmentReference(
+            id=row["environment_id"],
+            version=row["environment_version"],
+            spec_digest=row["spec_digest"],
+        )
+        factory = self.environments.resolve(reference)
+        if factory is None:
+            raise Conflict(
+                "no supplied environment factory reproduces "
+                f"{reference.id}@{reference.version} ({reference.spec_digest[:12]})"
+            )
+        return factory
+
     def _checkpoint(self, session: str, *, exact_agents: bool) -> Mapping[str, Any]:
-        runtime = self._runtime()
+        runtime = self._runtime(self._session_factory(session))
         lease = runtime.lease(session, self._access, "environment-harness-checkpoint", ttl=60)
         try:
             return runtime.checkpoint(session, self._access, lease, exact_agents=exact_agents)
@@ -457,7 +678,7 @@ class EnvironmentHarness:
             if request.idempotency_key is None
             else digest({"parent": session, "key": request.idempotency_key})[:32]
         )
-        runtime = self._runtime()
+        runtime = self._runtime(self._session_factory(session))
         created = runtime.branch(
             session,
             self._access,
@@ -471,7 +692,7 @@ class EnvironmentHarness:
             existing = db.execute("SELECT * FROM session_runs WHERE environment=?", (child,)).fetchone()
             if existing is None and parent is not None:
                 db.execute(
-                    "INSERT INTO session_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    _INSERT_SESSION_RUN,
                     (
                         child,
                         self.tenant,
@@ -489,6 +710,10 @@ class EnvironmentHarness:
                         parent["scenario_body"],
                         now,
                         now,
+                        parent["environment_id"],
+                        parent["environment_version"],
+                        parent["spec_digest"],
+                        None,
                     ),
                 )
                 self._outbox(
@@ -537,8 +762,8 @@ class EnvironmentHarness:
             ttl=min(ttl, 86400),
         )
 
-    def _validate_scenario(self, scenario: Scenario[Any]) -> Scenario[Any]:
-        environment = self.environment_factory()
+    def _validate_scenario(self, scenario: Scenario[Any], factory=None) -> Scenario[Any]:
+        environment = (factory or self.environments.default)()
         declared = getattr(environment, "scenario_type", None)
         if declared is not None:
             value = TypeAdapter(declared).validate_python(scenario.input)
@@ -557,11 +782,14 @@ class EnvironmentHarness:
         turns: int,
         experiment_id: str | None = None,
         trial: int = 0,
+        factory=None,
     ) -> EnvironmentSession:
         if turns < 1:
             raise ValueError("turns must be positive")
-        environment_operations(self.environment_factory())
-        scenario = self._validate_scenario(scenario)
+        factory = factory or self.environments.default
+        reference = self.environments.reference(factory)
+        environment_operations(factory())
+        scenario = self._validate_scenario(scenario, factory)
         environment_id = uid()
         now = time.time()
         with self.store.transaction() as db:
@@ -572,7 +800,7 @@ class EnvironmentHarness:
             if active >= self.max_sessions:
                 raise Conflict("max_sessions limit reached")
             db.execute(
-                "INSERT INTO session_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                _INSERT_SESSION_RUN,
                 (
                     environment_id,
                     self.tenant,
@@ -588,6 +816,10 @@ class EnvironmentHarness:
                     encode(scenario.model_dump(mode="json")),
                     now,
                     now,
+                    reference.id,
+                    reference.version,
+                    reference.spec_digest,
+                    None,
                 ),
             )
             self._outbox(
@@ -604,17 +836,34 @@ class EnvironmentHarness:
             "turns": turns,
             "experiment": experiment_id,
             "trial": trial,
+            "reference": reference,
         }
         with self._lock:
             self._jobs[environment_id] = job
             self._schedule_locked(job)
         return EnvironmentSession(self, environment_id)
 
-    def start(self, scenario: Scenario[Any], *, seed: int = 0, turns: int = 10) -> EnvironmentSession:
-        return self._reserve(scenario, seed=seed, turns=turns)
+    def start(
+        self,
+        scenario: Scenario[Any],
+        *,
+        seed: int = 0,
+        turns: int = 10,
+        environment: Callable[[], Any] | None = None,
+    ) -> EnvironmentSession:
+        """Queue one session, selecting a supplied typed environment factory."""
 
-    def run(self, scenario: Scenario[Any], *, seed: int = 0, turns: int = 10) -> EnvironmentSession:
-        return self.start(scenario, seed=seed, turns=turns).wait()
+        return self._reserve(scenario, seed=seed, turns=turns, factory=environment)
+
+    def run(
+        self,
+        scenario: Scenario[Any],
+        *,
+        seed: int = 0,
+        turns: int = 10,
+        environment: Callable[[], Any] | None = None,
+    ) -> EnvironmentSession:
+        return self.start(scenario, seed=seed, turns=turns, environment=environment).wait()
 
     def session(self, session_id: str) -> EnvironmentSession:
         """Reconnect to a persisted session by its durable identity."""
@@ -651,12 +900,16 @@ class EnvironmentHarness:
         trials: int = 1,
         seed: int = 0,
         turns: int = 10,
+        environment: Callable[[], Any] | None = None,
     ) -> Experiment:
         if not name.strip():
             raise ValueError("experiment name is required")
         if trials < 1 or turns < 1:
             raise ValueError("trials and turns must be positive")
-        validated = tuple(self._validate_scenario(scenario) for scenario in scenarios)
+        factory = environment or self.environments.default
+        # Fail before queueing when the selected implementation was not supplied.
+        self.environments.reference(factory)
+        validated = tuple(self._validate_scenario(scenario, factory) for scenario in scenarios)
         if not validated:
             raise ValueError("at least one scenario is required")
         ids = [scenario.id for scenario in validated]
@@ -664,10 +917,18 @@ class EnvironmentHarness:
             raise ValueError("scenario IDs must be unique within an experiment")
         if len(validated) * trials > self.max_sessions:
             raise Conflict("experiment exceeds max_sessions")
-        return Experiment(self, name, validated, trials=trials, seed=seed, turns=turns)
+        return Experiment(self, name, validated, trials=trials, seed=seed, turns=turns, factory=factory)
 
     def _start_experiment(self, experiment: Experiment) -> None:
-        environment = self.environment_factory()
+        """Commit the frozen Experiment and every queued Session atomically.
+
+        Only after this transaction commits may the bounded local scheduler
+        claim work; submitting to the thread pool is a post-commit delivery
+        attempt.
+        """
+
+        reference = self.environments.reference(experiment.factory)
+        environment = experiment.factory()
         runtime_operations = environment_operations(environment)
         preview_agents = {participant: factory() for participant, factory in self.agent_factories.items()}
         operations = [
@@ -695,6 +956,11 @@ class EnvironmentHarness:
                 self._agent_spec(name, agent).model_dump(mode="json")
                 for name, agent in preview_agents.items()
             ],
+            "environment_reference": {
+                "id": reference.id,
+                "version": reference.version,
+                "spec_digest": reference.spec_digest,
+            },
             "scoring_versions": list(self.scoring_versions),
             "operations": [operation.model_dump(mode="json") for operation in operations],
             "policy": policy.model_dump(mode="json"),
@@ -745,7 +1011,7 @@ class EnvironmentHarness:
                     environment_id = uid()
                     session_seed = _session_seed(experiment.seed, scenario.id, trial)
                     db.execute(
-                        "INSERT INTO session_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        _INSERT_SESSION_RUN,
                         (
                             environment_id,
                             self.tenant,
@@ -761,6 +1027,10 @@ class EnvironmentHarness:
                             body,
                             now,
                             now,
+                            reference.id,
+                            reference.version,
+                            reference.spec_digest,
+                            None,
                         ),
                     )
                     self._outbox(
@@ -778,6 +1048,7 @@ class EnvironmentHarness:
                             "turns": experiment.turns,
                             "experiment": experiment.id,
                             "trial": trial,
+                            "reference": reference,
                         }
                     )
             self._outbox(
@@ -807,7 +1078,36 @@ class EnvironmentHarness:
                 del self._pending[group]
             self._served[group] += 1
             self._running_jobs += 1
-            self._executor.submit(self._execute_scheduled, job)
+            try:
+                self._executor.submit(self._execute_scheduled, job)
+            except RuntimeError as error:
+                # Submission is a post-commit delivery attempt. The Session stays
+                # durably queued and a later reconciliation retries it without
+                # creating another Session.
+                self._running_jobs -= 1
+                self._pending.setdefault(group, []).insert(0, job)
+                self._served[group] -= 1
+                self._record_submission_failure(job, type(error).__name__)
+                return
+
+    def _record_submission_failure(self, job: dict[str, Any], reason: str) -> None:
+        with self.store.transaction() as db:
+            db.execute(
+                "UPDATE session_runs SET latest_activity=?,updated=? WHERE environment=? AND status='queued'",
+                ("Queued; executor rejected delivery", time.time(), job["id"]),
+            )
+            self._outbox(
+                db,
+                kind="scheduler.submission_failed",
+                body={
+                    "status": "queued",
+                    "scenario_id": job["scenario"].id,
+                    "trial": job["trial"],
+                    "error": reason,
+                },
+                experiment=job["experiment"],
+                environment=job["id"],
+            )
 
     def _execute_scheduled(self, job: dict[str, Any]) -> None:
         try:
@@ -848,9 +1148,20 @@ class EnvironmentHarness:
 
     def _execute(self, job: dict[str, Any]) -> None:
         environment_id = job["id"]
+        reference: EnvironmentReference | None = job.get("reference")
+        factory = self.environments.resolve(reference) if reference is not None else self.environments.default
+        if reference is not None and factory is None:
+            self._block(job, reference)
+            return
+        assert factory is not None
         try:
-            environment = self.environment_factory()
-            agents = {participant: factory() for participant, factory in self.agent_factories.items()}
+            environment = factory()
+            if reference is not None and not self.environments.verify(environment, reference):
+                # A factory that no longer reproduces its frozen identity never
+                # runs; the Session stays blocked for inspection.
+                self._block(job, reference)
+                return
+            agents = {participant: factory_() for participant, factory_ in self.agent_factories.items()}
             scenario: Scenario[Any] = job["scenario"]
             runtime_operations = environment_operations(environment)
             operations = tuple(
@@ -920,6 +1231,35 @@ class EnvironmentHarness:
             activity = "Interrupted" if status == "interrupted" else "Failed"
             self._set_status(environment_id, status, activity, error=type(error).__name__)
 
+    def _block(self, job: dict[str, Any], reference: EnvironmentReference) -> None:
+        """Leave a Session durably blocked rather than running substitute code."""
+
+        detail = (
+            "no supplied environment factory reproduces "
+            f"{reference.id}@{reference.version} ({reference.spec_digest[:12]})"
+        )
+        with self.store.transaction() as db:
+            db.execute(
+                "UPDATE session_runs SET status='blocked',error=?,blocked_reason=?,"
+                "latest_activity=?,updated=? WHERE environment=?",
+                ("environment_factory_unavailable", detail, "Blocked", time.time(), job["id"]),
+            )
+            self._outbox(
+                db,
+                kind="environment_session.blocked",
+                body={
+                    "status": "blocked",
+                    "scenario_id": job["scenario"].id,
+                    "trial": job["trial"],
+                    "error": "environment_factory_unavailable",
+                    "reason": detail,
+                },
+                experiment=job["experiment"],
+                environment=job["id"],
+            )
+            if job["experiment"]:
+                self._refresh_experiment(db, job["experiment"])
+
     def _outbox(
         self,
         db,
@@ -985,10 +1325,14 @@ class EnvironmentHarness:
         queued = counts.get("queued", 0)
         running = counts.get("running", 0)
         failed = counts.get("failed", 0)
-        completed = sum(counts.get(status, 0) for status in ("succeeded", "failed", "stopped", "interrupted"))
+        completed = sum(
+            counts.get(status, 0) for status in ("succeeded", "failed", "stopped", "interrupted", "blocked")
+        )
         total = sum(counts.values())
         if running or queued:
             status = "running" if running else "queued"
+        elif counts.get("blocked", 0):
+            status = "blocked"
         elif counts.get("interrupted", 0):
             status = "interrupted"
         elif counts.get("stopped", 0):
@@ -1047,25 +1391,20 @@ class EnvironmentHarness:
         with self.store.transaction() as db:
             row = db.execute("SELECT 1 FROM environments WHERE id=?", (environment,)).fetchone()
         if row:
-            self._runtime().cancel(environment, self._access)
+            self._runtime(self._session_factory(environment)).cancel(environment, self._access)
         self._set_status(environment, "stopped", "Stopped")
 
     def _resume(self, environment: str) -> None:
+        """Requeue interrupted or blocked work at explicit caller request."""
+
         with self.store.transaction() as db:
             row = db.execute("SELECT * FROM session_runs WHERE environment=?", (environment,)).fetchone()
-            if not row or row["status"] != "interrupted":
-                raise Conflict("only interrupted sessions can resume")
-            job = {
-                "id": environment,
-                "scenario": Scenario[Any].model_validate_json(row["scenario_body"]),
-                "seed": row["seed"],
-                "turns": row["target_turns"],
-                "experiment": row["experiment"],
-                "trial": row["trial"],
-            }
+            if not row or row["status"] not in ("interrupted", "blocked"):
+                raise Conflict("only interrupted or blocked sessions can resume")
+            job = self._job_from_row(row)
             db.execute(
-                "UPDATE session_runs SET status='queued',error=NULL,latest_activity='Queued',updated=? "
-                "WHERE environment=?",
+                "UPDATE session_runs SET status='queued',error=NULL,blocked_reason=NULL,"
+                "latest_activity='Queued',updated=? WHERE environment=?",
                 (time.time(), environment),
             )
             if row["experiment"]:

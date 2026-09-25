@@ -123,7 +123,8 @@ CREATE TABLE IF NOT EXISTS session_runs (
  environment TEXT PRIMARY KEY, tenant TEXT NOT NULL, experiment TEXT, scenario TEXT NOT NULL,
  trial INTEGER NOT NULL, seed INTEGER NOT NULL, status TEXT NOT NULL, error TEXT,
  turns INTEGER NOT NULL DEFAULT 0, target_turns INTEGER NOT NULL,
- latest_activity TEXT, scenario_body TEXT NOT NULL, created REAL NOT NULL, updated REAL NOT NULL);
+ latest_activity TEXT, scenario_body TEXT NOT NULL, created REAL NOT NULL, updated REAL NOT NULL,
+ environment_id TEXT, environment_version TEXT, spec_digest TEXT, blocked_reason TEXT);
 CREATE INDEX IF NOT EXISTS session_runs_experiment ON session_runs(experiment,status,scenario,trial);
 CREATE TABLE IF NOT EXISTS event_outbox (
  id INTEGER PRIMARY KEY AUTOINCREMENT, tenant TEXT NOT NULL, topic TEXT NOT NULL,
@@ -162,7 +163,7 @@ CREATE TRIGGER IF NOT EXISTS training_runs_no_delete BEFORE DELETE ON training_r
 #: ``005_credential_policies`` is the breaking credential migration described in
 #: ``docs/AUTHENTICATION.md``: every pre-0.3.0rc1 row carried the discarded
 #: four-role principal, so the migration deletes all of them and forces reissue.
-LOCAL_MIGRATIONS = ("005_credential_policies",)
+LOCAL_MIGRATIONS = ("005_credential_policies", "006_scheduler_recovery")
 
 
 class EvidenceStore:
@@ -187,6 +188,20 @@ class EvidenceStore:
             for version in LOCAL_MIGRATIONS:
                 if version in applied:
                     continue
+                if version == "006_scheduler_recovery":
+                    # Only the portable environment reference is persisted; a new
+                    # process matches it against its supplied typed factories.
+                    columns = {
+                        row["name"] for row in db.execute("PRAGMA table_info(session_runs)").fetchall()
+                    }
+                    for column in (
+                        "environment_id",
+                        "environment_version",
+                        "spec_digest",
+                        "blocked_reason",
+                    ):
+                        if column not in columns:
+                            db.execute(f"ALTER TABLE session_runs ADD COLUMN {column} TEXT")
                 if version == "005_credential_policies":
                     columns = {row["name"] for row in db.execute("PRAGMA table_info(credentials)").fetchall()}
                     if "principal" in columns:
@@ -395,15 +410,18 @@ class EvidenceStore:
             }
 
         def aggregate_status(children):
+            # Documented, evolvable strings: an unknown state sorts as
+            # attention-worthy rather than raising.
             priority = {
                 "succeeded": 0,
                 "failed": 1,
                 "stopped": 2,
                 "interrupted": 3,
-                "queued": 4,
-                "running": 5,
+                "blocked": 4,
+                "queued": 5,
+                "running": 6,
             }
-            return max(children, key=lambda child: priority[child["status"]])["status"]
+            return max(children, key=lambda child: priority.get(child["status"], 7))["status"]
 
         with self.transaction() as db:
             run_rows = db.execute(

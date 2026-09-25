@@ -337,9 +337,11 @@ def test_numbered_credential_migration_deletes_legacy_rows_and_forces_reissue(tm
     assert store.authenticate(reissued).policy == "management"
 
     # Reconciliation is idempotent: a second open applies nothing further.
+    with store.transaction() as db:
+        applied = {row["version"] for row in db.execute("SELECT version FROM schema_migrations")}
     EvidenceStore(root)
     with store.transaction() as db:
-        assert db.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == 1
+        assert {row["version"] for row in db.execute("SELECT version FROM schema_migrations")} == applied
 
 
 def test_postgres_credential_migration_is_numbered_and_transactional():

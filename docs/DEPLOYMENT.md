@@ -117,6 +117,50 @@ environment.
 
 ## Embed a supplier application
 
+## Durable local scheduling
+
+The database, not the process-local thread pool, is the source of requested Session work. Creating
+an Experiment and all of its Session rows is one transaction; only after it commits does the bounded
+local scheduler claim work. Submitting a job to the thread pool is a post-commit delivery attempt —
+if submission fails, the Session stays durably `queued`, the failure is recorded as scheduler
+activity, and a later `harness.reconcile()` or process restart retries it without creating another
+Session.
+
+Opening a store runs startup reconciliation before the process accepts new work:
+
+- every eligible `queued` Session is reconstructed from its frozen Experiment, Scenario, seed,
+  trial, turn limit, participant, policy, and environment references;
+- a Session left `running` by a lost process becomes `interrupted` with a `process_loss` reason and
+  requires the existing explicit resume; it is never executed twice automatically; and
+- terminal Sessions remain byte-for-byte unchanged.
+
+Reconciliation is idempotent, runs under the store's normal writer-concurrency mechanism, and
+produces durable activity evidence for every state correction. It assumes no other live process is
+executing the same store's sessions. This is a local durable scheduler, not a hosted queue: it adds
+no Redis, worker service, deployment orchestration, cross-machine lease, or remote execution.
+
+### Typed environment factories
+
+Recovered work resolves executable code through typed factories configured once on one
+`EnvironmentHarness`:
+
+```python
+harness = EnvironmentHarness(
+    store,
+    environments=(WarehouseEnvironment, BrowserEnvironment),
+    agent_factories={"alice": MyAgent},
+)
+experiment = harness.experiment("study", scenarios, environment=WarehouseEnvironment)
+```
+
+Python callers supply implementation classes or typed factory objects, never import-path strings.
+Only the portable reference `(id, version, spec_digest)` is serialized. Recovery matches that frozen
+reference against the specs produced by the currently supplied factories and verifies the
+schema/capability digest before scheduling; it never dynamically imports persisted text. A missing,
+duplicate, or mismatched factory leaves the Session `blocked` with a typed, inspectable reason and
+never substitutes another implementation. Supplying the correct factory later makes the same frozen
+Session schedulable through `resume()` without rewriting the Experiment or Session.
+
 `create_app()` is the application seam for a supplier-owned service. Without `local_access`, it
 uses credential mode: `/local/connect` is absent, the viewer shows a credential form, and every API
 request requires a bearer credential.

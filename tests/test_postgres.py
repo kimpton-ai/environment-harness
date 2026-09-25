@@ -204,3 +204,71 @@ def test_explicit_tenant_erasure_preserves_other_tenants_and_refuses_active_writ
     finally:
         with psycopg.connect(dsn, autocommit=True) as connection:
             connection.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(schema)))
+
+
+@pytest.mark.skipif(
+    not os.environ.get("ENVIRONMENT_HARNESS_POSTGRES_URL"),
+    reason="ephemeral PostgreSQL service is not configured",
+)
+def test_postgres_credential_and_scheduler_migrations_apply_and_force_reissue():
+    """The 0.3.0rc1 migrations drop legacy credentials and add the reference columns."""
+
+    import psycopg
+    from psycopg import sql
+
+    from environment_harness.hosted import PostgresEvidenceStore
+
+    class Objects:
+        def put(self, _key, _data):
+            return None
+
+        def get(self, _key):
+            return b""
+
+    dsn = os.environ["ENVIRONMENT_HARNESS_POSTGRES_URL"]
+    schema = "environment_harness_test_" + uuid4().hex
+    store = PostgresEvidenceStore(dsn, Objects(), schema=schema)
+    try:
+        store.initialize()
+        with store.transaction() as database:
+            database.execute(
+                "INSERT INTO credentials (hash,tenant,subject,policy,expires) VALUES (?,?,?,?,?)",
+                ("a" * 64, "tenant", "ops", "management", 9.9e9),
+            )
+            columns = {
+                row["column_name"]
+                for row in database.execute(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema=? AND table_name='credentials'",
+                    (schema,),
+                ).fetchall()
+            }
+            assert "principal" not in columns
+            assert {"policy", "session", "participant", "generation"} <= columns
+            sessions = {
+                row["column_name"]
+                for row in database.execute(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema=? AND table_name='session_runs'",
+                    (schema,),
+                ).fetchall()
+            }
+            assert {
+                "environment_id",
+                "environment_version",
+                "spec_digest",
+                "blocked_reason",
+            } <= sessions
+            applied = {
+                row["version"] for row in database.execute("SELECT version FROM schema_migrations").fetchall()
+            }
+        assert "005_credential_policies.sql" in applied
+        assert "006_scheduler_recovery.sql" in applied
+        # Reapplying is a no-op and does not delete the reissued credential.
+        store.initialize()
+        with store.transaction() as database:
+            assert database.execute("SELECT count(*) FROM credentials").fetchone()[0] == 1
+        assert store.authenticate  # the policy-based resolver is the only reader
+    finally:
+        with psycopg.connect(dsn, autocommit=True) as connection:
+            connection.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(schema)))
