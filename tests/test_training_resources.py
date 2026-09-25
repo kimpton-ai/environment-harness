@@ -383,7 +383,7 @@ def test_dataset_authority_and_lifecycle_rejection_paths(tmp_path, monkeypatch):
             "ambiguous",
         ),
         (
-            [SimpleNamespace(id="action", type="action.executed", data={"reward": float("nan")})],
+            [SimpleNamespace(id="action", type="environment.outcome", data={"reward": float("nan")})],
             "non-finite",
         ),
         (

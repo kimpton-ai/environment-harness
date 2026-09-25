@@ -40,11 +40,23 @@ class VerifiersRolloutConsumer:
 
     def training_rows(self, store, environment, who):
         trajectory = self.trajectory_resource(store, environment, who)
+        records = trajectory["status"]["records"]
+        # A native trace records the attempt and its committed outcome; only the
+        # outcome carries the reward, so an attempt with a matching outcome is
+        # not projected twice.
+        committed = {
+            record["data"].get("action_id") for record in records if record["type"] == "environment.outcome"
+        }
         observations = {}
-        for record in trajectory["status"]["records"]:
-            if record["type"] in ("observation.delivered", "environment.observation"):
+        for record in records:
+            if record["type"] == "environment.observation":
                 observations[record["data"].get("id", record["id"])] = record
-            if record["type"] not in ("action.executed", "agent.action"):
+            if record["type"] == "agent.action" and (
+                record["data"].get("action", {}).get("operation_id") in committed
+                or record["data"].get("operation_id") in committed
+            ):
+                continue
+            if record["type"] not in ("environment.outcome", "agent.action"):
                 continue
             data = record["data"]
             observation = observations.get(data.get("observation_id"))

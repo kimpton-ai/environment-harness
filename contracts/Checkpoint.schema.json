@@ -1,0 +1,358 @@
+{
+  "$defs": {
+    "CheckpointSpec": {
+      "additionalProperties": true,
+      "properties": {
+        "artifacts": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ResourceReference"
+          },
+          "title": "Artifacts",
+          "type": "array"
+        },
+        "environmentReference": {
+          "$ref": "#/$defs/EnvironmentReferenceModel"
+        },
+        "evidenceSequence": {
+          "minimum": 0,
+          "title": "Evidencesequence",
+          "type": "integer"
+        },
+        "evidence_head": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidence Head"
+        },
+        "participants": {
+          "items": {
+            "$ref": "#/$defs/ParticipantContinuation"
+          },
+          "minItems": 1,
+          "title": "Participants",
+          "type": "array"
+        },
+        "revision": {
+          "minimum": 0,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "session": {
+          "$ref": "#/$defs/ResourceReference"
+        },
+        "stateReference": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Statereference",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session",
+        "revision",
+        "environmentReference",
+        "participants",
+        "stateReference",
+        "evidenceSequence"
+      ],
+      "title": "CheckpointSpec",
+      "type": "object"
+    },
+    "CheckpointStatus": {
+      "additionalProperties": true,
+      "properties": {
+        "branchable": {
+          "title": "Branchable",
+          "type": "boolean"
+        },
+        "checkpointDigest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Checkpointdigest",
+          "type": "string"
+        },
+        "exact": {
+          "title": "Exact",
+          "type": "boolean"
+        },
+        "limitations": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Limitations",
+          "type": "array"
+        },
+        "resumable": {
+          "title": "Resumable",
+          "type": "boolean"
+        },
+        "unavailable": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Unavailable",
+          "type": "array"
+        }
+      },
+      "required": [
+        "exact",
+        "resumable",
+        "branchable",
+        "checkpointDigest"
+      ],
+      "title": "CheckpointStatus",
+      "type": "object"
+    },
+    "EnvironmentReferenceModel": {
+      "additionalProperties": true,
+      "description": "The portable environment identity that is serialized in every resource.\n\nExecutable code is resolved from typed factories supplied to one harness;\nno resource carries an import path, callable, or provider object.",
+      "properties": {
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "specDigest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Specdigest",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "specDigest"
+      ],
+      "title": "EnvironmentReferenceModel",
+      "type": "object"
+    },
+    "ParticipantContinuation": {
+      "additionalProperties": true,
+      "description": "Whether one participant can continue exactly from this Checkpoint.",
+      "properties": {
+        "exact": {
+          "title": "Exact",
+          "type": "boolean"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "implementation": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Implementation",
+          "type": "string"
+        },
+        "policyVersion": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Policyversion",
+          "type": "string"
+        },
+        "unavailable": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Unavailable",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "implementation",
+        "policyVersion",
+        "exact"
+      ],
+      "title": "ParticipantContinuation",
+      "type": "object"
+    },
+    "ResourceFeatures": {
+      "additionalProperties": true,
+      "properties": {
+        "optional": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Optional",
+          "type": "array"
+        },
+        "required": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Required",
+          "type": "array"
+        }
+      },
+      "required": [
+        "required",
+        "optional"
+      ],
+      "title": "ResourceFeatures",
+      "type": "object"
+    },
+    "ResourceMetadata": {
+      "additionalProperties": true,
+      "properties": {
+        "createdAt": {
+          "minLength": 1,
+          "title": "Createdat",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Labels",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "createdAt",
+        "labels"
+      ],
+      "title": "ResourceMetadata",
+      "type": "object"
+    },
+    "ResourceReference": {
+      "additionalProperties": true,
+      "description": "Enough identity to avoid mutable-name ambiguity across resources.",
+      "properties": {
+        "apiVersion": {
+          "default": "environmentharness.dev/v1alpha1",
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Apiversion",
+          "type": "string"
+        },
+        "digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Digest"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Revision"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "title": "ResourceReference",
+      "type": "object"
+    }
+  },
+  "$id": "urn:environment-harness:v1:Checkpoint",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Immutable resumable state for one Session revision.\n\nA Checkpoint exists to resume or branch execution and may reference private\nopaque continuation state. It is not an authorized evidence projection; use\n`TrajectorySnapshot` for repeatable inspection and export.",
+  "properties": {
+    "apiVersion": {
+      "const": "environmentharness.dev/v1alpha1",
+      "title": "Apiversion",
+      "type": "string"
+    },
+    "extensions": {
+      "additionalProperties": true,
+      "title": "Extensions",
+      "type": "object"
+    },
+    "features": {
+      "$ref": "#/$defs/ResourceFeatures"
+    },
+    "kind": {
+      "const": "Checkpoint",
+      "title": "Kind",
+      "type": "string"
+    },
+    "metadata": {
+      "$ref": "#/$defs/ResourceMetadata"
+    },
+    "spec": {
+      "$ref": "#/$defs/CheckpointSpec"
+    },
+    "status": {
+      "$ref": "#/$defs/CheckpointStatus"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "features",
+    "spec",
+    "status",
+    "extensions"
+  ],
+  "title": "Checkpoint",
+  "type": "object"
+}

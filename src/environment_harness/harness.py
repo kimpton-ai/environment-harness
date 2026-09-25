@@ -252,6 +252,19 @@ class EnvironmentSession:
 
         return TrajectoryRepository(self._harness.store).freeze(self._session_id, self._harness._access)
 
+    def resource(self):
+        """Return the portable ``Session`` resource for this handle."""
+
+        return self._harness.resources().session(self._session_id, self._harness._access)
+
+    def checkpoint_resources(self, *, limit: int = 100):
+        """Return the portable ``Checkpoint`` resources frozen for this session."""
+
+        return self._harness.resources().checkpoints(self._session_id, self._harness._access, limit=limit)
+
+    def checkpoint_resource(self, checkpoint: str):
+        return self._harness.resources().checkpoint(self._session_id, checkpoint, self._harness._access)
+
     def checkpoint(self, *, exact_agents: bool = False) -> dict[str, Any]:
         """Freeze immutable resumable state for this session revision."""
 
@@ -456,6 +469,18 @@ class Experiment:
             if session.status == "interrupted":
                 session.resume()
         return self
+
+    def resource(self):
+        """Return the portable ``Experiment`` resource for this handle."""
+
+        return self.harness.resources().experiment(self.id, self.harness._access)
+
+    def scenario_set(self):
+        """Return the portable ``ScenarioSet`` this experiment froze as input."""
+
+        return self.harness.resources().scenario_set(
+            self.resource().spec.scenario_set.id, self.harness._access
+        )
 
     def result(self) -> ExperimentResult:
         with self.harness.store.transaction() as db:
@@ -737,6 +762,28 @@ class EnvironmentHarness:
         from .evaluation import compare as compare_sessions
 
         return compare_sessions(self.store, list(sessions), self._access)
+
+    def resources(self):
+        """Return the portable experiment-resource projection for this store."""
+
+        from .resources import ResourceProjection
+
+        return ResourceProjection(self.store)
+
+    def experiment_resources(self, *, limit: int = 100):
+        from .resources import ResourceProjection
+
+        return ResourceProjection(self.store).experiments(self._access, limit=limit)
+
+    def session_resources(self, *, experiment: str | None = None, limit: int = 100):
+        from .resources import ResourceProjection
+
+        return ResourceProjection(self.store).sessions(self._access, experiment=experiment, limit=limit)
+
+    def scenario_sets(self, *, limit: int = 100):
+        from .resources import ResourceProjection
+
+        return ResourceProjection(self.store).scenario_sets(self._access, limit=limit)
 
     def sources(self) -> TrajectoryAccess:
         """Return the trusted local trajectory, source, and dataset surface."""

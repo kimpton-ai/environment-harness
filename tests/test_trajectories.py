@@ -183,10 +183,14 @@ def test_repository_projects_existing_evidence_without_creating_another_journal(
     trajectory = TrajectoryRepository(store).get(environment_id, researcher)
 
     assert trajectory.spec.manifest.source.run_id == environment_id
+    # Native event kinds project onto the canonical record vocabulary.
     assert [record.type for record in trajectory.status.records] == [
         "session.created",
-        "observation.delivered",
+        "environment.observation",
     ]
+    assert trajectory.status.records[1].extensions["environmentharness.dev/eventKind"] == (
+        "observation.delivered"
+    )
     assert trajectory.status.records[1].causes == (trajectory.status.records[0].id,)
     assert trajectory.status.evidence_head == list(store.replay(environment_id, researcher))[-1]["hash"]
 

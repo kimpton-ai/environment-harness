@@ -235,7 +235,7 @@ class TrainingRepository:
 
         ready = False
         for record in trajectory.status.records:
-            if record.type == "action.executed" and isinstance(record.data, dict):
+            if record.type == "environment.outcome" and isinstance(record.data, dict):
                 value = record.data.get("reward")
                 if value is not None:
                     if type(value) not in (int, float) or not math.isfinite(value):

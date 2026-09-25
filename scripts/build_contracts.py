@@ -2,7 +2,7 @@ import json
 import sys
 from pathlib import Path
 
-from environment_harness import contracts, training, trajectories
+from environment_harness import contracts, resources, training, trajectories
 
 root = Path(__file__).resolve().parents[1]
 models = (
@@ -19,6 +19,7 @@ models = (
     (contracts, "ActivityScenario"),
     (contracts, "ActivityExperiment"),
     (contracts, "ActivityHierarchy"),
+    (contracts, "BranchRequest"),
     (contracts, "Action"),
     (contracts, "Transition"),
     (contracts, "Finding"),
@@ -30,6 +31,10 @@ models = (
     (trajectories, "SourceIngestionBatch"),
     (trajectories, "SourceStatus"),
     (trajectories, "SourceStatusUpdate"),
+    (resources, "ScenarioSet"),
+    (resources, "Experiment"),
+    (resources, "Session"),
+    (resources, "Checkpoint"),
     (trajectories, "Policy"),
     (trajectories, "Trajectory"),
     (trajectories, "TrajectorySnapshot"),

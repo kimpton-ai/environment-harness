@@ -216,6 +216,7 @@ the browser server never executes them. See [Frozen datasets and local training 
 
 | Goal | Guide |
 | --- | --- |
+| Look up a resource, command, protocol, or status dimension | [Data models](https://github.com/kimpton-ai/environment-harness/blob/main/docs/DATA-MODELS.md) |
 | Import, inspect, snapshot, and export trajectories | [Trajectories](https://github.com/kimpton-ai/environment-harness/blob/main/docs/TRAJECTORIES.md) |
 | Freeze datasets and invoke local training integrations | [Training](https://github.com/kimpton-ai/environment-harness/blob/main/docs/TRAINING.md) |
 | Connect a Python agent, model integration, or JSON program | [Agent integration](https://github.com/kimpton-ai/environment-harness/blob/main/docs/AGENT-INTEGRATION.md) |

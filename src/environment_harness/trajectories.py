@@ -15,6 +15,59 @@ from .store import digest, encode
 
 API_VERSION = "environmentharness.dev/v1alpha1"
 
+#: The canonical record vocabulary this contract owns. Third parties add
+#: reverse-domain namespaced types instead of extending this set.
+CORE_RECORD_TYPES = (
+    "environment.observation",
+    "decision.requested",
+    "decision.selected",
+    "agent.action",
+    "inference.generation",
+    "environment.reward",
+    "environment.operation",
+    "environment.outcome",
+    "evaluation.report",
+    "artifact.reference",
+)
+
+#: First-party native lifecycle records. They are core types rather than
+#: extensions, but they are not part of the canonical causal vocabulary above.
+NATIVE_RECORD_TYPES = (
+    "session.created",
+    "session.paused",
+    "session.cancelled",
+    "session.resumed",
+    "session.branched",
+    "agent.dispatched",
+    "agent.reconciled",
+    "environment.transition",
+    "environment.event",
+    "phase.closed",
+    "feed.ingested",
+    "participant.memory",
+    "authority.transferred",
+    "checkpoint.committed",
+    "outcomes.finalized",
+    "operation.intent",
+    "operation.dispatched",
+    "operation.cancelled",
+)
+
+#: Map the durable native event kind onto its canonical record type. Kinds that
+#: are absent keep their own first-party type.
+NATIVE_RECORD_MAPPING = {
+    "observation.delivered": "environment.observation",
+    "action.attempted": "agent.action",
+    "action.executed": "environment.outcome",
+    "transition.committed": "environment.transition",
+    "operation.receipt": "environment.operation",
+    "report": "evaluation.report",
+    "artifact": "artifact.reference",
+    "model.request": "inference.generation",
+    "model.response": "inference.generation",
+    "model.failure": "inference.generation",
+}
+
 
 class SourceRegistration(Record):
     namespace: str = Field(
@@ -384,10 +437,15 @@ class ResourceRegistry:
     """Resolve portable resources by their explicit version and kind."""
 
     def __init__(self, *, supported_features=()):
+        from .resources import Checkpoint, Experiment, ScenarioSet, Session
         from .training import TrainingRun, TrajectoryDataset
 
         self.supported_features = frozenset(supported_features)
         self._models: dict[tuple[str, str], type[BaseModel]] = {
+            (API_VERSION, "ScenarioSet"): ScenarioSet,
+            (API_VERSION, "Experiment"): Experiment,
+            (API_VERSION, "Session"): Session,
+            (API_VERSION, "Checkpoint"): Checkpoint,
             (API_VERSION, "Policy"): Policy,
             (API_VERSION, "Trajectory"): Trajectory,
             (API_VERSION, "TrajectorySnapshot"): TrajectorySnapshot,
@@ -395,18 +453,7 @@ class ResourceRegistry:
             (API_VERSION, "TrainingRun"): TrainingRun,
         }
         self._record_models: dict[str, type[TrajectoryRecord]] = {}
-        self._built_in_record_types = frozenset(
-            {
-                "environment.observation",
-                "agent.action",
-                "inference.generation",
-                "environment.reward",
-                "environment.operation",
-                "environment.outcome",
-                "evaluation.report",
-                "artifact.reference",
-            }
-        )
+        self._built_in_record_types = frozenset(CORE_RECORD_TYPES) | frozenset(NATIVE_RECORD_TYPES)
 
     def register(self, api_version: str, kind: str, model: type[BaseModel]):
         key = (api_version, kind)
@@ -434,10 +481,10 @@ class ResourceRegistry:
         return model.model_validate(value)
 
     def register_record(self, record_type: str, model: type[TrajectoryRecord]):
-        if not _extension_record_type(record_type):
-            raise ValueError("extension record type must use a reverse-domain namespace")
         if record_type in self._record_models or record_type in self._built_in_record_types:
             raise Conflict(f"record contract already registered: {record_type}")
+        if not _extension_record_type(record_type):
+            raise ValueError("extension record type must use a reverse-domain namespace")
         self._record_models[record_type] = model
 
     def decode_record(self, value: Json) -> TrajectoryRecord:
@@ -452,6 +499,9 @@ class ResourceRegistry:
         if not _extension_record_type(record_type):
             raise Unsupported("unknown record type must use a reverse-domain namespaced identifier")
         return ExtensionRecord.model_validate(value)
+
+
+ALL_RECORD_TYPES = frozenset(CORE_RECORD_TYPES) | frozenset(NATIVE_RECORD_TYPES)
 
 
 def _extension_record_type(value: str) -> bool:
@@ -662,9 +712,14 @@ class TrajectoryRepository:
         if participant is None and len(event["audience"]) == 1:
             participant = event["audience"][0]
         wall_time = event["event_time"] if event["event_time"] is not None else event["ingested"]
+        record_type = NATIVE_RECORD_MAPPING.get(event["kind"], event["kind"])
+        if record_type not in ALL_RECORD_TYPES:
+            # An environment-declared event keeps its kind inside a first-party
+            # container rather than pretending to be a canonical record.
+            record_type = "environment.event"
         return TrajectoryRecord.model_validate(
             {
-                "type": event["kind"],
+                "type": record_type,
                 "id": "event-" + event["hash"],
                 "sequence": event["seq"],
                 "segment": segment,
@@ -680,6 +735,7 @@ class TrajectoryRepository:
                     "environmentharness.dev/sourceHash": event["hash"],
                     "environmentharness.dev/previousHash": event["previous"],
                     "environmentharness.dev/audience": event["audience"],
+                    "environmentharness.dev/eventKind": event["kind"],
                 },
             }
         )
