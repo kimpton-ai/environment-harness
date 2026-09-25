@@ -57,11 +57,14 @@ Landed since the baseline:
 
 Remaining before the candidate:
 
-- Confirm the [downstream-impact appendix](RELEASING.md#downstream-impact-appendix) rows against the
-  actual consumer. The rows are derived from this repository's own breaking changes; someone with
-  EvalRouter visibility must verify they are complete and that `0.2.4rc2` is its last compatible pin.
-- The coordinated manifest freeze and the `0.3.0rc1` version bump itself, through the
-  *Prepare release pull request* workflow on its own `release/` branch merged last.
+- The `0.3.0rc1` version bump, through the *Prepare release pull request* workflow on its own
+  `release/` branch merged last.
+
+The candidate manifest is frozen: see
+[Frozen `0.3.0rc1` manifest](RELEASING.md#frozen-030rc1-manifest) for the exact package set,
+runtime, public surface, wire contracts, generated artifacts, migrations, and exclusions that will
+be published, and the [downstream-impact appendix](RELEASING.md#downstream-impact-appendix) for
+every breaking change and its migration.
 
 Explicitly outside the candidate manifest: Parquet export, RLlib conversion and external-environment
 support, TRL integration, live OpenEnv training, remote training workers, and the separately owned

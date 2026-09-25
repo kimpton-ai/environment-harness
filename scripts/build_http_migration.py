@@ -753,8 +753,8 @@ def table(manifest: dict, current: dict[str, dict]) -> str:
         "(../contracts/migrations/http-0.2-to-0.3.json),",
         "and CI regenerates this page so documentation cannot drift from enforcement.",
         "",
-        "Consumers such as EvalRouter must pin "
-        f"`environment-harness=={manifest['from']}` until their adapter is migrated.",
+        "A consumer that has not migrated must pin "
+        f"`environment-harness=={manifest['from']}` rather than upgrade partway.",
         "",
         "## Route and contract changes",
         "",

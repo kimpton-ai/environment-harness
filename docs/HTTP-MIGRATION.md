@@ -6,7 +6,7 @@ Every operation published by `environment-harness==0.2.4rc2` is classified exact
 machine-readable source is [`contracts/migrations/http-0.2-to-0.3.json`](../contracts/migrations/http-0.2-to-0.3.json),
 and CI regenerates this page so documentation cannot drift from enforcement.
 
-Consumers such as EvalRouter must pin `environment-harness==0.2.4rc2` until their adapter is migrated.
+A consumer that has not migrated must pin `environment-harness==0.2.4rc2` rather than upgrade partway.
 
 ## Route and contract changes
 

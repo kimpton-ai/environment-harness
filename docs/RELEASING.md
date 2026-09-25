@@ -52,40 +52,70 @@ Use a release candidate when the release needs real installation and integration
 the stable version. PyPI prereleases are immutable production-PyPI releases, but ordinary
 `pip install environment-harness` does not select them.
 
-### Trajectory program manifest
+### Frozen `0.3.0rc1` manifest
 
 The trajectory-contract program uses exactly one coordinated candidate, `0.3.0rc1`, followed by
 `0.3.0`. Do not introduce alpha, beta, or routine additional candidates to stage internal
-workstreams. Freeze the candidate manifest only after every selected core feature, schema, client,
-viewer asset, document, and optional integration has passed its release gate. The final keeps the
-same package set and public feature surface.
+workstreams. **This manifest is frozen.** `0.3.0` publishes the same package set and the same
+public feature surface; an additional candidate is permitted only to fix a qualification failure
+found in `0.3.0rc1`, never to add scope.
 
-The core manifest includes the trajectory/resource envelope, native and historical projection,
-source health and bounded ingestion, snapshots/JSONL export, training-entitled datasets, local
-integration receipts, correlated inference evidence, the read-only viewer, and the bounded
-Verifiers legacy bridge. RLlib, TRL, live OpenEnv training, Parquet, remote training workers, and
-the separately owned **Pluggable Decision-Selection Seam** are excluded unless their complete code,
-dependency, fixture, documentation, and distribution gates land before the manifest freezes.
+**Packages.** Three artifacts on one coordinated version: the Python wheel, the Python source
+distribution, and the TypeScript client tarball attached to the GitHub release. No npm registry
+publication.
 
-A separately installable decision runtime keeps its own version and release gate, but when it is
-selected for the manifest it is published in the same candidate/final release event rather than on
-its own timeline. See [Decision runtime](DECISION-RUNTIME.md).
+**Runtime.** Python `>=3.12`. Base dependencies `pydantic>=2.12.5,<3` and `jsonschema>=4.26,<5`.
+Extras: `server`, `postgres`, `modal`, `pettingzoo`, `signatures`, `mcp`, `verifiers`.
+
+**Public Python surface.** The 24 names in `environment_harness.__all__`. `EnvironmentHarness` is
+the only local-execution facade; `EnvironmentSession` and `SessionControl` are its typed handles.
+No public callable exposes a principal, access context, role, kind, or permission.
+
+**Wire contracts.** Protocol `environment-session.v1`; portable resources
+`environmentharness.dev/v1alpha1`. The canonical short HTTP hierarchy with a typed management-list
+envelope, ETags, `Location` headers, one stable error taxonomy, and the three declared capabilities
+`historical-ingestion`, `participant-credentials`, `local-viewer`. All 40 frozen 0.2 operations are
+classified exactly once in `contracts/migrations/http-0.2-to-0.3.json`.
+
+**Generated artifacts.** 36 JSON Schemas and `contracts/openapi.json` under `contracts/`; the
+checked-in viewer assets under `src/environment_harness/viewer/`; the generated
+[HTTP migration](HTTP-MIGRATION.md) table. Every one has a `--check` drift gate.
+
+**Storage.** Migrations `001` through `006`, applied automatically for SQLite and through
+`PostgresEvidenceStore.initialize()` for PostgreSQL.
+
+**Credentials.** Three issuable server-owned policies — `admin`, `viewer`, `participant` — plus the
+non-issuable in-process `trusted-local` context.
+
+**Viewer.** Four global destinations, one contextual left navigation per resource, ancestry
+breadcrumbs, and the reserved-height context bar.
+
+**Documentation.** `README.md`, `packages/typescript/README.md`, `CHANGELOG.md`, and the 20 guides
+under `docs/`.
+
+**Explicitly excluded.** Parquet export, RLlib conversion and external-environment support, TRL
+integration, live OpenEnv training, remote training workers and distributed decision workers, and
+the separately owned **Pluggable Decision-Selection Seam**. None of these is a dependency of the
+trajectory foundation. The bounded Verifiers legacy bridge is included and pinned to
+`>=0.3.1,<0.4`.
+
+A separately installable decision runtime keeps its own version and release gate. If it is ever
+added to a manifest it ships in the same candidate/final release event rather than on its own
+timeline. See [Decision runtime](DECISION-RUNTIME.md).
 
 ### Downstream-impact appendix
 
-Attach this appendix to the release PR. It is derived from this repository's own breaking changes,
-so it can be written and reviewed here without copying private consumer code, deployment state,
-supplier data, or credentials into the repository or the release artifacts.
+`0.3.0rc1` is broadly incompatible with `0.2.x`. This appendix is the complete list of breaking
+changes and their required migrations, derived from this repository's own diff, so it can be
+written and reviewed here without copying consumer code, deployment state, or credentials into the
+repository or the release artifacts.
 
 **Last compatible pin for any consumer that has not migrated: `environment-harness==0.2.4rc2`.**
-An unqualified downstream deployment must stay at that pin. Completing a downstream migration is
-*not* a prerequisite for choosing the correct EnvironmentHarness contract here, but such a
-deployment must not upgrade past its compatible pin.
+An unqualified deployment must stay at that pin rather than upgrade partway.
 
-The known-incompatible consumer at the time of this program is **EvalRouter**. Each row below is
-mechanical: it names the change, what it affects, and the required adapter, converter, or
-migration. Confirm each row against the consumer before publishing, and add a row for any other
-consumer discovered during qualification.
+No downstream consumer is known to depend on `0.2.x` at the time of this freeze. Add a row here for
+any breaking change a later release introduces, and re-verify the table against any consumer that
+adopts the SDK before `0.3.0`.
 
 | Change | Affected API or stored representation | Required migration |
 | --- | --- | --- |
@@ -108,9 +138,6 @@ Two rows deliberately have no converter: the credential deletion and the `Princi
 project accepts a forced reissue and a hard compile break rather than carrying the discarded role
 taxonomy or a principal compatibility mapper into `0.3`. Do not justify either by claiming tokens
 are necessarily short-lived — the previous API allowed long TTLs.
-
-No EvalRouter change is implemented in this repository. EvalRouter may be consulted as
-implementation evidence only.
 
 ## Prepare a release candidate
 
