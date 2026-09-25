@@ -39,8 +39,15 @@ class VerifiersRolloutConsumer:
         )
 
     def training_rows(self, store, environment, who):
+        from ..trajectories import TrajectoryRepository
+
         trajectory = self.trajectory_resource(store, environment, who)
-        records = trajectory["status"]["records"]
+        # Convert at the integration boundary from the paged canonical record
+        # stream; the canonical resource never materializes its records.
+        records = [
+            record.model_dump(mode="json", by_alias=True)
+            for record in TrajectoryRepository(store).stream_records(environment, who)
+        ]
         # A native trace records the attempt and its committed outcome; only the
         # outcome carries the reward, so an attempt with a matching outcome is
         # not projected twice.

@@ -60,23 +60,9 @@ def test_trajectory_round_trips_one_segment_and_causal_record():
                     "execution": {"state": "completed"},
                 }
             ],
-            "records": [
-                {
-                    "type": "environment.observation",
-                    "id": "record-1",
-                    "sequence": 1,
-                    "segment": "segment-1",
-                    "participant": "alice",
-                    "revision": 0,
-                    "causes": [],
-                    "time": {
-                        "wallTime": "2026-09-22T15:00:00Z",
-                        "native": [{"clock": "environment.tick", "value": 18}],
-                    },
-                    "data": {"body": {"position": [1, 2]}},
-                    "extensions": {},
-                }
-            ],
+            "recordCount": 1,
+            "sequenceStart": 1,
+            "sequenceEnd": 1,
             "collection": {"state": "complete"},
             "execution": {"state": "completed"},
             "termination": {"terminated": True, "truncated": False, "reason": "goal"},
@@ -89,6 +75,8 @@ def test_trajectory_round_trips_one_segment_and_causal_record():
 
     trajectory = Trajectory.model_validate(payload)
 
+    # The detail projection never materializes a record tuple.
+    assert not hasattr(trajectory.status, "records")
     assert trajectory.model_dump(mode="json", by_alias=True) == payload
 
 
@@ -180,18 +168,19 @@ def test_repository_projects_existing_evidence_without_creating_another_journal(
     environment_id = session.create(spec, researcher)["id"]
     session.observe(environment_id, researcher, "alice")
 
-    trajectory = TrajectoryRepository(store).get(environment_id, researcher)
+    repository = TrajectoryRepository(store)
+    trajectory = repository.get(environment_id, researcher)
+    records = list(repository.stream_records(environment_id, researcher))
 
     assert trajectory.spec.manifest.source.run_id == environment_id
+    assert trajectory.status.record_count == len(records)
     # Native event kinds project onto the canonical record vocabulary.
-    assert [record.type for record in trajectory.status.records] == [
+    assert [record.type for record in records] == [
         "session.created",
         "environment.observation",
     ]
-    assert trajectory.status.records[1].extensions["environmentharness.dev/eventKind"] == (
-        "observation.delivered"
-    )
-    assert trajectory.status.records[1].causes == (trajectory.status.records[0].id,)
+    assert records[1].extensions["environmentharness.dev/eventKind"] == "observation.delivered"
+    assert records[1].causes == (records[0].id,)
     assert trajectory.status.evidence_head == list(store.replay(environment_id, researcher))[-1]["hash"]
 
 
@@ -212,15 +201,21 @@ def test_native_resume_creates_a_continuation_segment_without_breaking_causality
     session.resume(environment_id, researcher, lease)
     session.release(environment_id, researcher, lease)
 
-    trajectory = TrajectoryRepository(store).get(environment_id, researcher)
+    repository = TrajectoryRepository(store)
+    trajectory = repository.get(environment_id, researcher)
+    records = list(repository.stream_records(environment_id, researcher))
 
     assert [(segment.id, segment.kind) for segment in trajectory.status.segments] == [
         ("segment-1", "execution"),
         ("segment-2", "continuation"),
     ]
-    resumed = next(record for record in trajectory.status.records if record.type == "session.resumed")
+    # A continuation segment names its predecessor and the interruption reason.
+    assert trajectory.status.segments[1].continues == "segment-1"
+    assert trajectory.status.segments[1].interruption == "session.paused"
+    resumed = next(record for record in records if record.type == "session.resumed")
     assert resumed.segment == "segment-2"
-    assert resumed.causes == (trajectory.status.records[-2].id,)
+    # Causal links cross the segment boundary rather than restarting.
+    assert resumed.causes == (records[-2].id,)
 
 
 def test_frozen_snapshot_does_not_change_when_new_evidence_is_appended(tmp_path):
@@ -410,10 +405,11 @@ def test_imported_source_uses_the_same_trajectory_interface_and_preserves_author
     repository.ingest(source.id, (record,), researcher)
 
     trajectory = repository.get(source.id, researcher)
+    records = list(repository.stream_records(source.id, researcher))
 
     assert trajectory.spec.manifest.source.namespace == "com.example.simulator"
-    assert trajectory.status.records[0].type == "com.example.simulator.observation"
-    assert trajectory.status.records[0].time.native[0].value == 10
+    assert records[0].type == "com.example.simulator.observation"
+    assert records[0].time.native[0].value == 10
     assert trajectory.status.collection.state == "current"
     assert trajectory.status.execution.state == "unknown"
     assert trajectory.status.verified_outcome.state == "unavailable"
@@ -533,13 +529,13 @@ def test_imported_collection_health_preserves_backlog_gaps_and_acknowledged_boun
     )
 
     collection = repository.get(source.id, researcher).status.collection
-    extras = collection.model_extra or {}
 
-    assert extras["acknowledgedPosition"] == "frame-4"
-    assert extras["acknowledgedHash"] == record.source_hash
-    assert extras["backlog"] == 5
-    assert extras["gaps"] == ["frame-2:frame-3"]
-    assert extras["captureFailures"] == ["telemetry-timeout"]
+    assert collection.state == "lagging"
+    assert collection.acknowledged_position == "frame-4"
+    assert collection.acknowledged_hash == record.source_hash
+    assert collection.backlog == 5
+    assert collection.gaps == ("frame-2:frame-3",)
+    assert collection.capture_failures == ("telemetry-timeout",)
 
 
 def test_registry_decodes_built_in_resources_and_rejects_duplicate_ownership(tmp_path):
@@ -730,32 +726,9 @@ def _portable_trajectory_payload():
                     "execution": {"state": "completed"},
                 }
             ],
-            "records": [
-                {
-                    "type": "environment.observation",
-                    "id": "record-1",
-                    "sequence": 1,
-                    "segment": "segment-1",
-                    "participant": "alice",
-                    "revision": 0,
-                    "causes": [],
-                    "time": {"wallTime": "2026-09-22T15:00:00Z", "native": []},
-                    "data": {},
-                    "extensions": {},
-                },
-                {
-                    "type": "agent.action",
-                    "id": "record-2",
-                    "sequence": 2,
-                    "segment": "segment-1",
-                    "participant": "alice",
-                    "revision": 0,
-                    "causes": ["record-1"],
-                    "time": {"wallTime": "2026-09-22T15:00:01Z", "native": []},
-                    "data": {},
-                    "extensions": {},
-                },
-            ],
+            "recordCount": 2,
+            "sequenceStart": 1,
+            "sequenceEnd": 2,
             "collection": {"state": "complete"},
             "execution": {"state": "completed"},
             "termination": {"terminated": True, "truncated": False, "reason": "complete"},
@@ -799,13 +772,30 @@ def test_portable_resources_reject_invalid_boundaries_and_causal_references():
         )
 
     mutations = (
-        (lambda value: value["status"]["records"][1].update(id="record-1"), "duplicate"),
-        (lambda value: value["status"]["records"][1].update(sequence=1), "increasing"),
-        (lambda value: value["status"]["records"][1].update(segment="missing"), "unknown segment"),
-        (lambda value: value["status"]["records"][1].update(causes=["future"]), "earlier record"),
         (
-            lambda value: value["status"]["verifiedOutcome"].update(evidence=["missing"]),
-            "unknown evidence",
+            lambda value: value["status"]["segments"].append(value["status"]["segments"][0]),
+            "duplicate trajectory segment",
+        ),
+        (
+            lambda value: value["status"]["segments"].append(
+                value["status"]["segments"][0] | {"id": "segment-2", "sequenceStart": 1}
+            ),
+            "increasing sequence ranges",
+        ),
+        (
+            lambda value: value["status"]["segments"].append(
+                value["status"]["segments"][0]
+                | {"id": "segment-2", "sequenceStart": 3, "sequenceEnd": 4, "continues": "missing"}
+            ),
+            "known predecessor",
+        ),
+        (
+            lambda value: value["status"].update(sequenceEnd=0, sequenceStart=1),
+            "sequence end precedes",
+        ),
+        (
+            lambda value: value["status"].update(sequenceEnd=9),
+            "must match its final segment",
         ),
     )
     for mutate, message in mutations:
@@ -864,8 +854,18 @@ def test_resource_registry_covers_success_and_rejection_paths():
     with pytest.raises(Unsupported, match="requires a type"):
         registry.decode_record({})
 
-    custom = _portable_trajectory_payload()["status"]["records"][0]
-    custom["type"] = "com.example.custom.record"
+    custom = {
+        "type": "com.example.custom.record",
+        "id": "record-1",
+        "sequence": 1,
+        "segment": "segment-1",
+        "participant": "alice",
+        "revision": 0,
+        "causes": [],
+        "time": {"wallTime": "2026-09-22T15:00:00Z", "native": []},
+        "data": {},
+        "extensions": {},
+    }
     registry.register_record(custom["type"], TrajectoryRecord)
     assert registry.decode_record(custom).type == custom["type"]
     custom["type"] = "agent.action"

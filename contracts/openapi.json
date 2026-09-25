@@ -1531,8 +1531,33 @@
       },
       "RecordTime": {
         "additionalProperties": true,
+        "description": "Clocks are preserved, never coerced into one scalar.\n\nOrdering comes from the durable record sequence and causal links; a\ntimestamp alone never establishes causality.",
         "properties": {
+          "monotonicOffsetNs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monotonicoffsetns"
+          },
+          "monotonicOrigin": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monotonicorigin"
+          },
           "native": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/NativeTimeCoordinate"
             },
@@ -1540,15 +1565,18 @@
             "type": "array"
           },
           "wallTime": {
-            "minLength": 1,
-            "title": "Walltime",
-            "type": "string"
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Walltime"
           }
         },
-        "required": [
-          "wallTime",
-          "native"
-        ],
         "title": "RecordTime",
         "type": "object"
       },
@@ -1788,6 +1816,73 @@
           "hash"
         ],
         "title": "SourceBoundary",
+        "type": "object"
+      },
+      "SourceCollection": {
+        "additionalProperties": true,
+        "description": "Collection health for the trajectory's delivery backlog.",
+        "properties": {
+          "acknowledgedHash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acknowledgedhash"
+          },
+          "acknowledgedPosition": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acknowledgedposition"
+          },
+          "backlog": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backlog"
+          },
+          "captureFailures": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Capturefailures",
+            "type": "array"
+          },
+          "gaps": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Gaps",
+            "type": "array"
+          },
+          "state": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "SourceCollection",
         "type": "object"
       },
       "SourceIdentity": {
@@ -2368,9 +2463,22 @@
       },
       "TrajectorySegment": {
         "additionalProperties": true,
+        "description": "One addressable execution interval inside a trajectory.\n\nEven a single uninterrupted run receives one segment, so there is never a\nsecond record shape with a missing segment. A pause, process restart,\ncheckpoint continuation, recovery attempt, or counterfactual branch starts a\nnew segment instead of pretending the episode was one sequential run.",
         "properties": {
           "collection": {
             "$ref": "#/components/schemas/LifecycleStatus"
+          },
+          "continues": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Continues"
           },
           "execution": {
             "$ref": "#/components/schemas/LifecycleStatus"
@@ -2381,11 +2489,39 @@
             "title": "Id",
             "type": "string"
           },
+          "interruption": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interruption"
+          },
           "kind": {
             "maxLength": 100,
             "minLength": 1,
             "title": "Kind",
             "type": "string"
+          },
+          "nativeEnd": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/NativeTimeCoordinate"
+            },
+            "title": "Nativeend",
+            "type": "array"
+          },
+          "nativeStart": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/NativeTimeCoordinate"
+            },
+            "title": "Nativestart",
+            "type": "array"
           },
           "sequenceEnd": {
             "minimum": 1.0,
@@ -2580,9 +2716,10 @@
       },
       "TrajectoryStatus": {
         "additionalProperties": true,
+        "description": "The detail projection. Records are a separately paged stream.\n\n``Trajectory.status`` never materializes a record tuple: its digest binds\nthe typed manifest and the authoritative evidence or source head, and record\npages remain independently verifiable against those boundaries.",
         "properties": {
           "collection": {
-            "$ref": "#/components/schemas/LifecycleStatus"
+            "$ref": "#/components/schemas/SourceCollection"
           },
           "evidenceHead": {
             "pattern": "^[0-9a-f]{64}$",
@@ -2592,19 +2729,28 @@
           "execution": {
             "$ref": "#/components/schemas/LifecycleStatus"
           },
-          "records": {
-            "items": {
-              "$ref": "#/components/schemas/TrajectoryRecord"
-            },
-            "title": "Records",
-            "type": "array"
+          "recordCount": {
+            "minimum": 0.0,
+            "title": "Recordcount",
+            "type": "integer"
           },
           "segments": {
             "items": {
               "$ref": "#/components/schemas/TrajectorySegment"
             },
+            "minItems": 1,
             "title": "Segments",
             "type": "array"
+          },
+          "sequenceEnd": {
+            "minimum": 0.0,
+            "title": "Sequenceend",
+            "type": "integer"
+          },
+          "sequenceStart": {
+            "minimum": 0.0,
+            "title": "Sequencestart",
+            "type": "integer"
           },
           "termination": {
             "$ref": "#/components/schemas/TerminationStatus"
@@ -2620,7 +2766,9 @@
         },
         "required": [
           "segments",
-          "records",
+          "recordCount",
+          "sequenceStart",
+          "sequenceEnd",
           "collection",
           "execution",
           "termination",

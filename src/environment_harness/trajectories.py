@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 from .contracts import Json, Record
 from .errors import Conflict, Forbidden, Unsupported
@@ -111,9 +112,29 @@ class TrajectorySummary(Record):
 
 
 class PortableRecord(BaseModel):
-    """Frozen evidence payload that preserves additive optional fields."""
+    """Frozen evidence payload that preserves additive optional fields.
+
+    Serialization omits optional fields a writer never set, so a document from
+    another writer survives a parse–serialize cycle byte-for-byte under the
+    canonical encoder. Preserved unknown data participates in the digest.
+    """
 
     model_config = ConfigDict(extra="allow", frozen=True, populate_by_name=True)
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_optionals(self, handler):
+        data = handler(self)
+        fields = type(self).model_fields
+        omitted = {
+            key
+            for name, field in fields.items()
+            if name not in self.model_fields_set
+            for key in (name, field.alias)
+            if key is not None
+        }
+        # Preserved unknown fields always survive; only declared fields the
+        # writer never supplied are absent from the serialized document.
+        return {key: value for key, value in data.items() if key not in omitted}
 
     @model_validator(mode="after")
     def json_serializable(self):
@@ -193,8 +214,24 @@ class NativeTimeCoordinate(PortableRecord):
 
 
 class RecordTime(PortableRecord):
-    wall_time: str = Field(alias="wallTime", min_length=1)
-    native: tuple[NativeTimeCoordinate, ...]
+    """Clocks are preserved, never coerced into one scalar.
+
+    Ordering comes from the durable record sequence and causal links; a
+    timestamp alone never establishes causality.
+    """
+
+    wall_time: str | None = Field(alias="wallTime", default=None, min_length=1)
+    monotonic_offset_ns: int | None = Field(alias="monotonicOffsetNs", default=None)
+    monotonic_origin: str | None = Field(alias="monotonicOrigin", default=None, max_length=200)
+    native: tuple[NativeTimeCoordinate, ...] = ()
+
+    @model_validator(mode="after")
+    def some_coordinate_is_present(self):
+        if self.wall_time is None and self.monotonic_offset_ns is None and not self.native:
+            raise ValueError("a record time requires a wall, monotonic, or native coordinate")
+        if self.monotonic_offset_ns is not None and self.monotonic_origin is None:
+            raise ValueError("a process-local duration requires its declared origin")
+        return self
 
 
 class SourceRecord(Record):
@@ -243,12 +280,26 @@ class SourceIngestionBatch(Record):
 
 
 class TrajectorySegment(PortableRecord):
+    """One addressable execution interval inside a trajectory.
+
+    Even a single uninterrupted run receives one segment, so there is never a
+    second record shape with a missing segment. A pause, process restart,
+    checkpoint continuation, recovery attempt, or counterfactual branch starts a
+    new segment instead of pretending the episode was one sequential run.
+    """
+
     id: str = Field(min_length=1, max_length=200)
     kind: str = Field(min_length=1, max_length=100)
     sequence_start: int = Field(alias="sequenceStart", ge=1)
     sequence_end: int = Field(alias="sequenceEnd", ge=1)
     collection: LifecycleStatus
     execution: LifecycleStatus
+    #: The segment this one continues from, when it is a continuation.
+    continues: str | None = Field(default=None, max_length=200)
+    #: Why the preceding segment ended, when that is known.
+    interruption: str | None = Field(default=None, max_length=500)
+    native_start: tuple[NativeTimeCoordinate, ...] = Field(alias="nativeStart", default=())
+    native_end: tuple[NativeTimeCoordinate, ...] = Field(alias="nativeEnd", default=())
 
     @model_validator(mode="after")
     def ordered_sequence(self):
@@ -319,10 +370,36 @@ class SourceStatus(Record):
     verified_outcome: VerifiedOutcome
 
 
+class SourceCollection(PortableRecord):
+    """Collection health for the trajectory's delivery backlog."""
+
+    state: str = Field(min_length=1, max_length=100)
+    acknowledged_position: str | None = Field(alias="acknowledgedPosition", default=None)
+    acknowledged_hash: str | None = Field(alias="acknowledgedHash", default=None)
+    backlog: int | None = Field(default=None, ge=0)
+    gaps: tuple[str, ...] = ()
+    capture_failures: tuple[str, ...] = Field(alias="captureFailures", default=())
+
+    @model_validator(mode="after")
+    def completion_requires_a_closed_boundary(self):
+        if self.state == "complete" and (self.gaps or self.capture_failures or self.backlog):
+            raise ValueError("collection cannot be complete with a declared gap, failure, or backlog")
+        return self
+
+
 class TrajectoryStatus(PortableRecord):
-    segments: tuple[TrajectorySegment, ...]
-    records: tuple[TrajectoryRecord, ...]
-    collection: LifecycleStatus
+    """The detail projection. Records are a separately paged stream.
+
+    ``Trajectory.status`` never materializes a record tuple: its digest binds
+    the typed manifest and the authoritative evidence or source head, and record
+    pages remain independently verifiable against those boundaries.
+    """
+
+    segments: tuple[TrajectorySegment, ...] = Field(min_length=1)
+    record_count: int = Field(alias="recordCount", ge=0)
+    sequence_start: int = Field(alias="sequenceStart", ge=0)
+    sequence_end: int = Field(alias="sequenceEnd", ge=0)
+    collection: SourceCollection
     execution: LifecycleStatus
     termination: TerminationStatus
     verified_outcome: VerifiedOutcome = Field(alias="verifiedOutcome")
@@ -330,23 +407,21 @@ class TrajectoryStatus(PortableRecord):
     trajectory_digest: str = Field(alias="trajectoryDigest", pattern=r"^[0-9a-f]{64}$")
 
     @model_validator(mode="after")
-    def references_are_consistent(self):
-        segments = {segment.id for segment in self.segments}
-        record_ids = set()
-        previous_sequence = 0
-        for record in self.records:
-            if record.id in record_ids:
-                raise ValueError("duplicate trajectory record")
-            if record.sequence <= previous_sequence:
-                raise ValueError("trajectory records must have increasing sequence")
-            if record.segment not in segments:
-                raise ValueError("trajectory record references an unknown segment")
-            if any(cause not in record_ids for cause in record.causes):
-                raise ValueError("trajectory record cause must reference an earlier record")
-            record_ids.add(record.id)
-            previous_sequence = record.sequence
-        if any(reference not in record_ids for reference in self.verified_outcome.evidence):
-            raise ValueError("verified outcome references unknown evidence")
+    def segments_are_consistent(self):
+        identities = [segment.id for segment in self.segments]
+        if len(identities) != len(set(identities)):
+            raise ValueError("duplicate trajectory segment")
+        boundary = 0
+        for segment in self.segments:
+            if segment.sequence_start <= boundary:
+                raise ValueError("trajectory segments must cover increasing sequence ranges")
+            if segment.continues is not None and segment.continues not in identities:
+                raise ValueError("a continuation segment must reference a known predecessor")
+            boundary = segment.sequence_end
+        if self.sequence_end < self.sequence_start:
+            raise ValueError("trajectory sequence end precedes its start")
+        if self.record_count and self.sequence_end != self.segments[-1].sequence_end:
+            raise ValueError("trajectory sequence end must match its final segment")
         return self
 
 
@@ -903,36 +978,53 @@ class TrajectoryRepository:
             manifest = json.loads(row["manifest"])
             participants = tuple(json.loads(row["participants"]))
             execution_state = row["status"]
-        events = list(self.store.replay(environment, access))
-        if not events:
+        # Stream the evidence: a large campaign is never loaded into memory to
+        # build the detail projection.
+        segments: list[dict] = []
+        record_count = 0
+        first_ingested = None
+        source_head = None
+        transition: Json = {}
+        interruption = None
+        for event in self.store.replay(environment, access):
+            record_count += 1
+            if first_ingested is None:
+                first_ingested = event["ingested"]
+            if event["kind"] == "session.resumed" or not segments:
+                previous = segments[-1] if segments else None
+                segments.append(
+                    {
+                        "id": f"segment-{len(segments) + 1}",
+                        "kind": "execution" if previous is None else "continuation",
+                        "sequenceStart": event["seq"],
+                        "sequenceEnd": event["seq"],
+                        "continues": None if previous is None else previous["id"],
+                        "interruption": interruption,
+                        "nativeStart": [{"clock": "environment.revision", "value": event["revision"]}],
+                        "nativeEnd": [{"clock": "environment.revision", "value": event["revision"]}],
+                    }
+                )
+                interruption = None
+            segments[-1]["sequenceEnd"] = event["seq"]
+            segments[-1]["nativeEnd"] = [{"clock": "environment.revision", "value": event["revision"]}]
+            if event["kind"] in ("session.paused", "session.cancelled"):
+                interruption = event["kind"]
+            if event["kind"] == "transition.committed":
+                transition = event["payload"]
+            source_head = event["hash"]
+        if source_head is None:
             raise ValueError("trajectory has no evidence")
 
-        records = []
-        segment_ranges: dict[str, list[int]] = {}
-        segment_index = 1
-        previous_record = None
-        for event in events:
-            if event["kind"] == "session.resumed":
-                segment_index += 1
-            segment = f"segment-{segment_index}"
-            record = self._native_record(event, previous_record, segment)
-            records.append(record.model_dump(mode="json", by_alias=True))
-            segment_ranges.setdefault(segment, []).append(event["seq"])
-            previous_record = record.id
-
-        source_head = events[-1]["hash"]
         trajectory_digest = digest(
             {
                 "environment": environment,
                 "manifest": manifest,
-                "records": [event["hash"] for event in events],
+                "evidenceHead": source_head,
+                "recordCount": record_count,
+                "segments": segments,
             }
         )
         completed = execution_state in ("completed", "succeeded")
-        transition = next(
-            (event["payload"] for event in reversed(events) if event["kind"] == "transition.committed"),
-            {},
-        )
         terminated = bool(transition.get("terminated"))
         truncated = bool(transition.get("truncated"))
         policies = []
@@ -955,7 +1047,7 @@ class TrajectoryRepository:
                 "kind": "Trajectory",
                 "metadata": {
                     "id": "trajectory-" + environment,
-                    "createdAt": _timestamp(events[0]["ingested"]),
+                    "createdAt": _timestamp(first_ingested or 0.0),
                     "labels": {"source": "native"},
                 },
                 "features": {"required": [], "optional": []},
@@ -975,19 +1067,18 @@ class TrajectoryRepository:
                 },
                 "status": {
                     "segments": [
-                        {
-                            "id": segment,
-                            "kind": "execution" if index == 0 else "continuation",
-                            "sequenceStart": min(sequences),
-                            "sequenceEnd": max(sequences),
+                        segment
+                        | {
                             "collection": {"state": "complete" if completed else "current"},
                             "execution": {
-                                "state": execution_state if index == len(segment_ranges) - 1 else "paused"
+                                "state": execution_state if index == len(segments) - 1 else "paused"
                             },
                         }
-                        for index, (segment, sequences) in enumerate(segment_ranges.items())
+                        for index, segment in enumerate(segments)
                     ],
-                    "records": records,
+                    "recordCount": record_count,
+                    "sequenceStart": segments[0]["sequenceStart"],
+                    "sequenceEnd": segments[-1]["sequenceEnd"],
                     "collection": {"state": "complete" if completed else "current"},
                     "execution": {"state": execution_state},
                     "termination": {
@@ -1015,40 +1106,43 @@ class TrajectoryRepository:
             ).fetchone()
             if source_row is None:
                 raise Forbidden("trajectory source unavailable")
-            imported = db.execute(
-                "SELECT * FROM trajectory_source_records WHERE source=? ORDER BY ordinal", (source,)
-            ).fetchall()
-        if not imported:
+            # Stream the imported journal rather than materializing every record.
+            cursor = db.execute(
+                "SELECT ordinal,body,source_hash FROM trajectory_source_records WHERE source=? "
+                "ORDER BY ordinal",
+                (source,),
+            )
+            segments: list[dict] = []
+            record_count = 0
+            created_at = None
+            for row in cursor:
+                record_count += 1
+                source_record = SourceRecord.model_validate_json(row["body"])
+                if created_at is None:
+                    created_at = source_record.time.wall_time
+                if not segments or segments[-1]["id"] != source_record.segment:
+                    previous = segments[-1] if segments else None
+                    segments.append(
+                        {
+                            "id": source_record.segment,
+                            "kind": "execution" if previous is None else "continuation",
+                            "sequenceStart": row["ordinal"],
+                            "sequenceEnd": row["ordinal"],
+                            "continues": None if previous is None else previous["id"],
+                            "nativeStart": [
+                                item.model_dump(mode="json", by_alias=True)
+                                for item in source_record.time.native
+                            ],
+                        }
+                    )
+                segments[-1]["sequenceEnd"] = row["ordinal"]
+                segments[-1]["nativeEnd"] = [
+                    item.model_dump(mode="json", by_alias=True) for item in source_record.time.native
+                ]
+        if not record_count:
             raise ValueError("trajectory has no evidence")
 
         registration = json.loads(source_row["registration"])
-        records = []
-        segment_ranges: dict[str, list[int]] = {}
-        previous_record = None
-        for row in imported:
-            source_record = SourceRecord.model_validate_json(row["body"])
-            segment_ranges.setdefault(source_record.segment, []).append(row["ordinal"])
-            records.append(
-                {
-                    "type": source_record.type,
-                    "id": source_record.id,
-                    "sequence": row["ordinal"],
-                    "segment": source_record.segment,
-                    "participant": source_record.participant,
-                    "revision": source_record.revision,
-                    "causes": [] if previous_record is None else [previous_record],
-                    "time": source_record.time.model_dump(mode="json", by_alias=True),
-                    "data": source_record.data,
-                    "extensions": {
-                        "environmentharness.dev/sourcePosition": source_record.position,
-                        "environmentharness.dev/sourceHash": source_record.source_hash,
-                        "environmentharness.dev/previousHash": source_record.previous_hash,
-                        "environmentharness.dev/audience": list(source_record.audience),
-                    },
-                }
-            )
-            previous_record = source_record.id
-
         collection_state = source_row["collection_state"]
         execution_state = source_row["execution_state"]
         termination = json.loads(source_row["termination"])
@@ -1061,15 +1155,22 @@ class TrajectoryRepository:
             "gaps": json.loads(source_row["gaps"]),
             "captureFailures": json.loads(source_row["capture_failures"]),
         }
-        source_hashes = [row["source_hash"] for row in imported]
-        trajectory_digest = digest({"source": source, "registration": registration, "records": source_hashes})
+        trajectory_digest = digest(
+            {
+                "source": source,
+                "registration": registration,
+                "evidenceHead": source_row["acknowledged_hash"],
+                "recordCount": record_count,
+                "segments": segments,
+            }
+        )
         return Trajectory.model_validate(
             {
                 "apiVersion": API_VERSION,
                 "kind": "Trajectory",
                 "metadata": {
                     "id": "trajectory-" + source,
-                    "createdAt": records[0]["time"]["wallTime"],
+                    "createdAt": created_at or _timestamp(source_row["created"]),
                     "labels": {"source": "imported"},
                 },
                 "features": {"required": [], "optional": []},
@@ -1088,17 +1189,12 @@ class TrajectoryRepository:
                 },
                 "status": {
                     "segments": [
-                        {
-                            "id": segment,
-                            "kind": "execution",
-                            "sequenceStart": min(sequences),
-                            "sequenceEnd": max(sequences),
-                            "collection": collection,
-                            "execution": {"state": execution_state},
-                        }
-                        for segment, sequences in segment_ranges.items()
+                        segment | {"collection": collection, "execution": {"state": execution_state}}
+                        for segment in segments
                     ],
-                    "records": records,
+                    "recordCount": record_count,
+                    "sequenceStart": segments[0]["sequenceStart"],
+                    "sequenceEnd": segments[-1]["sequenceEnd"],
                     "collection": collection,
                     "execution": {"state": execution_state},
                     "termination": termination,
@@ -1110,10 +1206,28 @@ class TrajectoryRepository:
             }
         )
 
+    def stream_records(self, trajectory: str, access, *, page_size: int = 200):
+        """Yield every authorized record for one trajectory, page by page.
+
+        Pagination is the only read path: a large trajectory is never
+        materialized. Restarting from the returned cursor neither omits nor
+        duplicates a record.
+        """
+
+        if not 1 <= page_size <= 1000:
+            raise ValueError("invalid trajectory record page size")
+        cursor = 0
+        while True:
+            page = self.records_page(trajectory, access, after=cursor, limit=page_size)
+            for record in page.records:
+                yield record
+            if not page.has_more or page.cursor == cursor:
+                return
+            cursor = page.cursor
+
     def freeze(self, environment: str, access) -> TrajectorySnapshot:
         access.require("snapshot.create")
         trajectory = self.get(environment, access)
-        records = [record.model_dump(mode="json", by_alias=True) for record in trajectory.status.records]
         with self.store.transaction() as db:
             native = db.execute(
                 "SELECT tenant FROM environments WHERE id=? AND tenant=?", (environment, access.tenant)
@@ -1136,12 +1250,23 @@ class TrajectoryRepository:
                     raise Forbidden("trajectory unavailable")
                 reports, artifacts, tenant = (), (), source["tenant"]
 
-        last_record = trajectory.status.records[-1]
-        source_position = str(last_record.sequence)
-        if isinstance(last_record.extensions, dict):
-            source_position = str(
-                last_record.extensions.get("environmentharness.dev/sourcePosition", source_position)
-            )
+        # Compute the ordered record digest incrementally while streaming, so a
+        # frozen snapshot never depends on materializing its records.
+        ordered = hashlib.sha256()
+        record_count = 0
+        source_position = str(trajectory.status.sequence_end)
+        bodies: list[tuple[int, str]] = []
+        for record in self.stream_records(environment, access):
+            body = record.model_dump(mode="json", by_alias=True)
+            ordered.update(digest(body).encode())
+            record_count += 1
+            bodies.append((record.sequence, encode(body)))
+            if isinstance(record.extensions, dict):
+                source_position = str(
+                    record.extensions.get("environmentharness.dev/sourcePosition", source_position)
+                )
+        if not record_count:
+            raise ValueError("trajectory has no evidence")
 
         spec = {
             "trajectoryId": trajectory.metadata.id,
@@ -1151,8 +1276,8 @@ class TrajectoryRepository:
                 "hash": trajectory.status.evidence_head,
             },
             "evidenceHead": trajectory.status.evidence_head,
-            "sequenceStart": trajectory.status.records[0].sequence,
-            "sequenceEnd": trajectory.status.records[-1].sequence,
+            "sequenceStart": trajectory.status.sequence_start,
+            "sequenceEnd": trajectory.status.sequence_end,
             "scoreReports": [
                 {
                     "scorer": json.loads(report["body"])["scorer"],
@@ -1166,10 +1291,10 @@ class TrajectoryRepository:
         }
         manifest_dump = trajectory.spec.manifest.model_dump(mode="json", by_alias=True)
         status_without_digest = {
-            "recordCount": len(records),
+            "recordCount": record_count,
             "artifactCount": len(artifacts),
             "manifestDigest": digest(manifest_dump),
-            "recordsDigest": digest(records),
+            "recordsDigest": ordered.hexdigest(),
             "complete": trajectory.status.collection.state == "complete",
         }
         snapshot_digest = digest({"spec": spec, "status": status_without_digest})
@@ -1202,10 +1327,10 @@ class TrajectoryRepository:
                 ),
             )
             if inserted.cursor.rowcount if hasattr(inserted, "cursor") else inserted.rowcount:
-                for record in records:
+                for sequence, body in bodies:
                     db.execute(
                         "INSERT INTO trajectory_snapshot_records VALUES (?,?,?)",
-                        (snapshot.metadata.id, record["sequence"], encode(record)),
+                        (snapshot.metadata.id, sequence, body),
                     )
         return snapshot
 

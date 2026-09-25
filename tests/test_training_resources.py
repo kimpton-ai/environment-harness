@@ -358,6 +358,7 @@ def test_dataset_authority_and_lifecycle_rejection_paths(tmp_path, monkeypatch):
         lambda identity, _who: trajectory if identity == "first" else incompatible,
     )
     monkeypatch.setattr(repository.trajectories, "freeze", lambda *_args: snapshot)
+    monkeypatch.setattr(repository.trajectories, "stream_records", lambda *_args, **_kwargs: iter(()))
     with pytest.raises(Conflict, match="incompatible trajectory schemas"):
         repository.freeze_dataset("mixed", ("first", "second"), who)
 
@@ -402,7 +403,7 @@ def test_dataset_authority_and_lifecycle_rejection_paths(tmp_path, monkeypatch):
 )
 def test_reward_resolution_rejects_malformed_or_unresolved_values(records, message):
     with pytest.raises(Conflict, match=message):
-        TrainingRepository._has_resolved_reward(SimpleNamespace(status=SimpleNamespace(records=records)))
+        TrainingRepository._has_resolved_reward(records)
 
 
 def test_dataset_and_training_run_lookup_listing_and_conflict_edges(tmp_path, monkeypatch):

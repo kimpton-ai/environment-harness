@@ -22,8 +22,35 @@
     },
     "RecordTime": {
       "additionalProperties": true,
+      "description": "Clocks are preserved, never coerced into one scalar.\n\nOrdering comes from the durable record sequence and causal links; a\ntimestamp alone never establishes causality.",
       "properties": {
+        "monotonicOffsetNs": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Monotonicoffsetns"
+        },
+        "monotonicOrigin": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Monotonicorigin"
+        },
         "native": {
+          "default": [],
           "items": {
             "$ref": "#/$defs/NativeTimeCoordinate"
           },
@@ -31,15 +58,19 @@
           "type": "array"
         },
         "wallTime": {
-          "minLength": 1,
-          "title": "Walltime",
-          "type": "string"
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Walltime"
         }
       },
-      "required": [
-        "wallTime",
-        "native"
-      ],
       "title": "RecordTime",
       "type": "object"
     }

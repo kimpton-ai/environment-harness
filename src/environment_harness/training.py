@@ -148,7 +148,9 @@ class TrainingRepository:
                 raise Conflict("dataset requires a terminal trajectory")
             if trajectory.status.verified_outcome.state in ("pending", "uncertain"):
                 raise Conflict("dataset requires resolved outcomes")
-            any_reward = self._has_resolved_reward(trajectory) or any_reward
+            any_reward = (
+                self._has_resolved_reward(self.trajectories.stream_records(identity, access)) or any_reward
+            )
             if schema_version is None:
                 schema_version = manifest.source.schema_version
             elif schema_version != manifest.source.schema_version:
@@ -208,10 +210,15 @@ class TrainingRepository:
         return dataset
 
     @staticmethod
-    def _has_resolved_reward(trajectory) -> bool:
-        rewards = {
-            record.id: record for record in trajectory.status.records if record.type == "environment.reward"
-        }
+    def _has_resolved_reward(records) -> bool:
+        """Resolve trajectory-local reward chains in durable sequence order.
+
+        ``records`` is the paged record stream, not a materialized trajectory:
+        only reward records are retained so a large trajectory stays bounded.
+        """
+
+        stream = list(records) if not isinstance(records, list) else records
+        rewards = {record.id: record for record in stream if record.type == "environment.reward"}
         superseders: dict[str, str] = {}
         for record in rewards.values():
             if not isinstance(record.data, dict):
@@ -234,7 +241,7 @@ class TrainingRepository:
                 current = superseders[current]
 
         ready = False
-        for record in trajectory.status.records:
+        for record in stream:
             if record.type == "environment.outcome" and isinstance(record.data, dict):
                 value = record.data.get("reward")
                 if value is not None:
