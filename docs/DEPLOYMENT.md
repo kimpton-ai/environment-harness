@@ -59,7 +59,7 @@ Use another port when needed:
 environment-harness --store ./environment-sessions serve --port 9876
 ```
 
-The loopback viewer obtains an in-memory researcher credential on every page load. Refreshes, deep
+The loopback viewer obtains an in-memory read-only viewer credential on every page load. Refreshes, deep
 links, and new tabs work without a login form or browser storage. Every `/v1` API route still
 requires an explicit bearer credential.
 
@@ -208,7 +208,7 @@ record ingestion, and status mutation. An explicitly managed ingestion service m
 app = create_app(session, trajectory_ingestion=True)
 ```
 
-That flag adds only bearer-authenticated researcher management routes. It does not make ingestion
+That flag adds only bearer-authenticated management routes. It does not make ingestion
 public, authorize environment actions, run selectors, or execute trainer plugins. Keep a source's
 domain journal as the delivery backlog during service outages and resume from its last acknowledged
 position and hash. Do not configure ingestion on a supplier/viewer process that is intended to be

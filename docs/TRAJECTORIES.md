@@ -70,9 +70,9 @@ is immutable.
 ```python
 from environment_harness.trajectories import SourceRecord, SourceRegistration
 
-repository = harness.sources()
+sources = harness.sources()
 
-source = repository.register(
+source = sources.register(
     SourceRegistration(
         namespace="com.example.simulator",
         run_id="run-42",
@@ -80,8 +80,7 @@ source = repository.register(
         environment={"id": "simulator", "version": "1"},
         participants=("alice",),
         purpose="evaluation",
-    ),
-    researcher,
+    )
 )
 
 record = SourceRecord.create(
@@ -99,7 +98,7 @@ record = SourceRecord.create(
     data={"available": True},
     audience=("alice",),
 )
-acknowledgement = repository.ingest(source.id, (record,))
+acknowledgement = sources.ingest(source.id, (record,))
 print(acknowledgement.position, acknowledgement.hash)
 ```
 

@@ -21,6 +21,8 @@ from environment_harness import (
     EvidenceStore,
     ExperimentSpec,
     Scenario,
+    SessionControl,
+    SessionRunner,
 )
 from environment_harness import access as access_module
 from environment_harness.access import (
@@ -172,6 +174,20 @@ def test_participant_contexts_cannot_cross_sessions_participants_or_generations(
         runtime.get(identity, outsider)
 
 
+# The domain facades a caller composes: local execution, the session handle, the
+# custom-runner seam, the experiment builder, and portable trajectory access.
+# `EvidenceStore` is deliberately excluded: it is the private storage seam that
+# `EnvironmentHarness` drives, not a domain facade, and its evidence readers
+# still require an access context.
+DOMAIN_FACADES = (
+    "EnvironmentHarness",
+    "EnvironmentSession",
+    "SessionControl",
+    "Experiment",
+    "TrajectoryAccess",
+)
+
+
 def test_public_api_exposes_no_principal_access_context_or_permission(tmp_path):
     forbidden = ("principal", "access_context", "accesscontext", "role", "roles", "permission")
     for name in environment_harness.__all__:
@@ -180,6 +196,7 @@ def test_public_api_exposes_no_principal_access_context_or_permission(tmp_path):
         assert not any(token in name.lower() for token in ("principal", "permission"))
         if not callable(exported):
             continue
+        tokens = (*forbidden, "access") if name in DOMAIN_FACADES else forbidden
         members = [(name, exported)]
         if isinstance(exported, type):
             members = [
@@ -193,11 +210,81 @@ def test_public_api_exposes_no_principal_access_context_or_permission(tmp_path):
             except (TypeError, ValueError):
                 continue
             for parameter in signature.parameters:
-                assert not any(token in parameter.lower() for token in forbidden), (name, attribute)
+                assert not any(token in parameter.lower() for token in tokens), (name, attribute)
+    # Every domain facade named above is actually exported, so the list cannot rot.
+    assert set(DOMAIN_FACADES) <= set(environment_harness.__all__)
 
     # The authorization-aware runtime is private and is not re-exported.
     assert "_SessionRuntime" not in environment_harness.__all__
     assert not issubclass(EnvironmentSession, _SessionRuntime)
+
+
+def test_the_session_runner_seam_receives_no_runtime_or_access_context(tmp_path):
+    """A custom runner is a public extension point, so it stays domain-only."""
+
+    seen: dict[str, object] = {}
+
+    def inspecting_runner(control, agents, *, turns):
+        seen["control"] = control
+        seen["id"] = control.id
+        seen["attributes"] = sorted(
+            name for name in dir(control) if not name.startswith("_") and callable(getattr(control, name))
+        )
+        seen["status"] = control.status()["status"]
+        seen["observation"] = control.observation("alice")["payload"]
+        lease = control.lease("seam-test")
+        try:
+            seen["leased"] = sorted(lease)
+        finally:
+            control.release(lease)
+        return control.advance(agents, turns=turns)
+
+    harness = EnvironmentHarness(
+        tmp_path,
+        environment_factory=SyntheticEnvironment,
+        agent_factories={"alice": SyntheticAgent},
+        session_runner=inspecting_runner,
+    )
+    session = harness.run(Scenario(id="seam", input={}), turns=1)
+
+    assert session.status == "succeeded"
+    assert seen["id"] == session.id
+    assert seen["status"] == "running"
+    assert seen["observation"]["total"] == 0
+    assert seen["leased"] == ["epoch", "expires", "owner"]
+    control = seen["control"]
+    assert isinstance(control, SessionControl)
+    assert not isinstance(control, _SessionRuntime)
+    # Only domain operations cross the seam: no runtime, store, or access context.
+    assert seen["attributes"] == [
+        "advance",
+        "dispatch_operation",
+        "lease",
+        "observation",
+        "prepare_operation",
+        "release",
+        "status",
+    ]
+    assert not any(
+        isinstance(getattr(control, name, None), (_SessionRuntime, _AccessContext))
+        for name in dir(control)
+        if not name.startswith("_")
+    )
+    for member in (SessionControl.__init__, *[getattr(SessionControl, name) for name in seen["attributes"]]):
+        parameters = inspect.signature(member).parameters
+        if member is SessionControl.__init__:
+            continue
+        assert not any(
+            token in parameter.lower()
+            for parameter in parameters
+            for token in ("access", "principal", "role")
+        )
+    assert list(inspect.signature(SessionRunner.__call__).parameters) == [
+        "self",
+        "control",
+        "agents",
+        "turns",
+    ]
     # Only the facade starts or resumes local execution.
     assert not hasattr(environment_harness, "run")
     assert callable(EnvironmentHarness.start) and callable(EnvironmentHarness.run)
@@ -356,10 +443,8 @@ def test_postgres_credential_migration_is_numbered_and_transactional():
 
 
 def test_branch_request_creates_a_child_session_with_lineage(tmp_path):
-    from environment_harness.runner import run
-
-    def three(session, environment, access, agents, *, turns):
-        return run(session, environment, access, agents, turns=1)
+    def three(control, agents, *, turns):
+        return control.advance(agents, turns=1)
 
     harness = EnvironmentHarness(
         tmp_path,

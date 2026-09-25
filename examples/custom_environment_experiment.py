@@ -21,8 +21,6 @@ from environment_harness.fixtures import (
     SyntheticScenarioInput,
     SyntheticShowcaseAgent,
 )
-from environment_harness.operations import Operations
-from environment_harness.runner import run as run_turns
 
 SCORER = "synthetic-operation-review"
 SCORER_VERSION = "1"
@@ -81,34 +79,25 @@ class ReviewEnvironment(SyntheticEnvironment):
         )
 
 
-def run_with_inspection(session, environment, researcher, agents, *, turns):
+def run_with_inspection(control, agents, *, turns):
     """Interleave normal turns with an environment operation in every session."""
-    result = run_turns(session, environment, researcher, agents, turns=1)
-    observation = session.observe(environment, researcher, "alice")
-    # The runtime derives the participant scope; examples never build one.
-    agent = session.participant_context(environment, researcher, "alice")
-    operations = Operations(session.store)
-    operations.prepare(
-        environment,
-        agent,
+    result = control.advance(agents, turns=1)
+    observation = control.observation("alice")
+    # The control derives the participant scope; examples never build one.
+    control.prepare_operation(
         "inspect-after-turn-1",
+        participant="alice",
         endpoint="synthetic",
         operation="synthetic.inspect-total",
         payload={"total": observation["payload"]["total"]},
     )
-    lease = session.lease(environment, researcher, "synthetic-inspection")
+    lease = control.lease("synthetic-inspection")
     try:
-        operations.dispatch(
-            session,
-            environment,
-            researcher,
-            lease,
-            "inspect-after-turn-1",
-        )
+        control.dispatch_operation(lease, "inspect-after-turn-1")
     finally:
-        session.release(environment, researcher, lease)
+        control.release(lease)
     if turns > 1:
-        result = run_turns(session, environment, researcher, agents, turns=turns - 1)
+        result = control.advance(agents, turns=turns - 1)
     return result
 
 
@@ -235,7 +224,7 @@ def run_experiment(store, *, turns: int = 3):
         "sessions": sessions,
         "review": {
             "command": ["environment-harness", "--store", str(store), "serve", "--open"],
-            "path": f"/experiment/{result.id}",
+            "path": f"/experiments/{result.id}",
         },
     }
 

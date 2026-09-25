@@ -19,8 +19,8 @@ from pydantic import TypeAdapter
 from .access import trusted_local
 from .contracts import AgentSpec, BranchRequest, ExperimentSpec, RunPolicy, Scenario
 from .errors import Conflict
-from .operations import environment_operations
-from .runner import run as run_session
+from .operations import Operations, environment_operations
+from .runner import run as run_turns
 from .runtime import _SessionRuntime
 from .store import EvidenceStore, digest, encode, uid
 
@@ -137,18 +137,110 @@ class _EnvironmentRegistry:
         )
 
 
+class SessionControl:
+    """A typed handle for advancing one durable environment session.
+
+    :class:`EnvironmentHarness` binds the private session runtime and the
+    trusted local access context when it constructs the control, so a custom
+    :class:`SessionRunner` receives no authorization input and cannot forge,
+    widen, or forward one. Every method accepts only domain inputs.
+    """
+
+    def __init__(self, runtime: _SessionRuntime, session: str, access: Any):
+        self._runtime = runtime
+        self._session = session
+        self._access = access
+        self._operations = Operations(runtime.store)
+
+    @property
+    def id(self) -> str:
+        """The durable environment-session identity."""
+
+        return self._session
+
+    def status(self) -> Mapping[str, Any]:
+        """The current durable record for this environment session."""
+
+        return self._runtime.get(self._session, self._access)
+
+    def advance(self, agents: Mapping[str, Any], *, turns: int) -> Mapping[str, Any]:
+        """Run the standard turn loop for a bounded number of turns."""
+
+        return run_turns(self._runtime, self._session, self._access, agents, turns=turns)
+
+    def observation(self, participant: str) -> Mapping[str, Any]:
+        """Read one participant's current authorized observation."""
+
+        return self._runtime.observe(self._session, self._access, participant)
+
+    def lease(self, owner: str) -> Mapping[str, Any]:
+        """Acquire the renewable, fenced writer lease for this session."""
+
+        return self._runtime.lease(self._session, self._access, owner)
+
+    def release(self, lease: Mapping[str, Any]) -> None:
+        """Release a writer lease acquired through :meth:`lease`."""
+
+        self._runtime.release(self._session, self._access, lease)
+
+    def prepare_operation(
+        self,
+        operation_id: str,
+        *,
+        participant: str,
+        endpoint: str,
+        operation: str,
+        payload: Any,
+        maximum_cost_micros: int = 0,
+        write: bool = False,
+    ) -> Mapping[str, Any]:
+        """Record an environment-operation intent and reserve its cost.
+
+        The participant scope is derived from the durable session record; a
+        caller never constructs one.
+        """
+
+        return self._operations.prepare(
+            self._session,
+            self._runtime.participant_context(self._session, self._access, participant),
+            operation_id,
+            endpoint=endpoint,
+            operation=operation,
+            payload=payload,
+            maximum_cost_micros=maximum_cost_micros,
+            write=write,
+        )
+
+    def dispatch_operation(
+        self, lease: Mapping[str, Any], operation_id: str, provider=None
+    ) -> Mapping[str, Any]:
+        """Dispatch a prepared environment operation under a held lease."""
+
+        return self._operations.dispatch(
+            self._runtime, self._session, self._access, lease, operation_id, provider
+        )
+
+
 class SessionRunner(Protocol):
-    """Callable that advances one durable environment session."""
+    """Callable that advances one durable environment session.
+
+    The harness supplies a typed :class:`SessionControl`; the private runtime
+    and access context never cross this boundary.
+    """
 
     def __call__(
         self,
-        session: Any,
-        environment: str,
-        access: Any,
+        control: SessionControl,
         agents: Mapping[str, Any],
         *,
         turns: int,
     ) -> Mapping[str, Any]: ...
+
+
+def run_session(control: SessionControl, agents: Mapping[str, Any], *, turns: int) -> Mapping[str, Any]:
+    """The default session runner: advance the whole turn budget."""
+
+    return control.advance(agents, turns=turns)
 
 
 class EnvironmentSession:
@@ -654,7 +746,8 @@ class EnvironmentHarness:
             raise ValueError("turns must be positive")
         agents = {participant: factory() for participant, factory in self.agent_factories.items()}
         runtime = _SessionRuntime(self.store, self._session_factory(session)())
-        return self.session_runner(runtime, session, self._access, agents, turns=turns)
+        control = SessionControl(runtime, session, self._access)
+        return self.session_runner(control, agents, turns=turns)
 
     def _session_factory(self, session: str) -> Callable[[], Any]:
         """Resolve the typed factory that reproduces one Session's frozen reference."""
@@ -1216,9 +1309,7 @@ class EnvironmentHarness:
                 # Resumed and branched sessions keep their frozen manifest.
                 runtime.resume_if_paused(environment_id, self._access)
             result = self.session_runner(
-                runtime,
-                environment_id,
-                self._access,
+                SessionControl(runtime, environment_id, self._access),
                 agents,
                 turns=job["turns"],
             )

@@ -11,7 +11,7 @@ The supplier service owns the environment. HTTPS requests carry only an opaque b
 
 Administrative Python methods are trusted embedding APIs. They must not be exposed directly to untrusted agents. Store directories are private to the operating-system account. SQL credentials, signing keys, model credentials and resource handles belong to the server or worker scope.
 
-The loopback CLI's `serve` command configures automatic local viewer access independently of browser launch. The viewer reads its non-secret authentication mode from `GET /viewer/config` and exchanges local access through `POST /local/connect`, which requires the exact loopback origin and a loopback peer. The endpoint supports refreshes and new tabs, is absent from ordinary supplier applications, and never places its researcher credential in a URL, HTML, browser storage or a token file. `serve --open` only opens the plain viewer URL. The CLI disables proxy-header trust. Manual supplier connections retain credentials only in page memory, and every supplier API request still requires its bearer credential.
+The loopback CLI's `serve` command configures automatic local viewer access independently of browser launch. The viewer reads its non-secret authentication mode from `GET /viewer/config` and exchanges local access through `POST /local/connect`, which requires the exact loopback origin and a loopback peer. The endpoint supports refreshes and new tabs, is absent from ordinary supplier applications, and never places its viewer credential in a URL, HTML, browser storage or a token file. `serve --open` only opens the plain viewer URL. The CLI disables proxy-header trust. Manual supplier connections retain credentials only in page memory, and every supplier API request still requires its bearer credential.
 
 ## API
 
@@ -78,7 +78,7 @@ Commands have shape `{"operation":"checkpoint","arguments":{"lease":{"owner":"wo
 
 Events support JSON pages and finite server-sent-event pages. Reconnect with `Last-Event-ID`; an empty page means caught up. Cursors expose ordering gaps but never hidden event payloads. A viewer can disconnect without blocking evidence writes. Artifact access is authorized against its environment and audience before retrieving any bytes.
 
-Activity feeds use a transactional outbox and global cursor. They cover experiment status and environment-session evidence without exposing the scheduler queue as an authority. The recovery snapshot includes the experiment's frozen shared configuration and each scenario's immutable input, reference, and metadata. SSE pages include a reconnect delay and heartbeat; clients tolerate duplicate IDs and recover from the activity snapshot after reconnecting. Global, experiment and environment-session scopes all require an authenticated tenant principal.
+Activity feeds use a transactional outbox and global cursor. They cover experiment status and environment-session evidence without exposing the scheduler queue as an authority. The recovery snapshot includes the experiment's frozen shared configuration and each scenario's immutable input, reference, and metadata. SSE pages include a reconnect delay and heartbeat; clients tolerate duplicate IDs and recover from the activity snapshot after reconnecting. Global, experiment and environment-session scopes all require an authenticated tenant credential.
 
 The checked-in `ActivityPage` and `ActivitySnapshot` JSON Schemas are the durable JSON response
 contracts for those feeds. The generated OpenAPI document references the same response models and
@@ -104,7 +104,7 @@ Branches copy checkpoint state into a new environment and retain lineage. Parent
 
 ## Evidence and limitations
 
-Local evidence uses sorted, compact ASCII JSON with finite numbers and a SHA-256 hash chain. This is an explicitly specified encoding, not a claim of RFC 8785 conformance. Events, checkpoints and report revisions are append-only. Participant projections cannot verify hidden portions of a hash chain; researcher/scorer authority can verify the complete chain. Optional Ed25519 receipts establish supplier provenance, not independent reproduction of hidden mechanics.
+Local evidence uses sorted, compact ASCII JSON with finite numbers and a SHA-256 hash chain. This is an explicitly specified encoding, not a claim of RFC 8785 conformance. Events, checkpoints and report revisions are append-only. Participant projections cannot verify hidden portions of a hash chain; trusted-local and management authority can verify the complete chain. Optional Ed25519 receipts establish supplier provenance, not independent reproduction of hidden mechanics.
 
 Findings validate participant/action/observation links and existence of referenced outcome/consequence events. The runtime does not adjudicate the scientific truth of a grader's judgment. Comparisons aggregate lineage means and do not treat turns or related branches as independent experiments. Unknown uncertainty remains explicit.
 

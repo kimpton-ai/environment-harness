@@ -56,7 +56,7 @@ def run_experiment(store, *, turns: int = 3):
         ],
         "review": {
             "command": ["environment-harness", "--store", str(store), "serve", "--open"],
-            "path": f"/experiment/{result.id}",
+            "path": f"/experiments/{result.id}",
         },
     }
 

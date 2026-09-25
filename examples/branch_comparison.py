@@ -7,13 +7,12 @@ from pathlib import Path
 from environment_harness import EnvironmentHarness, EvidenceStore, Scenario
 from environment_harness.contracts import BranchRequest, RunPolicy, ScoreReport
 from environment_harness.fixtures import SyntheticAgent, SyntheticEnvironment
-from environment_harness.runner import run
 
 
-def first_three_turns(session, environment, access, agents, *, turns):
+def first_three_turns(control, agents, *, turns):
     """Stop after three turns so the example can checkpoint mid-budget."""
 
-    return run(session, environment, access, agents, turns=3)
+    return control.advance(agents, turns=3)
 
 
 def experiment(directory):

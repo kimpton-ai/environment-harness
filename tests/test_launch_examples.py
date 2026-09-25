@@ -73,7 +73,7 @@ def test_typed_experiment_example_creates_reviewable_grouped_sessions(tmp_path):
         "negative-start",
         "positive-start",
     }
-    assert summary["review"]["path"] == f"/experiment/{summary['experiment']}"
+    assert summary["review"]["path"] == f"/experiments/{summary['experiment']}"
 
 
 def test_custom_environment_experiment_records_operations_scores_and_findings(tmp_path):
@@ -96,7 +96,7 @@ def test_custom_environment_experiment_records_operations_scores_and_findings(tm
     summary = json.loads(result.stdout)
     assert summary["status"] == "succeeded"
     assert summary["completed"] == summary["total"] == 4
-    assert summary["review"]["path"] == f"/experiment/{summary['experiment']}"
+    assert summary["review"]["path"] == f"/experiments/{summary['experiment']}"
     assert {session["inspection"]["meets_threshold"] for session in summary["sessions"]} == {
         False,
         True,
@@ -134,7 +134,7 @@ def test_external_environment_experiment_connects_to_a_separate_simulator(tmp_pa
     assert summary["completed"] == summary["total"] == 4
     assert summary["connection"]["transport"] == "json-lines-subprocess"
     assert summary["connection"]["worker_pid"] != summary["driver_pid"]
-    assert summary["review"]["path"] == f"/experiment/{summary['experiment']}"
+    assert summary["review"]["path"] == f"/experiments/{summary['experiment']}"
     assert {session["receipt"]["status"] for session in summary["sessions"]} == {"moved"}
 
     store = EvidenceStore(store_path)

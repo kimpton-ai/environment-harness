@@ -287,13 +287,13 @@ curl --fail-with-body -H "Authorization: Bearer $EH_TOKEN" \
 
 ```json
 {
-  "work": [
+  "items": [
     {"id":"work_01","revision":2,"participant":"alice","generation":0,"status":"pending"}
   ]
 }
 ```
 
-Agent callers see only their own participant's work.
+A participant credential sees only its own participant's invocations.
 
 ### Execute a lifecycle command
 
@@ -327,7 +327,7 @@ Supported operation names are `advance`, `lease`, `release`, `cancel`, `resolve`
 | `branch` | Management | `checkpoint`; optional `interventions`, `new_environment` | New environment session | `403` unavailable checkpoint, `409` integrity/version conflict, `422` unsupported pending/live-write state |
 | `control` | Management | `lease`, `command` (`pause` or `cancel`) | Updated lifecycle status | `409` stale lease/terminal session, `422` unknown command |
 | `memory` | Participant | `memory`; optional `agent_state`, `expected_revision` | `null` after the update commits | `403` participant authority, `409` stale revision/size, `422` missing checkpoint hook |
-| `transfer` | Management | `lease`, `participant`, `controller`; optional `active` | New scoped participant principal | `409` decision boundary/last participant, `422` undeclared participant |
+| `transfer` | Management | `lease`, `participant`, `controller`; optional `active` | New scoped participant credential | `409` decision boundary/last participant, `422` undeclared participant |
 | `external_event` | Management, viewer | `lease`, `source`, `cursor`, `event_time`, `payload`; optional `gap` | Evidence event receipt | `409` stale cursor/queue limit/lease |
 | `finalize_outcomes` | Management, viewer | `lease`, `report_revision` | Completed outcome receipt | `409` missing report or unsettled operations |
 

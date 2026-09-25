@@ -114,6 +114,15 @@ Behind the facade, a private `_SessionRuntime` requires a private
 Because all three paths drive one runtime, local, HTTP, and runner
 authorization cannot drift into separate implementations.
 
+The one public extension point that runs inside a session — a custom
+`SessionRunner` — receives a typed `SessionControl` rather than the runtime and
+the access context. The control binds both internally, so extension code cannot
+forge, widen, or forward an authorization value, and `SessionControl` exposes
+only domain operations. `EvidenceStore` is the exception by design: it is the
+private storage seam that `EnvironmentHarness` drives, not a domain facade, and
+its evidence readers still require an access context. A contract test enumerates
+the domain facades and fails if any of them grows an authorization parameter.
+
 ## Issuing and constraining participant credentials
 
 ```python

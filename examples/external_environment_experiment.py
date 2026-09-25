@@ -27,8 +27,6 @@ from environment_harness.fixtures import (
     SyntheticScenarioInput,
     SyntheticShowcaseAgent,
 )
-from environment_harness.operations import Operations
-from environment_harness.runner import run as run_turns
 
 SCORER = "external-simulator-review"
 SCORER_VERSION = "1"
@@ -137,30 +135,27 @@ class ExternalReviewEnvironment(SyntheticEnvironment):
         )
 
 
-def run_with_external_move(session, environment, researcher, agents, *, turns):
+def run_with_external_move(control, agents, *, turns):
     """Run ordinary turns and one fenced external operation per session."""
-    result = run_turns(session, environment, researcher, agents, turns=1)
-    observation = session.observe(environment, researcher, "alice")
+    result = control.advance(agents, turns=1)
+    observation = control.observation("alice")
     distance = max(1, abs(int(observation["payload"]["total"])))
-    # The runtime derives the participant scope; examples never build one.
-    agent = session.participant_context(environment, researcher, "alice")
-    operations = Operations(session.store)
-    operations.prepare(
-        environment,
-        agent,
+    # The control derives the participant scope; examples never build one.
+    control.prepare_operation(
         "move-after-turn-1",
+        participant="alice",
         endpoint="external-simulator",
         operation="example.move-entity",
-        payload={"entity": environment, "delta": [distance, 0, 0]},
+        payload={"entity": control.id, "delta": [distance, 0, 0]},
         write=True,
     )
-    lease = session.lease(environment, researcher, "external-simulator-example")
+    lease = control.lease("external-simulator-example")
     try:
-        operations.dispatch(session, environment, researcher, lease, "move-after-turn-1")
+        control.dispatch_operation(lease, "move-after-turn-1")
     finally:
-        session.release(environment, researcher, lease)
+        control.release(lease)
     if turns > 1:
-        result = run_turns(session, environment, researcher, agents, turns=turns - 1)
+        result = control.advance(agents, turns=turns - 1)
     return result
 
 
@@ -284,7 +279,7 @@ def run_experiment(store, *, turns: int = 3):
             "sessions": sessions,
             "review": {
                 "command": ["environment-harness", "--store", str(store), "serve", "--open"],
-                "path": f"/experiment/{result.id}",
+                "path": f"/experiments/{result.id}",
             },
         }
     finally:

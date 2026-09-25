@@ -216,7 +216,7 @@ def main():
             )
         )
         if args.open:
-            threading.Thread(target=open_when_ready, args=(server, f"{origin}/home"), daemon=True).start()
+            threading.Thread(target=open_when_ready, args=(server, f"{origin}/overview"), daemon=True).start()
         try:
             server.run()
         except KeyboardInterrupt:

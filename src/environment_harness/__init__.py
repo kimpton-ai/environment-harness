@@ -13,8 +13,10 @@ from .harness import (
     EnvironmentSession,
     Experiment,
     ExperimentResult,
+    SessionControl,
     SessionRunner,
     TrajectoryAccess,
+    run_session,
 )
 from .operations import EnvironmentOperation
 from .store import EvidenceStore
@@ -34,7 +36,9 @@ __all__ = [
     "EnvironmentHarness",
     "Experiment",
     "ExperimentResult",
+    "SessionControl",
     "SessionRunner",
+    "run_session",
     "TrajectoryAccess",
     "EvidenceStore",
     "ResourceRegistry",

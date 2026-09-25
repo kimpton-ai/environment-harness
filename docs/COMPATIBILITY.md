@@ -27,13 +27,13 @@ These changes keep existing SQLite and PostgreSQL stores readable. They require 
 
 ## Cancellation and recovery
 
-Use `session.cancel(environment, researcher)` in Python or `client.cancel(environment)` through either client. The HTTP command is:
+Use `session.cancel()` on the `EnvironmentSession` handle in Python, or `client.cancel(environment)` through either client. The HTTP command is:
 
 ```json
 {"operation": "cancel", "arguments": {}}
 ```
 
-Cancellation requires researcher authority for the target environment. It does not require the execution writer's lease. It atomically marks the session cancelled, invalidates that lease, stops new action/state commits and releases reservations for known-undispatched operations. Repeating cancellation is safe. Completed sessions remain terminal and reject cancellation. The existing `control` command with `command="cancel"` still works and delegates to the same operation.
+Cancellation requires trusted-local or management authority over the target environment. It does not require the execution writer's lease. It atomically marks the session cancelled, invalidates that lease, stops new action/state commits and releases reservations for known-undispatched operations. Repeating cancellation is safe. Completed sessions remain terminal and reject cancellation. The existing `control` command with `command="cancel"` still works and delegates to the same operation.
 
 The response contains `status`, `unresolved_agent_work` and `unresolved_operations`. Cancellation does not prove that an already-dispatched external effect did not happen. Unknown operations retain their reservation. Resolve those outcomes through the existing receipt or agent reconciliation interface. Recovery after cancellation records the recovered response without changing the cancelled environment's participant continuation state.
 
@@ -91,7 +91,7 @@ JSONL exports contain every chunk needed to reconstruct the original row:
 ```python
 from environment_harness.history import reconstruct_inherited
 
-records = list(reconstruct_inherited(store.replay(environment_id, researcher)))
+records = list(reconstruct_inherited(session.replay()))
 ```
 
 Each result has `complete=True` and the original database row in `record`. Missing chunks, conflicting metadata and an incorrect record digest fail explicitly. For partial inspection pages, `strict=False` returns entries with `complete=False` and the source identity. The CLI and viewer count each original record once and expose reconstructed payloads. The viewer reconstructs bytes and checks identity; full integrity verification uses the Python reconstruction helper and `store.verify` for the enclosing chain.

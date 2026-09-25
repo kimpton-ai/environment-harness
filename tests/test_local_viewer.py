@@ -117,13 +117,13 @@ def test_browser_opening_and_readiness_fail_safely(monkeypatch, capsys):
 
     server = type("Server", (), {"started": True, "should_exit": False})()
     monkeypatch.setattr(local_viewer, "open_browser", lambda _url: False)
-    local_viewer.open_when_ready(server, "http://localhost/home")
-    assert capsys.readouterr().out == ("Could not open a browser. Open http://localhost/home manually.\n")
+    local_viewer.open_when_ready(server, "http://localhost/overview")
+    assert capsys.readouterr().out == ("Could not open a browser. Open http://localhost/overview manually.\n")
 
     server = type("Server", (), {"started": False, "should_exit": True})()
-    local_viewer.open_when_ready(server, "http://localhost/home")
+    local_viewer.open_when_ready(server, "http://localhost/overview")
 
     server = type("Server", (), {"started": True, "should_exit": False})()
     monkeypatch.setattr(local_viewer, "open_browser", lambda _url: (_ for _ in ()).throw(OSError()))
-    local_viewer.open_when_ready(server, "http://localhost/home")
+    local_viewer.open_when_ready(server, "http://localhost/overview")
     assert "Could not open a browser" in capsys.readouterr().out

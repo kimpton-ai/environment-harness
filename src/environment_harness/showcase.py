@@ -219,9 +219,9 @@ def create_synthetic_review_demo(
             for name, item in named_sessions
         ],
         "review": {
-            "home": "/home",
-            "experiment": f"/experiment/{experiment['id']}",
-            "environment_session": f"/session/{showcase['id']}/overview",
+            "overview": "/overview",
+            "experiment": f"/experiments/{experiment['id']}",
+            "environment_session": f"/sessions/{showcase['id']}",
         },
     }
 

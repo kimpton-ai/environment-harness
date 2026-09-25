@@ -161,9 +161,9 @@ def test_quickstart_builds_a_grouped_experiment_and_review_routes(tmp_path, monk
         "Team handoff review",
     ]
     assert result["review"] == {
-        "home": "/home",
-        "experiment": f"/experiment/{experiment['id']}",
-        "environment_session": f"/session/{result['id']}/overview",
+        "overview": "/overview",
+        "experiment": f"/experiments/{experiment['id']}",
+        "environment_session": f"/sessions/{result['id']}",
     }
 
     recorded = EvidenceStore(store_path)
@@ -435,7 +435,7 @@ def test_cli_open_flag_only_launches_the_plain_viewer_url(tmp_path, monkeypatch,
 
     invoke(monkeypatch, capsys, tmp_path / "store", "serve", "--port", "9876", "--open")
 
-    assert opened == ["http://127.0.0.1:9876/home"]
+    assert opened == ["http://127.0.0.1:9876/overview"]
 
 
 def test_cli_inspect_forwards_limit(tmp_path, monkeypatch, capsys):

@@ -18,8 +18,6 @@ from environment_harness import (
 from environment_harness.access import _AccessContext
 from environment_harness.contracts import Capabilities, EnvironmentSpec, Transition
 from environment_harness.errors import Conflict, Forbidden
-from environment_harness.operations import Operations
-from environment_harness.runner import run as run_session
 from environment_harness.runtime import _SessionRuntime
 from environment_harness.server import create_app
 
@@ -95,7 +93,7 @@ def test_harness_runs_a_standalone_environment_session(tmp_path):
 
 
 def test_harness_rejects_a_session_runner_that_does_not_return_the_current_record(tmp_path):
-    def invalid_runner(session, environment, researcher, agents, *, turns):
+    def invalid_runner(control, agents, *, turns):
         return {"status": "completed"}
 
     harness = EnvironmentHarness(
@@ -131,30 +129,22 @@ def test_harness_freezes_environment_supplied_operation_specs(tmp_path):
                 }
             )
 
-    def run_with_inspection(session, environment, researcher, agents, *, turns):
-        run_session(session, environment, researcher, agents, turns=1)
-        agent = _AccessContext(
-            tenant=researcher.tenant,
-            subject="agent",
-            policy="participant",
-            session=environment,
-            participant="agent",
-        )
-        operations = Operations(session.store)
-        operations.prepare(
-            environment,
-            agent,
+    def run_with_inspection(control, agents, *, turns):
+        control.advance(agents, turns=1)
+        # The typed control derives the participant scope; no caller builds one.
+        control.prepare_operation(
             "inspect",
+            participant="agent",
             endpoint="world",
             operation="world.inspect",
             payload={"location": "Arena"},
         )
-        lease = session.lease(environment, researcher, "example-operation")
+        lease = control.lease("example-operation")
         try:
-            operations.dispatch(session, environment, researcher, lease, "inspect")
+            control.dispatch_operation(lease, "inspect")
         finally:
-            session.release(environment, researcher, lease)
-        return run_session(session, environment, researcher, agents, turns=turns - 1)
+            control.release(lease)
+        return control.advance(agents, turns=turns - 1)
 
     harness = EnvironmentHarness(
         tmp_path,

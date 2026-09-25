@@ -11,7 +11,7 @@ A trajectory can enter a dataset only when all of these are true:
 - its frozen purpose and split are both `training`;
 - collection is complete and execution is completed;
 - it is terminated or truncated with a resolved outcome;
-- the researcher can read the full selected evidence;
+- the caller holds trusted-local or management authority over the selected evidence;
 - every reward supersession chain is complete, acyclic, unambiguous, and finite; and
 - every member uses the same source schema version.
 
@@ -125,7 +125,7 @@ class LocalTrainer:
         )
 
 
-recorded = training.run(dataset.metadata.id, LocalTrainer(), {"epochs": 1}, researcher)
+recorded = harness.sources().train(dataset.metadata.id, LocalTrainer(), {"epochs": 1})
 ```
 
 Third-party packages can publish integration factories under the
