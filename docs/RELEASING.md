@@ -166,6 +166,10 @@ For local validation or recovery, the equivalent first-candidate command is:
 python scripts/release_version.py prepare --bump patch --prerelease rc
 ```
 
+The same command starts a new release line when the current metadata is a candidate on an older
+line. For example, `--bump minor --prerelease rc` advances `0.2.4rc2` to `0.3.0rc1`; supplying a
+bump starts the new line at candidate 1 instead of advancing the older line's candidate serial.
+
 Use `minor` or `major` when appropriate. The command synchronizes:
 
 - `pyproject.toml`;
