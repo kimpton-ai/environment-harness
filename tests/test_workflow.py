@@ -100,7 +100,7 @@ def test_isolation_artifacts_and_authority(setup):
     replacement = session.participant_context(environment, who, "alice")
     assert session.observe(environment, replacement)["generation"] == 1
     private = json.dumps(list(store.replay(environment, agents["bob"])))
-    assert "synthetic-secret-alice" not in private
+    assert "synthetic-briefing-alice" not in private
 
 
 def test_fencing_and_resume_preserve_state(setup):

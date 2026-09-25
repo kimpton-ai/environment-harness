@@ -158,6 +158,13 @@ def main() -> None:
         )
         if setup.returncode != 0:
             raise SystemExit(f"regression proof environment failed with exit code {setup.returncode}")
+        # Collection and assertion failures below are the proof this gate wants:
+        # the changed tests must not pass on the base revision.
+        print(
+            f"regression proof: running {len(changed)} changed test file(s) against {BASE}; "
+            "failures below are expected",
+            flush=True,
+        )
         result = subprocess.run(
             [
                 "uv",

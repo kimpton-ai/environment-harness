@@ -355,3 +355,43 @@ def test_public_python_calls_never_select_code_by_import_path(tmp_path):
     local = harness(tmp_path)
     with pytest.raises(ValueError, match="was not supplied"):
         local.start(Scenario(id="a", input={}), environment="counter")  # type: ignore[arg-type]
+
+
+def test_repeated_reconciliation_skips_work_it_already_tracks(tmp_path):
+    """The second call must not requeue a job this process is already running.
+
+    The first reconciliation schedules the durable rows; until they finish, the
+    rows are still `queued` in the database while their jobs are tracked in
+    memory. A second call has to recognise that and do nothing.
+    """
+
+    import threading
+
+    release = threading.Event()
+
+    class Blocking(Agent):
+        def act(self, observation):
+            assert release.wait(15)
+            return super().act(observation)
+
+    store = EvidenceStore(tmp_path)
+    seed = harness(store, reconcile=False)
+    seed._executor.shutdown(wait=False)
+    seed.experiment("blocked", [Scenario(id="a", input={})], trials=2, turns=1).start()
+    with store.transaction() as db:
+        assert db.execute("SELECT count(*) FROM session_runs WHERE status='queued'").fetchone()[0] == 2
+
+    second = EnvironmentHarness(
+        store, environment=(Counter,), agents={"agent": Blocking}, max_concurrency=2, reconcile=False
+    )
+    requeued = second.reconcile()["requeued"]
+    assert len(requeued) == 2
+
+    # The rows are still queued but their jobs are tracked, so nothing is added.
+    assert second.reconcile()["requeued"] == []
+    release.set()
+    for identity in requeued:
+        second.session(identity).wait(15)
+    assert {second.session(identity).status for identity in requeued} == {"succeeded"}
+    with store.transaction() as db:
+        assert db.execute("SELECT count(*) FROM session_runs").fetchone()[0] == 2

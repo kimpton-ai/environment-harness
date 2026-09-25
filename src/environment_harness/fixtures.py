@@ -42,7 +42,7 @@ class SyntheticEnvironment:
         return {
             "total": scenario.starting_total,
             "turn": 0,
-            "private": {p.id: "synthetic-secret-" + p.id for p in experiment.participants},
+            "private": {p.id: "synthetic-briefing-" + p.id for p in experiment.participants},
         }
 
     def observe(self, state, participant):

@@ -255,8 +255,8 @@ try:
     except Exception as error:
         assert "403" in str(error), error
     events = request(f"/v1/sessions/{parent}/evidence", participant_token).read().decode()
-    assert "synthetic-secret-alice" in events
-    assert "synthetic-secret-bob" not in events
+    assert "synthetic-briefing-alice" in events
+    assert "synthetic-briefing-bob" not in events
 
     comparison = client.compare([parent, child])
     assert len(comparison["metric_groups"]) == 1

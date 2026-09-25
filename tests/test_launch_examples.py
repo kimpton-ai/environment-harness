@@ -32,8 +32,8 @@ def test_branch_example_outcomes_and_private_history(tmp_path):
             tenant="local", subject="alice", policy="participant", session=environment, participant="alice"
         )
         events = json.dumps(list(store.replay(environment, alice)))
-        assert "synthetic-secret-alice" in events
-        assert "synthetic-secret-bob" not in events
+        assert "synthetic-briefing-alice" in events
+        assert "synthetic-briefing-bob" not in events
         assert (tmp_path / f"{environment}.jsonl").is_file()
 
 
