@@ -348,6 +348,7 @@ def check_release_workflow_binding() -> None:
         'git merge-base --is-ancestor "$RELEASE_SHA" origin/main': "main ancestry",
         '--release-tag "$RELEASE_TAG"': "tag-to-package version binding",
         '--release-origin "$RELEASE_ORIGIN"': "version-origin binding",
+        "GITHUB_TOKEN: ${{ github.token }}": "authenticated Action metadata audit",
         "environment: release-tag": "protected tag environment",
         'tag_response="$RUNNER_TEMP/tag-ref.json"': "fail-closed tag lookup response",
         '\'.status == "404" and .message == "Not Found"\'': "validated missing tag response",
