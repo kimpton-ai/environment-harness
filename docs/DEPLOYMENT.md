@@ -289,3 +289,15 @@ Update this guide in the same pull request when any of these change:
 
 Release maintainers should also follow [How to release EnvironmentHarness](RELEASING.md). Viewer
 contributors should follow [How to maintain the viewer](VIEWER-MAINTENANCE.md).
+
+## Optional decision runtime storage
+
+The separately installed `environment-harness-decisions` companion owns a private
+SQLite child ledger below an environment operation. Its driver must enforce final
+native admission, deadlines and cancellation. Stopping releases native controls
+without waiting for inference. Unknown provider charges keep reservations;
+unknown effects require lookup using the original ID and are never resubmitted.
+Use the consumer's explicit stopped-controller migration command for saved runs.
+The migration utility copies SQLite through a consistent backup, retains source
+artifacts and writes a linked paused SDK segment. This local contract does not
+establish a production hosted-service or full-game acceptance claim.
