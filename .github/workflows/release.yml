@@ -107,6 +107,7 @@ jobs:
           uv run --no-sync python scripts/check_repository.py --full
           --release-tag "$RELEASE_TAG" --release-origin "$RELEASE_ORIGIN"
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           RELEASE_ORIGIN: ${{ needs.resolve.outputs.release_origin }}
           RELEASE_TAG: ${{ needs.resolve.outputs.release_tag }}
       - run: uv run --no-sync python scripts/check_release.py

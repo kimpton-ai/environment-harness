@@ -226,6 +226,7 @@ def test_dependabot_routine_update_policy_fails_closed(tmp_path, monkeypatch, co
         ("release_origin:", "version-introducing release origin"),
         ("python scripts/release_version.py resolve", "release PR resolution"),
         ('--release-origin "$RELEASE_ORIGIN"', "version-origin binding"),
+        ("GITHUB_TOKEN: ${{ github.token }}", "authenticated Action metadata audit"),
         ("environment: release-tag", "protected tag environment"),
         ('tag_response="$RUNNER_TEMP/tag-ref.json"', "fail-closed tag lookup response"),
         ('\'.status == "404" and .message == "Not Found"\'', "validated missing tag response"),
