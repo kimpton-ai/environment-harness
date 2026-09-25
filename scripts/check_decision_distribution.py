@@ -39,8 +39,11 @@ with tempfile.TemporaryDirectory() as directory:
     assert session.status == 'succeeded'
 """
         subprocess.run([str(python), "-I", "-c", smoke], check=True, cwd=root, env=env)
+        # Resolve the companion's declared requirement against the core wheel that
+        # is already installed, offline. `--no-deps` would skip resolution entirely
+        # and let the pin drift away from the SDK generation this package targets.
         subprocess.run(
-            ["uv", "pip", "install", "--no-deps", "--python", str(python), str(companion)],
+            ["uv", "pip", "install", "--offline", "--python", str(python), str(companion)],
             check=True,
             env=env,
         )
