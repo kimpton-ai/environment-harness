@@ -8,6 +8,11 @@ Install this directory with `pip install ./packages/decision-runtime`. Add
 `[typesafe]` to install the optional HTTP transport. No package publication is
 part of this implementation.
 
+The core evidence contract for decisions — the `decision.requested` and
+`decision.selected` record types this package produces — is owned by the SDK and
+documented in [Decision runtime](../../docs/DECISION-RUNTIME.md). The TypeSafe Jev
+adapter is documented in [TypeSafe Jev provider](docs/TYPESAFE-JEV.md).
+
 ## Execution contract
 
 `DecisionOperation` receives an immutable `BoundedInvocation`: an objective,
@@ -100,7 +105,7 @@ admission and original IDs. Unknown effects cannot be acknowledged away. New
 composed-control integrations should implement `EnvironmentControl` directly.
 
 Prepared successors are optional and require explicit native support. Sequential
-execution remains the default. Civ does not enable prepared successors.
+execution remains the default, and an integration opts in explicitly.
 
 ## Validation scope
 

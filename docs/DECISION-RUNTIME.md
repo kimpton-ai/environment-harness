@@ -7,10 +7,12 @@ causal vocabulary, their minimum payloads, and how they link to environment oper
 **not** implement a decision runtime.
 
 The runtime — `DecisionSelector`, the candidate registry, the operation-expansion engine, the
-deterministic reference selector, and the optional TypeSafe/Jev adapter — is the separately owned
-**Pluggable Decision-Selection Seam**. That package keeps its own version and release gate. It is
-**not part of the frozen `0.3.0rc1` manifest**; nothing in this repository imports it, requires it,
-or degrades without it.
+deterministic reference selector, and the optional TypeSafe/Jev adapter — is the separately
+versioned **Pluggable Decision-Selection Seam**, published as `environment-harness-decisions`
+from [`packages/decision-runtime`](../packages/decision-runtime/README.md). It keeps its own
+version and release gate and is **not part of the frozen `0.3.0rc1` manifest**: the companion
+imports this SDK, the SDK never imports the companion, and the core distribution neither ships
+nor degrades without it.
 
 This split is deliberate. A trajectory must remain readable, diffable, and trainable whether the
 decision that produced an action came from a selector runtime, a hand-written agent, or an imported
@@ -111,21 +113,22 @@ parameterized contract fixture.
 
 ## Deterministic reference selector
 
-The seam's deterministic reference selector is **not implemented here**. When it is selected for a
-release manifest, it is published in the same candidate/final release event and exercised by the
-installed-wheel walkthrough. Until then, the evidence contract records `selector.id` and
-`selector.version` for whatever producer actually made the choice — including an ordinary agent that
-never used a selector runtime at all.
+The seam's deterministic reference selector lives in the companion, not in the SDK. When the
+companion is selected for a release manifest, it is published in the same candidate/final release
+event and exercised by the installed-wheel walkthrough. Until then, the evidence contract records
+`selector.id` and `selector.version` for whatever producer actually made the choice — including an
+ordinary agent that never used a selector runtime at all.
 
 Do not read `selector` as proof that a pluggable runtime was installed. It is a producer
 declaration, like `AgentSpec.implementation`, not an executable attestation.
 
 ## Optional TypeSafe/Jev setup
 
-TypeSafe and Jev are optional adapters owned by the decision-seam package. This repository declares
-no dependency, extra, or entry point for them, and the default distribution does not install them.
-The release walkthrough verifies the optional distribution **without** installing TypeSafe by
-default, so a plain install never acquires that dependency graph transitively.
+TypeSafe and Jev are optional adapters owned by the companion, documented in
+[TypeSafe Jev provider](../packages/decision-runtime/docs/TYPESAFE-JEV.md). The SDK declares no
+dependency, extra, or entry point for them, and the core distribution does not install them.
+`scripts/check_decision_distribution.py` installs the core wheel alone, then the companion wheel,
+and asserts that neither acquires that dependency graph transitively.
 
 A provider that wants to record its own adapter detail puts it in `data` as an additive optional
 field or under a namespaced key in `extensions`. Both survive parse–serialize losslessly and
@@ -160,3 +163,5 @@ second recovery path:
 - [Agent integration](AGENT-INTEGRATION.md) — correlated inference evidence
 - [Coordinated sessions](coordinated-sessions.md) — simultaneous decisions and phase closure
 - [Compatibility](COMPATIBILITY.md) — `v1alpha1` evolution and enforced fixtures
+- [EnvironmentHarness Decisions](../packages/decision-runtime/README.md) — the separately
+  versioned companion that implements the seam
