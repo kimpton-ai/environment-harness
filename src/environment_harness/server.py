@@ -1471,6 +1471,13 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         del experiment_id, scenario_id
         return FileResponse(Path(__file__).parent / "viewer" / "index.html")
 
+    @app.get("/experiments/{experiment_id}/scenarios/{scenario_id}/{section}", include_in_schema=False)
+    def viewer_experiment_scenario_section(experiment_id: str, scenario_id: str, section: str):
+        del experiment_id, scenario_id
+        if section not in ("overview", "sessions", "trajectories"):
+            raise HTTPException(404)
+        return FileResponse(Path(__file__).parent / "viewer" / "index.html")
+
     @app.get("/experiments/{experiment_id}/{section}", include_in_schema=False)
     def viewer_experiment_section(experiment_id: str, section: str):
         del experiment_id

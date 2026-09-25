@@ -50,13 +50,14 @@ measure model quality or safety.
 
 The running service publishes its generated OpenAPI document at `/openapi.json` and interactive reference at `/docs`. The repository checks the committed [`contracts/openapi.json`](contracts/openapi.json) and versioned JSON Schemas in [`contracts/`](contracts/) for drift. [`docs/API-REFERENCE.md`](docs/API-REFERENCE.md) documents endpoints and examples; [`docs/PROTOCOL.md`](docs/PROTOCOL.md) defines the authority, lifecycle, activity-stream, recovery, and evidence semantics that OpenAPI alone cannot express.
 
-![EnvironmentHarness Home showing grouped experiments and their environment sessions](https://raw.githubusercontent.com/kimpton-ai/environment-harness/main/docs/assets/environment-harness-home.png)
+![The EnvironmentHarness Sessions index showing grouped experiments and their environment sessions](https://raw.githubusercontent.com/kimpton-ai/environment-harness/main/docs/assets/environment-harness-home.png)
 
-Use the viewer from broad context to specific evidence:
+The viewer has four global destinations — **Overview**, **Experiments**, **Sessions**, and **Trajectories** — and moves from broad context to specific evidence:
 
-1. **Home** groups related environment sessions under their experiment and keeps standalone sessions visible.
-2. **Experiment** records the shared scenarios, trials, participants, environment, operations, policy, and scoring configuration.
-3. **Session** separates frozen configuration, turn-by-turn evidence, progression, and versioned reports.
+1. **Sessions** groups related environment sessions under their experiment and keeps standalone sessions visible.
+2. **Experiments** records the shared scenarios, trials, participants, environment, operations, policy, and scoring configuration, and lists the trajectories its sessions recorded.
+3. A **session** separates its scores, turn-by-turn evidence, progression, trajectory, and frozen configuration.
+4. **Trajectories** lists native and imported portable evidence with its collection health, records, snapshot boundaries, and provenance.
 
 All screenshots use the repository's synthetic examples. Their counters, rewards, and findings demonstrate the data model; they are not model-quality or safety measurements.
 

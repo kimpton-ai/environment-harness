@@ -27,17 +27,28 @@ let homePage = 1;
 let focusedExperiment: string | null = null;
 let focusedScenario: string | null = null;
 const expandedExperiments = new Set<string>();
-type SessionTab = 'overview' | 'turns' | 'progression' | 'reports';
-type ExperimentTab = 'overview' | 'scenarios' | 'sessions' | 'training';
+type SessionTab = 'overview' | 'turns' | 'progression' | 'trajectory' | 'configuration';
+type ExperimentTab = 'overview' | 'scenarios' | 'sessions' | 'trajectories' | 'configuration';
+type ScenarioTab = 'overview' | 'sessions' | 'trajectories';
+type TrajectoryTab = 'overview' | 'records' | 'snapshots' | 'provenance';
+type Destination = 'overview' | 'experiments' | 'sessions' | 'trajectories';
 type ComparisonMetricId = 'synthetic-total' | 'cumulative-reward' | 'executed-actions';
 type ComparisonViewState = {metric?: ComparisonMetricId; startTurn?: number; endTurn?: number};
 type ViewerRoute =
-  | {kind: 'home'; environments: string[]}
-  | {kind: 'experiment'; id: string; tab: ExperimentTab; scenario?: string}
+  | {kind: 'overview'; environments: string[]}
+  | {kind: 'experiments'}
+  | {kind: 'experiment'; id: string; tab: ExperimentTab; scenario?: string; scenarioTab?: ScenarioTab}
+  | {kind: 'sessions'; environments: string[]}
   | {kind: 'compare'; environments: string[]; view: ComparisonViewState}
   | {kind: 'session'; id: string; tab: SessionTab}
-  | {kind: 'trajectory'; id: string};
+  | {kind: 'trajectories'}
+  | {kind: 'trajectory'; id: string; tab: TrajectoryTab};
+const SESSION_TABS: SessionTab[] = ['overview', 'turns', 'progression', 'trajectory', 'configuration'];
+const EXPERIMENT_TABS: ExperimentTab[] = ['overview', 'scenarios', 'sessions', 'trajectories', 'configuration'];
+const SCENARIO_TABS: ScenarioTab[] = ['overview', 'sessions', 'trajectories'];
+const TRAJECTORY_TABS: TrajectoryTab[] = ['overview', 'records', 'snapshots', 'provenance'];
 let sessionTab: SessionTab = 'overview';
+let trajectoryTab: TrajectoryTab = 'overview';
 let selectedTurnIndex = -1;
 let selectedParticipant: string | null = null;
 const selected = new Set<string>();
@@ -148,6 +159,8 @@ function syncDropdown(select: HTMLSelectElement) {
   const label = trigger?.querySelector('span');
   const menu = shell?.querySelector<HTMLElement>('.dropdown-menu');
   if (!shell || !trigger || !label || !menu) return;
+  // A background refresh must not drop keyboard focus out of an open listbox.
+  const keyboardFocused = menu.contains(document.activeElement);
   label.textContent = select.selectedOptions[0]?.textContent ?? dropdownLabel(select);
   trigger.disabled = select.disabled || select.options.length === 0;
   trigger.setAttribute('aria-label', `${dropdownLabel(select)}: ${label.textContent}`);
@@ -176,6 +189,7 @@ function syncDropdown(select: HTMLSelectElement) {
     };
     return item;
   }));
+  if (keyboardFocused) menu.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus();
 }
 function initializeDropdown(select: HTMLSelectElement) {
   if (select.dataset.dropdownInitialized === 'true') return;
@@ -262,12 +276,17 @@ function mapping(value: Json | undefined): Record<string, Json> {
 }
 const known = (id: string | null | undefined) => catalog.find(row => row.id === id);
 function reference(id: string | null | undefined) {const item = known(id); return item ? `${title(item)} ${shortId(id)}` : shortId(id);}
-const sessionPath = (id: string, tab: SessionTab) => `/sessions/${encodeURIComponent(id)}/${tab}`;
-function experimentPath(id: string, tab: ExperimentTab, scenario?: string) {
+const sessionPath = (id: string, tab: SessionTab) =>
+  tab === 'overview' ? `/sessions/${encodeURIComponent(id)}` : `/sessions/${encodeURIComponent(id)}/${tab}`;
+const trajectoryPath = (id: string, tab: TrajectoryTab) =>
+  tab === 'overview' ? `/trajectories/${encodeURIComponent(id)}` : `/trajectories/${encodeURIComponent(id)}/${tab}`;
+function experimentPath(id: string, tab: ExperimentTab, scenario?: string, scenarioTab: ScenarioTab = 'overview') {
   const root = `/experiments/${encodeURIComponent(id)}`;
-  if (tab === 'overview') return root;
-  if (tab === 'scenarios' && scenario) return `${root}/scenarios/${encodeURIComponent(scenario)}`;
-  return `${root}/${tab}`;
+  if (scenario) {
+    const base = `${root}/scenarios/${encodeURIComponent(scenario)}`;
+    return scenarioTab === 'overview' ? base : `${base}/${scenarioTab}`;
+  }
+  return tab === 'overview' ? root : `${root}/${tab}`;
 }
 function selectedEnvironments(parameters: URLSearchParams) {
   return [...new Set(parameters.getAll('environment').filter(Boolean))].slice(0, 100);
@@ -276,7 +295,7 @@ function positiveTurn(value: string | null) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed >= 1 ? parsed : undefined;
 }
-function selectionPath(path: '/overview' | '/comparisons', environments: string[], view: ComparisonViewState = {}) {
+function selectionPath(path: '/sessions' | '/comparisons', environments: string[], view: ComparisonViewState = {}) {
   const parameters = new URLSearchParams();
   for (const environment of [...new Set(environments)].slice(0, 100)) parameters.append('environment', environment);
   if (path === '/comparisons' && view.metric) parameters.set('metric', view.metric);
@@ -289,7 +308,10 @@ function routeFromLocation(): ViewerRoute | null {
   const path = location.pathname.replace(/\/$/, '') || '/';
   const parameters = new URLSearchParams(location.search);
   const environments = selectedEnvironments(parameters);
-  if (path === '/' || path === '/overview') return {kind: 'home', environments};
+  if (path === '/' || path === '/overview') return {kind: 'overview', environments};
+  if (path === '/experiments') return {kind: 'experiments'};
+  if (path === '/sessions') return {kind: 'sessions', environments};
+  if (path === '/trajectories') return {kind: 'trajectories'};
   if (path === '/comparisons') {
     const metric = parameters.get('metric');
     const startTurn = positiveTurn(parameters.get('start_turn'));
@@ -300,12 +322,19 @@ function routeFromLocation(): ViewerRoute | null {
       endTurn: endTurn !== undefined && (startTurn === undefined || endTurn >= startTurn) ? endTurn : undefined,
     }};
   }
-  const experimentScenario = path.match(/^\/experiments\/([^/]+)\/scenarios\/([^/]+)$/);
+  const experimentScenario = path.match(/^\/experiments\/([^/]+)\/scenarios\/([^/]+)(?:\/(sessions|trajectories))?$/);
   if (experimentScenario) {
-    try {return {kind: 'experiment', id: decodeURIComponent(experimentScenario[1]), tab: 'scenarios', scenario: decodeURIComponent(experimentScenario[2])};}
-    catch {return null;}
+    try {
+      return {
+        kind: 'experiment',
+        id: decodeURIComponent(experimentScenario[1]),
+        tab: 'scenarios',
+        scenario: decodeURIComponent(experimentScenario[2]),
+        scenarioTab: (experimentScenario[3] ?? 'overview') as ScenarioTab,
+      };
+    } catch {return null;}
   }
-  const experimentSection = path.match(/^\/experiments\/([^/]+)\/(scenarios|sessions|training)$/);
+  const experimentSection = path.match(/^\/experiments\/([^/]+)\/(scenarios|sessions|trajectories|configuration)$/);
   if (experimentSection) {
     try {return {kind: 'experiment', id: decodeURIComponent(experimentSection[1]), tab: experimentSection[2] as ExperimentTab};}
     catch {return null;}
@@ -315,12 +344,12 @@ function routeFromLocation(): ViewerRoute | null {
     try {return {kind: 'experiment', id: decodeURIComponent(experiment[1]), tab: 'overview'};}
     catch {return null;}
   }
-  const trajectory = path.match(/^\/trajectories\/([^/]+)$/);
+  const trajectory = path.match(/^\/trajectories\/([^/]+)(?:\/(records|snapshots|provenance))?$/);
   if (trajectory) {
-    try {return {kind: 'trajectory', id: decodeURIComponent(trajectory[1])};}
+    try {return {kind: 'trajectory', id: decodeURIComponent(trajectory[1]), tab: (trajectory[2] ?? 'overview') as TrajectoryTab};}
     catch {return null;}
   }
-  const match = path.match(/^\/sessions\/([^/]+)(?:\/(overview|turns|progression|reports))?$/);
+  const match = path.match(/^\/sessions\/([^/]+)(?:\/(overview|turns|progression|trajectory|configuration))?$/);
   if (!match) return null;
   try {
     return {kind: 'session', id: decodeURIComponent(match[1]), tab: (match[2] ?? 'overview') as SessionTab};
@@ -339,7 +368,7 @@ function restoreSelected(environments: string[]) {
 }
 function persistSelection() {
   const route = routeFromLocation();
-  if (route?.kind === 'home') setLocation(selectionPath('/overview', [...selected]), true);
+  if (route?.kind === 'sessions') setLocation(selectionPath('/sessions', [...selected]), true);
   if (route?.kind === 'compare') setLocation(selectionPath('/comparisons', [...selected], route.view), true);
 }
 function markListSynced() {
@@ -360,7 +389,7 @@ async function list() {
   trajectoryIndex = trajectories.items;
   activityHierarchy = snapshot; activityCursor = Math.max(activityCursor, snapshot.cursor);
   renderList();
-  renderImportedTrajectories();
+  renderTrajectoryIndex();
   renderModeSummary();
   markListSynced();
   return catalog;
@@ -429,6 +458,8 @@ async function activityTick() {
 async function attach(id: string, tab: SessionTab = 'overview', updateLocation = true) {
   const ticket = ++generation;
   sessionSync += 1;
+  // Ancestry comes from the fetched Session, so reserve the breadcrumb height before requesting it.
+  renderBreadcrumbSkeleton(3);
   const item = sessionToEnvironment(await client.session(id));
   if (ticket !== generation) return;
   environment = item; cursor = 0; events = []; reports = [];
@@ -774,49 +805,226 @@ function renderHomeSelection() {
   button.disabled = count < 2;
   button.textContent = count > 1 ? `Compare ${count} Sessions` : 'Select Another Session';
 }
-function renderImportedTrajectories() {
-  const imported = trajectoryIndex.filter(item => item.origin === 'imported');
-  const section = el('imported-trajectories');
-  section.hidden = imported.length === 0 || focusedExperiment !== null;
-  const list = el('imported-trajectory-list'); list.replaceChildren();
-  for (const item of imported) {
-    const button = text('button', '', 'imported-trajectory-row') as HTMLButtonElement;
+function trajectoryRow(item: TrajectorySummary) {
+  const button = text('button', '', 'collection-index-row imported-trajectory-row') as HTMLButtonElement;
+  button.type = 'button';
+  button.dataset.trajectoryId = item.id;
+  button.dataset.trajectoryOrigin = item.origin;
+  const identity = text('span', '', 'collection-index-identity imported-trajectory-identity');
+  identity.append(text('strong', item.run_id), text('small', `${item.namespace} · ${shortId(item.id)}`));
+  button.append(identity, text('span', item.origin === 'native' ? 'Native' : 'Imported'),
+    text('span', sessionStatus(item.collection_state)), text('span', sessionStatus(item.execution_state)));
+  button.onclick = () => void attempt(() => showTrajectory(item.id));
+  return button;
+}
+function renderTrajectoryIndex() {
+  const list = el('trajectory-index-list');
+  list.replaceChildren();
+  for (const item of trajectoryIndex) list.append(trajectoryRow(item));
+  if (!trajectoryIndex.length) list.append(text('p', 'No trajectory evidence has been recorded yet.', 'muted'));
+}
+function contextTrajectories(sessions: ActivitySession[]) {
+  const owned = new Set(sessions.map(session => session.id));
+  return trajectoryIndex.filter(item => item.origin === 'native' && owned.has(item.id));
+}
+function renderContextTrajectories(sessions: ActivitySession[]) {
+  const list = el('experiment-trajectory-list');
+  list.replaceChildren();
+  const items = contextTrajectories(sessions);
+  for (const item of items) list.append(trajectoryRow(item));
+  if (!items.length) list.append(text('p', 'No trajectory evidence has been recorded in this context.', 'muted'));
+}
+function renderExperimentIndex() {
+  const list = el('experiment-index-list');
+  list.replaceChildren();
+  const experiments = activityHierarchy?.experiments ?? [];
+  for (const item of experiments) {
+    const button = text('button', '', 'collection-index-row') as HTMLButtonElement;
     button.type = 'button';
-    const identity = text('span', '', 'imported-trajectory-identity');
-    identity.append(text('strong', item.run_id), text('small', item.namespace));
-    button.append(identity, text('span', sessionStatus(item.collection_state)),
-      text('span', sessionStatus(item.execution_state)), text('span', shortId(item.id)));
-    button.onclick = () => void attempt(() => showTrajectory(item.id));
+    button.dataset.experimentId = item.id;
+    const identity = text('span', '', 'collection-index-identity');
+    identity.append(text('strong', item.name), text('small', shortId(item.id)));
+    const scenarios = meaningfulScenarios(item).length;
+    button.append(identity, text('span', `${scenarios} ${scenarios === 1 ? 'scenario' : 'scenarios'}`),
+      text('span', `${item.sessions.length} ${item.sessions.length === 1 ? 'session' : 'sessions'}`),
+      text('span', sessionStatus(item.status)));
+    button.onclick = () => showExperiment(item.id);
     list.append(button);
   }
+  if (!experiments.length) list.append(text('p', 'No experiments have been recorded yet.', 'muted'));
 }
-type BreadcrumbItem = {label: string; href?: string; activate?: () => void};
-function renderBreadcrumbs(items: BreadcrumbItem[] = []) {
-  const home = el<HTMLAnchorElement>('home');
-  items.length ? home.removeAttribute('aria-current') : home.setAttribute('aria-current', 'page');
-  const trail = el('breadcrumb-trail'); trail.replaceChildren(); trail.hidden = items.length === 0;
-  items.forEach((item, index) => {
-    trail.append(text('span', '/', 'breadcrumb-separator'));
-    const final = index === items.length - 1;
-    if (!final && item.href) {
-      const link = text('a', item.label, 'breadcrumb-link') as HTMLAnchorElement;
-      link.href = item.href;
-      link.onclick = event => {event.preventDefault(); item.activate?.();};
-      trail.append(link);
-    } else {
-      const current = text('span', item.label, 'breadcrumb-current');
-      current.setAttribute('aria-current', 'page'); trail.append(current);
+function renderOverviewSummary() {
+  const holder = el('overview-summary');
+  holder.replaceChildren();
+  const experiments = activityHierarchy?.experiments ?? [];
+  const destinations: [Destination, string, string, number][] = [
+    ['experiments', 'Experiments', 'Frozen definitions and the sessions they produced.', experiments.length],
+    ['sessions', 'Sessions', 'Every recorded environment session in this store.', catalog.length],
+    ['trajectories', 'Trajectories', 'Native and imported portable evidence.', trajectoryIndex.length],
+  ];
+  const section = text('div', '', 'overview-section');
+  const heading = text('div', '', 'overview-heading');
+  const copy = text('div', '');
+  copy.append(text('h2', 'Where to start'),
+    text('p', 'Experiments, sessions, and trajectories are the three global destinations.'));
+  heading.append(copy);
+  section.append(heading);
+  const list = text('div', '', 'collection-index-list');
+  for (const [destination, label, description, count] of destinations) {
+    const button = text('button', '', 'collection-index-row') as HTMLButtonElement;
+    button.type = 'button';
+    button.dataset.overviewDestination = destination;
+    const identity = text('span', '', 'collection-index-identity');
+    identity.append(text('strong', label), text('small', description));
+    button.append(identity, text('span', `${count} recorded`), text('span', ''), text('span', ''));
+    button.onclick = () => void attempt(() => showDestination(destination));
+    list.append(button);
+  }
+  section.append(list);
+  holder.append(section);
+}
+// Navigation
+// Global destinations, ancestry breadcrumbs, and one contextual left navigation. Ancestry comes
+// from the fetched resource rather than the URL, so the bar reserves its height and renders a
+// same-height skeleton until the resource and its parent references resolve.
+type BreadcrumbItem = {label: string; href: string; activate: () => void};
+let breadcrumbItems: BreadcrumbItem[] = [];
+const NARROW_BREADCRUMB_WIDTH = 620;
+function setDestination(active: Destination | null) {
+  for (const link of document.querySelectorAll<HTMLAnchorElement>('[data-destination]')) {
+    if (link.dataset.destination === active) link.setAttribute('aria-current', 'page');
+    else link.removeAttribute('aria-current');
+  }
+}
+function breadcrumbLink(item: BreadcrumbItem, className = 'breadcrumb-link') {
+  const link = text('a', item.label, className) as HTMLAnchorElement;
+  link.href = item.href;
+  link.onclick = event => {event.preventDefault(); item.activate();};
+  return link;
+}
+function paintBreadcrumbs() {
+  const trail = el('breadcrumb-trail');
+  trail.dataset.state = 'ready';
+  trail.replaceChildren();
+  const collapsed = window.innerWidth <= NARROW_BREADCRUMB_WIDTH && breadcrumbItems.length > 2;
+  const hidden = collapsed ? breadcrumbItems.slice(1, -1) : [];
+  const visible = collapsed
+    ? [breadcrumbItems[0], breadcrumbItems[breadcrumbItems.length - 1]]
+    : breadcrumbItems;
+  visible.forEach((item, index) => {
+    if (index) trail.append(text('span', '/', 'breadcrumb-separator'));
+    if (index === 1 && hidden.length) {
+      trail.append(breadcrumbOverflow(hidden), text('span', '/', 'breadcrumb-separator'));
     }
+    trail.append(breadcrumbLink(item));
   });
 }
-function renderSessionBreadcrumbs(item: Environment) {
-  const parent = activityHierarchy?.experiments.find(experiment =>
-    experiment.sessions.some(session => session.id === item.id));
-  renderBreadcrumbs(parent ? [
-    {label: parent.name, href: experimentPath(parent.id, 'overview'), activate: () => showExperiment(parent.id)},
-    {label: sessionTitle(item)},
-  ] : [{label: sessionTitle(item)}]);
+function breadcrumbOverflow(hidden: BreadcrumbItem[]) {
+  const holder = text('span', '', 'breadcrumb-overflow');
+  const trigger = text('button', '\u2026', 'breadcrumb-ellipsis') as HTMLButtonElement;
+  trigger.type = 'button';
+  trigger.setAttribute('aria-haspopup', 'menu');
+  trigger.setAttribute('aria-expanded', 'false');
+  trigger.setAttribute('aria-label', `Show ${hidden.length} hidden ancestor${hidden.length === 1 ? '' : 's'}`);
+  const menu = text('span', '', 'breadcrumb-overflow-menu');
+  menu.setAttribute('role', 'menu');
+  menu.setAttribute('aria-label', 'Hidden ancestry');
+  menu.hidden = true;
+  for (const item of hidden) {
+    const link = breadcrumbLink(item, '');
+    link.setAttribute('role', 'menuitem');
+    menu.append(link);
+  }
+  trigger.onclick = () => {
+    menu.hidden = !menu.hidden;
+    trigger.setAttribute('aria-expanded', String(!menu.hidden));
+  };
+  holder.append(trigger, menu);
+  return holder;
 }
+function renderBreadcrumbs(items: BreadcrumbItem[] = []) {
+  breadcrumbItems = items;
+  paintBreadcrumbs();
+}
+function renderBreadcrumbSkeleton(depth = 2) {
+  breadcrumbItems = [];
+  const trail = el('breadcrumb-trail');
+  trail.dataset.state = 'loading';
+  trail.replaceChildren();
+  for (let index = 0; index < depth; index += 1) {
+    if (index) trail.append(text('span', '/', 'breadcrumb-separator'));
+    trail.append(text('span', '', 'breadcrumb-skeleton'));
+  }
+}
+const destinationCrumb = (destination: Destination, label: string): BreadcrumbItem => ({
+  label,
+  href: `/${destination}`,
+  activate: () => void attempt(() => showDestination(destination)),
+});
+const experimentCrumb = (item: {id: string; name: string}): BreadcrumbItem => ({
+  label: item.name,
+  href: experimentPath(item.id, 'overview'),
+  activate: () => showExperiment(item.id),
+});
+const scenarioCrumb = (experiment: ActivityExperiment, scenario: ActivityScenario): BreadcrumbItem => ({
+  label: scenarioTitle(scenario),
+  href: experimentPath(experiment.id, 'scenarios', scenario.id),
+  activate: () => showExperiment(experiment.id, 'scenarios', scenario.id),
+});
+const sessionCrumb = (id: string, label: string): BreadcrumbItem => ({
+  label,
+  href: sessionPath(id, 'overview'),
+  activate: () => void attempt(() => attach(id)),
+});
+function experimentOf(sessionId: string) {
+  return activityHierarchy?.experiments.find(experiment =>
+    experiment.sessions.some(session => session.id === sessionId)) ?? null;
+}
+/** Ownership ancestry for a Session, stopping at its parent so the heading owns the name. */
+function sessionAncestry(id: string): BreadcrumbItem[] {
+  const experiment = experimentOf(id);
+  if (!experiment) return [destinationCrumb('sessions', 'Sessions')];
+  const session = experiment.sessions.find(candidate => candidate.id === id);
+  const scenario = session ? scenarioFor(experiment, session) : undefined;
+  return [
+    destinationCrumb('experiments', 'Experiments'),
+    experimentCrumb(experiment),
+    ...(scenario ? [scenarioCrumb(experiment, scenario)] : []),
+  ];
+}
+/** Native trajectory identities are their Session identity; imported ones are their source. */
+function nativeSessionOf(trajectoryId: string) {
+  const summary = trajectoryIndex.find(candidate => candidate.id === trajectoryId);
+  return summary?.origin === 'native' ? summary.id : null;
+}
+/** Ancestry for a Trajectory: native evidence is owned by its Session, imported evidence is not. */
+function trajectoryAncestry(id: string): BreadcrumbItem[] {
+  const owner = nativeSessionOf(id);
+  if (!owner) return [destinationCrumb('trajectories', 'Trajectories')];
+  const session = known(owner);
+  return [...sessionAncestry(owner), sessionCrumb(owner, session ? sessionTitle(session) : shortId(owner))];
+}
+const ancestryDestination = (items: BreadcrumbItem[]): Destination =>
+  (items[0]?.href.slice(1) as Destination | undefined) ?? 'overview';
+type ContextItem = {id: string; label: string; activate: () => void};
+function renderContextNav(heading: string, items: ContextItem[], active: string) {
+  const nav = el('context-nav');
+  nav.replaceChildren();
+  nav.hidden = items.length === 0;
+  document.body.classList.toggle('viewer-contextual', items.length > 0);
+  if (!items.length) return;
+  nav.append(text('div', heading, 'context-nav-heading'));
+  for (const item of items) {
+    const button = text('button', item.label) as HTMLButtonElement;
+    button.type = 'button';
+    button.dataset.contextItem = item.id;
+    if (item.id === active) button.setAttribute('aria-current', 'page');
+    button.onclick = item.activate;
+    nav.append(button);
+  }
+}
+const clearContextNav = () => renderContextNav('', [], '');
+const contextLabel = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);
 function meaningfulScenarios(experiment: ActivityExperiment) {
   return experiment.scenarios.filter(scenario => {
     const input = mapping(scenario.input as Json);
@@ -856,6 +1064,52 @@ function definitionGroup(heading: string, value: unknown) {
 }
 function renderExperimentOverview(item: ActivityExperiment) {
   const holder = el('experiment-overview'); holder.replaceChildren();
+  const scenarios = meaningfulScenarios(item);
+  const progressSection = text('div', '', 'overview-section');
+  const progressHeading = text('div', '', 'overview-heading');
+  const progressCopy = text('div', '');
+  progressCopy.append(text('h2', 'Progress'), text('p', 'Independent collection and execution state for this experiment.'));
+  progressHeading.append(progressCopy);
+  progressSection.append(progressHeading);
+  const progress = text('dl', '', 'frozen-summary');
+  const completed = item.sessions.filter(session => ['succeeded', 'completed'].includes(session.status)).length;
+  for (const [label, value] of [
+    ['Status', sessionStatus(item.status)],
+    ['Scenarios', String(scenarios.length)],
+    ['Sessions', String(item.sessions.length)],
+    ['Completed', String(completed)],
+  ]) {
+    const row = text('div', ''); row.append(text('dt', label), text('dd', value)); progress.append(row);
+  }
+  progressSection.append(progress);
+  holder.append(progressSection);
+
+  const scenarioSection = text('div', '', 'overview-section');
+  const scenarioHeading = text('div', '', 'overview-heading');
+  const scenarioCopy = text('div', '');
+  scenarioCopy.append(text('h2', 'Scenarios'), text('p', scenarios.length
+    ? `${scenarios.length} configured ${scenarios.length === 1 ? 'scenario' : 'scenarios'} produced ${item.sessions.length} environment sessions.`
+    : 'No scenario variation was configured for this experiment.'));
+  scenarioHeading.append(scenarioCopy);
+  if (scenarios.length) {
+    const action = text('button', 'View Scenarios', 'text-button') as HTMLButtonElement;
+    action.type = 'button'; action.onclick = () => showExperiment(item.id, 'scenarios'); scenarioHeading.append(action);
+  }
+  scenarioSection.append(scenarioHeading);
+  if (scenarios.length) {
+    const list = text('div', '', 'experiment-scenario-summary');
+    for (const scenario of scenarios) {
+      const button = text('button', '', 'experiment-scenario-summary-row') as HTMLButtonElement;
+      button.type = 'button'; button.append(text('strong', scenarioTitle(scenario)),
+        text('span', `${scenario.completed} of ${scenario.total} sessions complete`));
+      button.onclick = () => showExperiment(item.id, 'scenarios', scenario.id); list.append(button);
+    }
+    scenarioSection.append(list);
+  }
+  holder.append(scenarioSection);
+}
+function renderExperimentConfiguration(item: ActivityExperiment) {
+  const holder = el('experiment-configuration'); holder.replaceChildren();
   const frozen = item.frozen ?? {};
   const environmentSpec = mapping(frozen.environment);
   const execution = mapping(frozen.execution);
@@ -866,7 +1120,6 @@ function renderExperimentOverview(item: ActivityExperiment) {
     ? frozen.scoring_versions.map(String).join(', ') : '';
   const participants = Array.isArray(frozen.participants)
     ? frozen.participants.map(value => mapping(value)) : [];
-  const scenarios = meaningfulScenarios(item);
 
   const frozenSection = text('div', '', 'overview-section');
   const heading = text('div', '', 'overview-heading');
@@ -909,8 +1162,9 @@ function renderExperimentOverview(item: ActivityExperiment) {
 
   const participantSection = text('div', '', 'overview-section');
   const participantHeading = text('div', '', 'overview-heading');
-  participantHeading.append(text('div', ''));
-  participantHeading.firstElementChild?.append(text('h2', 'Participants'), text('p', 'The participant implementations frozen for every session.'));
+  const participantCopy = text('div', '');
+  participantCopy.append(text('h2', 'Participants'), text('p', 'The participant implementations frozen for every session.'));
+  participantHeading.append(participantCopy);
   participantSection.append(participantHeading);
   const participantList = text('div', '', 'experiment-participant-list');
   for (const participant of participants) {
@@ -923,30 +1177,6 @@ function renderExperimentOverview(item: ActivityExperiment) {
   }
   if (!participants.length) participantList.append(text('p', 'No participants were recorded.', 'muted'));
   participantSection.append(participantList); holder.append(participantSection);
-
-  const scenarioSection = text('div', '', 'overview-section');
-  const scenarioHeading = text('div', '', 'overview-heading');
-  const scenarioCopy = text('div', '');
-  scenarioCopy.append(text('h2', 'Scenarios'), text('p', scenarios.length
-    ? `${scenarios.length} configured ${scenarios.length === 1 ? 'scenario' : 'scenarios'} produced ${item.sessions.length} environment sessions.`
-    : 'No scenario variation was configured for this experiment.'));
-  scenarioHeading.append(scenarioCopy);
-  if (scenarios.length) {
-    const action = text('button', 'View Scenarios', 'text-button') as HTMLButtonElement;
-    action.type = 'button'; action.onclick = () => showExperiment(item.id, 'scenarios'); scenarioHeading.append(action);
-  }
-  scenarioSection.append(scenarioHeading);
-  if (scenarios.length) {
-    const list = text('div', '', 'experiment-scenario-summary');
-    for (const scenario of scenarios) {
-      const button = text('button', '', 'experiment-scenario-summary-row') as HTMLButtonElement;
-      button.type = 'button'; button.append(text('strong', scenarioTitle(scenario)),
-        text('span', `${scenario.completed} of ${scenario.total} sessions complete`));
-      button.onclick = () => showExperiment(item.id, 'scenarios', scenario.id); list.append(button);
-    }
-    scenarioSection.append(list);
-  }
-  holder.append(scenarioSection);
 }
 function renderExperimentScenarios(item: ActivityExperiment, requested?: string) {
   const scenarios = meaningfulScenarios(item);
@@ -985,7 +1215,7 @@ function renderExperimentScenarios(item: ActivityExperiment, requested?: string)
   viewSessions.onclick = () => {
     el<HTMLInputElement>('session-search').value = selectedScenario.id;
     el<HTMLSelectElement>('session-status').value = '';
-    showExperiment(item.id, 'sessions');
+    showExperiment(item.id, 'scenarios', selectedScenario.id, true, 'sessions');
     resetHomePage();
   };
 }
@@ -998,37 +1228,80 @@ function revealHome() {
   document.body.classList.add('viewer-home');
   document.body.classList.remove('viewer-session', 'viewer-compare');
 }
-function showHome(updateLocation = true) {
+type CollectionPanels = Partial<Record<
+  'overviewSummary' | 'experimentIndex' | 'trajectoryIndex' | 'experimentOverview' | 'experimentScenarios'
+  | 'experimentConfiguration' | 'experimentTrajectories' | 'experimentTraining' | 'sessionList', boolean>>;
+function paintCollection(panels: CollectionPanels) {
+  el('overview-summary').hidden = !panels.overviewSummary;
+  el('experiment-index').hidden = !panels.experimentIndex;
+  el('trajectory-index').hidden = !panels.trajectoryIndex;
+  el('experiment-overview').hidden = !panels.experimentOverview;
+  el('experiment-scenarios').hidden = !panels.experimentScenarios;
+  el('experiment-configuration').hidden = !panels.experimentConfiguration;
+  el('experiment-trajectories').hidden = !panels.experimentTrajectories;
+  el('experiment-training').hidden = !panels.experimentTraining;
+  el('home-list-content').hidden = !panels.sessionList;
+}
+function showCollection(destination: Destination, heading: string, description: string, panels: CollectionPanels) {
   focusedExperiment = null;
   focusedScenario = null;
   revealHome();
   el('home-view').classList.remove('experiment-focused');
-  el('experiment-tabs').hidden = true;
-  el('experiment-overview').hidden = true;
-  el('experiment-scenarios').hidden = true;
-  el('experiment-training').hidden = true;
-  el('home-list-content').hidden = false;
-  renderImportedTrajectories();
+  clearContextNav();
+  setDestination(destination);
   renderBreadcrumbs();
+  paintCollection(panels);
   el('home-eyebrow').textContent = 'Overview';
-  el('home-title').textContent = 'Environment Sessions';
-  el('home-description').textContent = 'Find a run, investigate what changed, or select sessions to compare.';
+  el('home-title').textContent = heading;
+  el('home-description').textContent = description;
   el('home-list-title').textContent = 'All Sessions';
-  document.title = 'Environment Sessions · EnvironmentHarness';
-  if (updateLocation) setLocation(selectionPath('/overview', [...selected]));
+  document.title = `${heading} · EnvironmentHarness`;
   renderList();
 }
-async function renderExperimentTraining(item: ActivityExperiment, active: boolean) {
+function showOverview(updateLocation = true) {
+  showCollection('overview', 'Overview',
+    'Recorded experiments, environment sessions, and trajectory evidence in this store.',
+    {overviewSummary: true});
+  renderOverviewSummary();
+  if (updateLocation) setLocation('/overview');
+}
+function showExperimentsIndex(updateLocation = true) {
+  showCollection('experiments', 'Experiments',
+    'Frozen experiment definitions and the environment sessions they produced.',
+    {experimentIndex: true});
+  renderExperimentIndex();
+  if (updateLocation) setLocation('/experiments');
+}
+function showSessionsIndex(updateLocation = true) {
+  showCollection('sessions', 'Environment Sessions',
+    'Find a run, investigate what changed, or select sessions to compare.',
+    {sessionList: true});
+  if (updateLocation) setLocation(selectionPath('/sessions', [...selected]));
+}
+function showTrajectoriesIndex(updateLocation = true) {
+  showCollection('trajectories', 'Trajectories',
+    'Native session evidence and historical evidence imported from external source journals.',
+    {trajectoryIndex: true});
+  renderTrajectoryIndex();
+  if (updateLocation) setLocation('/trajectories');
+}
+async function showDestination(destination: Destination, updateLocation = true) {
+  if (destination === 'overview') showOverview(updateLocation);
+  else if (destination === 'experiments') showExperimentsIndex(updateLocation);
+  else if (destination === 'sessions') showSessionsIndex(updateLocation);
+  else showTrajectoriesIndex(updateLocation);
+  await Promise.resolve();
+}
+/** Training provenance is contextual read-only evidence, never a global destination. */
+async function renderExperimentTraining(item: ActivityExperiment) {
   const sessionTrajectories = new Set(item.sessions.map(session => `trajectory-${session.id}`));
   const datasets = (await client.datasets({limit: 100})).items.filter(dataset =>
     dataset.spec.members.some(member => sessionTrajectories.has(member.trajectoryId)));
   if (focusedExperiment !== item.id) return;
-  const tab = document.querySelector<HTMLButtonElement>('[data-experiment-tab="training"]');
-  if (tab) tab.hidden = datasets.length === 0 && !active;
   const holder = el('experiment-training'); holder.replaceChildren();
   const heading = text('div', '', 'overview-heading');
   const copy = text('div', '');
-  copy.append(text('h2', 'Training'), text('p', 'Frozen trajectory datasets and recorded local training results.'));
+  copy.append(text('h2', 'Training Provenance'), text('p', 'Frozen trajectory datasets and recorded local training results.'));
   heading.append(copy); holder.append(heading);
   if (!datasets.length) {
     holder.append(text('p', 'No training dataset has been frozen from this experiment.', 'muted training-zero'));
@@ -1071,55 +1344,83 @@ function renderTrainingRun(run: TrainingRun) {
   if (run.status.limitations.length) row.append(text('p', `Limitations: ${run.status.limitations.join('; ')}`, 'muted'));
   return row;
 }
-function showExperiment(id: string, tab: ExperimentTab = 'overview', scenario?: string, updateLocation = true) {
+function showExperiment(
+  id: string,
+  tab: ExperimentTab = 'overview',
+  scenario?: string,
+  updateLocation = true,
+  scenarioTab: ScenarioTab = 'overview',
+) {
   const item = activityHierarchy?.experiments.find(experiment => experiment.id === id);
   focusedExperiment = id;
-  focusedScenario = scenario ?? null;
   expandedExperiments.add(id);
   revealHome();
   el('home-view').classList.add('experiment-focused');
-  const experimentBreadcrumb = {
-    label: item?.name ?? 'Experiment',
-    href: experimentPath(id, 'overview'),
-    activate: () => showExperiment(id),
-  };
-  const selectedScenario = item?.scenarios.find(candidate => candidate.id === scenario);
-  renderBreadcrumbs(selectedScenario
-    ? [experimentBreadcrumb, {label: scenarioTitle(selectedScenario)}]
-    : [{label: experimentBreadcrumb.label}]);
+  const scenarios = item ? meaningfulScenarios(item) : [];
+  if (tab === 'scenarios' && !scenarios.length) {tab = 'overview'; scenario = undefined;}
+  const selectedScenario = scenario ? scenarios.find(candidate => candidate.id === scenario) : undefined;
+  if (scenario && !selectedScenario) scenario = undefined;
+  focusedScenario = selectedScenario?.id ?? null;
+  setDestination('experiments');
+  if (selectedScenario && item) {
+    renderBreadcrumbs([destinationCrumb('experiments', 'Experiments'), experimentCrumb(item)]);
+    renderContextNav('Scenario', SCENARIO_TABS.map(name => ({
+      id: name,
+      label: contextLabel(name),
+      activate: () => showExperiment(id, 'scenarios', selectedScenario.id, true, name),
+    })), scenarioTab);
+    el('home-eyebrow').textContent = 'Scenario';
+    el('home-title').textContent = scenarioTitle(selectedScenario);
+    el('home-description').textContent =
+      `${selectedScenario.completed} of ${selectedScenario.total} environment sessions complete.`;
+    el('home-list-title').textContent = 'Scenario Sessions';
+    paintCollection({
+      experimentScenarios: scenarioTab === 'overview',
+      sessionList: scenarioTab === 'sessions',
+      experimentTrajectories: scenarioTab === 'trajectories',
+    });
+    if (scenarioTab === 'overview') renderExperimentScenarios(item, selectedScenario.id);
+    if (scenarioTab === 'trajectories') {
+      renderContextTrajectories(item.sessions.filter(session =>
+        scenarioFor(item, session)?.id === selectedScenario.id));
+    }
+    document.title = `${scenarioTitle(selectedScenario)} · EnvironmentHarness`;
+    if (updateLocation) setLocation(experimentPath(id, 'scenarios', selectedScenario.id, scenarioTab));
+    renderList();
+    return;
+  }
+  renderBreadcrumbs([destinationCrumb('experiments', 'Experiments')]);
+  renderContextNav('Experiment', EXPERIMENT_TABS
+    .filter(name => name !== 'scenarios' || scenarios.length > 0)
+    .map(name => ({
+      id: name,
+      label: contextLabel(name),
+      activate: () => showExperiment(id, name),
+    })), tab);
   el('home-eyebrow').textContent = 'Experiment';
   el('home-title').textContent = item?.name ?? 'Experiment';
   el('home-description').textContent = item ? experimentDetail(item) : 'Experiment activity is unavailable.';
   el('home-list-title').textContent = 'Experiment Sessions';
-  el('imported-trajectories').hidden = true;
-  const scenarios = item ? meaningfulScenarios(item) : [];
-  if (tab === 'scenarios' && !scenarios.length) tab = 'overview';
-  const tabs = el('experiment-tabs'); tabs.hidden = false;
-  for (const button of tabs.querySelectorAll<HTMLButtonElement>('[data-experiment-tab]')) {
-    const name = button.dataset.experimentTab as ExperimentTab;
-    button.hidden = (name === 'scenarios' && scenarios.length === 0)
-      || (name === 'training' && tab !== 'training');
-    button.setAttribute('aria-selected', String(name === tab));
-  }
-  el('experiment-overview').hidden = tab !== 'overview';
-  el('experiment-scenarios').hidden = tab !== 'scenarios';
-  el('experiment-training').hidden = tab !== 'training';
-  el('home-list-content').hidden = tab !== 'sessions';
+  paintCollection({
+    experimentOverview: tab === 'overview',
+    experimentTraining: tab === 'overview',
+    experimentScenarios: tab === 'scenarios',
+    sessionList: tab === 'sessions',
+    experimentTrajectories: tab === 'trajectories',
+    experimentConfiguration: tab === 'configuration',
+  });
   if (item && tab === 'overview') renderExperimentOverview(item);
   if (item && tab === 'scenarios') renderExperimentScenarios(item, scenario);
-  if (item) void attempt(() => renderExperimentTraining(item, tab === 'training'));
+  if (item && tab === 'trajectories') renderContextTrajectories(item.sessions);
+  if (item && tab === 'configuration') renderExperimentConfiguration(item);
+  if (item && tab === 'overview') void attempt(() => renderExperimentTraining(item));
   document.title = `${item?.name ?? 'Experiment'} · EnvironmentHarness`;
   if (updateLocation) setLocation(experimentPath(id, tab, scenario));
   renderList();
 }
-async function showTrajectory(id: string, updateLocation = true) {
+async function showTrajectory(id: string, tab: TrajectoryTab = 'overview', updateLocation = true) {
   const ticket = ++generation;
   sessionSync += 1;
-  const [trajectory, page, snapshots] = await Promise.all([
-    client.trajectory(id), client.trajectoryRecords(id, {limit: 200}),
-    client.trajectorySnapshots(id).then(page => page.items),
-  ]);
-  if (ticket !== generation) return;
   focusedExperiment = null; focusedScenario = null;
   el('home-view').hidden = true;
   el('session-shell').hidden = true;
@@ -1127,11 +1428,27 @@ async function showTrajectory(id: string, updateLocation = true) {
   el('trajectory-shell').hidden = false;
   document.body.classList.remove('viewer-home', 'viewer-compare');
   document.body.classList.add('viewer-session');
+  trajectoryTab = tab;
+  renderTrajectoryTab();
+  // Ancestry is resolved from the fetched resource, so hold the reserved height until it arrives.
+  renderBreadcrumbSkeleton(3);
+  const [trajectory, page, snapshots] = await Promise.all([
+    client.trajectory(id), client.trajectoryRecords(id, {limit: 200}),
+    client.trajectorySnapshots(id).then(page => page.items),
+  ]);
+  if (ticket !== generation) return;
   const source = mapping(trajectory.spec.manifest.source);
   const runId = String(source.runId ?? id);
   el('trajectory-title').textContent = runId;
   el('trajectory-description').textContent = `${String(source.namespace ?? 'Unknown source')} · ${String(source.schemaVersion ?? 'Schema unavailable')}`;
-  renderBreadcrumbs([{label: `Trajectory ${shortId(id)}`}]);
+  const ancestry = trajectoryAncestry(id);
+  setDestination(ancestryDestination(ancestry));
+  renderBreadcrumbs(ancestry);
+  renderContextNav('Trajectory', TRAJECTORY_TABS.map(name => ({
+    id: name,
+    label: contextLabel(name),
+    activate: () => void attempt(() => showTrajectory(id, name)),
+  })), tab);
   renderTrajectoryHealth(trajectory);
   const segments = el('trajectory-segments'); segments.replaceChildren();
   for (const segment of trajectory.status.segments) {
@@ -1157,7 +1474,55 @@ async function showTrajectory(id: string, updateLocation = true) {
   if (!page.records.length) records.append(text('p', 'No authorized records are available.', 'muted'));
   if (page.has_more) records.append(text('p', 'More records are available through the paged API.', 'muted'));
   document.title = `${runId} · EnvironmentHarness`;
-  if (updateLocation) setLocation(`/trajectories/${encodeURIComponent(id)}`);
+  if (updateLocation) setLocation(trajectoryPath(id, tab));
+  if (tab === 'provenance') await renderTrajectoryProvenance(trajectory, id, ticket);
+}
+function renderTrajectoryTab() {
+  el('trajectory-overview-panel').hidden = trajectoryTab !== 'overview';
+  el('trajectory-records-panel').hidden = trajectoryTab !== 'records';
+  el('trajectory-snapshots-panel').hidden = trajectoryTab !== 'snapshots';
+  el('trajectory-provenance-panel').hidden = trajectoryTab !== 'provenance';
+}
+async function renderTrajectoryProvenance(trajectory: Trajectory, route: string, ticket: number) {
+  const id = trajectory.metadata.id;
+  const holder = el('trajectory-provenance');
+  holder.replaceChildren(text('p', 'Loading provenance…', 'muted'));
+  const source = mapping(trajectory.spec.manifest.source);
+  const [datasets, runs] = await Promise.all([
+    client.datasets({limit: 100}).then(page => page.items).catch(() => []),
+    client.trainingRuns({limit: 100}).then(page => page.items).catch(() => []),
+  ]);
+  if (ticket !== generation) return;
+  holder.replaceChildren();
+  const origin = text('dl', '', 'frozen-summary');
+  for (const [label, value] of [
+    ['Origin', nativeSessionOf(route) ? 'Native session evidence' : 'Imported source journal'],
+    ['Namespace', String(source.namespace ?? 'Not declared')],
+    ['Run', String(source.runId ?? id)],
+    ['Schema Version', String(source.schemaVersion ?? 'Not declared')],
+    ['Trajectory Digest', shortId(trajectory.status.trajectoryDigest)],
+  ]) {
+    const row = text('div', ''); row.append(text('dt', label), text('dd', value)); origin.append(row);
+  }
+  holder.append(origin);
+  const members = datasets.filter(dataset =>
+    dataset.spec.members.some(member => member.trajectoryId === id));
+  if (!members.length) {
+    holder.append(text('p', 'This trajectory has not been frozen into a training dataset.', 'muted'));
+    return;
+  }
+  for (const dataset of members) {
+    const section = text('section', '', 'training-resource');
+    const titleRow = text('div', '', 'training-resource-heading');
+    const identity = text('div', '');
+    identity.append(text('h3', dataset.spec.name), text('p', dataset.metadata.id, 'identity'));
+    titleRow.append(identity, text('span', dataset.status.rewardState === 'ready' ? 'Reward ready' : 'Reward unavailable', 'tag'));
+    section.append(titleRow);
+    const matching = runs.filter(run => run.spec.datasetId === dataset.metadata.id);
+    if (!matching.length) section.append(text('p', 'No training result has been recorded for this dataset.', 'muted'));
+    for (const run of matching) section.append(renderTrainingRun(run));
+    holder.append(section);
+  }
 }
 function renderTrajectorySnapshots(snapshots: TrajectorySnapshot[]) {
   const holder = el('trajectory-snapshots'); holder.replaceChildren();
@@ -1191,7 +1556,7 @@ function renderTrajectoryHealth(trajectory: Trajectory) {
   }
 }
 function showEmptyState() {
-  showHome();
+  showSessionsIndex();
 }
 function showSession() {
   el('home-view').hidden = true;
@@ -1215,7 +1580,10 @@ function showCompareSessions(updateLocation = true, showPicker = selected.size <
   el('compare-sessions-view').hidden = false;
   el('trajectory-shell').hidden = true;
   setComparisonPickerVisible(showPicker);
-  renderBreadcrumbs([{label: 'Compare Sessions'}]);
+  clearContextNav();
+  // Comparisons are a Session-scoped activity, so they highlight Sessions rather than a destination.
+  setDestination('sessions');
+  renderBreadcrumbs([destinationCrumb('sessions', 'Sessions')]);
   document.body.classList.remove('viewer-home', 'viewer-session');
   document.body.classList.add('viewer-compare');
   document.title = 'Compare Sessions · EnvironmentHarness';
@@ -1225,7 +1593,14 @@ function showCompareSessions(updateLocation = true, showPicker = selected.size <
 function renderHeader(item: Environment, tab: SessionTab = 'overview') {
   sessionTab = tab;
   showSession();
-  renderSessionBreadcrumbs(item);
+  const ancestry = sessionAncestry(item.id);
+  setDestination(ancestryDestination(ancestry));
+  renderBreadcrumbs(ancestry);
+  renderContextNav('Session', SESSION_TABS.map(name => ({
+    id: name,
+    label: contextLabel(name),
+    activate: () => void attempt(() => setSessionTab(name)),
+  })), tab);
   el('context-title').textContent = sessionTitle(item);
   el('environment-title').textContent = sessionTitle(item);
   el('environment-status').textContent = item.status;
@@ -1295,27 +1670,57 @@ function renderModeSummary() {
     holder.append(stat);
   }
   el('mode-description').textContent = sessionTab === 'overview'
-    ? 'Review this session and its frozen configuration.'
+    ? 'Review recorded scores and findings for this session.'
     : sessionTab === 'turns'
       ? 'Inspect this session turn by turn.'
       : sessionTab === 'progression'
         ? 'Follow recorded signals as this session evolves.'
-        : 'Inspect versioned evaluation records for this session.';
+        : sessionTab === 'trajectory'
+          ? 'Review the portable trajectory recorded by this session.'
+          : 'Review the frozen configuration and lineage of this session.';
 }
 function renderSessionTab() {
-  for (const tab of document.querySelectorAll<HTMLButtonElement>('[data-session-tab]')) {
-    tab.setAttribute('aria-selected', String(tab.dataset.sessionTab === sessionTab));
-  }
   el('session-overview').hidden = sessionTab !== 'overview';
+  el('reports-view').hidden = sessionTab !== 'overview';
   el('inspect-view').hidden = sessionTab !== 'turns';
   el('progression-view').hidden = sessionTab !== 'progression';
-  el('reports-view').hidden = sessionTab !== 'reports';
+  el('session-trajectory').hidden = sessionTab !== 'trajectory';
+  el('session-configuration').hidden = sessionTab !== 'configuration';
   if (sessionTab === 'progression') renderProgression();
+  if (sessionTab === 'trajectory') renderSessionTrajectory();
   renderModeSummary();
+}
+function renderSessionTrajectory() {
+  const holder = el('session-trajectory-body');
+  holder.replaceChildren();
+  const id = environment?.id;
+  const summary = id ? trajectoryIndex.find(item => item.id === id) : undefined;
+  if (!summary) {
+    holder.append(text('p', 'No trajectory has been recorded for this environment session.', 'muted'));
+    return;
+  }
+  const facts = text('dl', '', 'frozen-summary');
+  for (const [label, value] of [
+    ['Trajectory', shortId(summary.id)],
+    ['Origin', summary.origin === 'native' ? 'Native' : 'Imported'],
+    ['Collection', sessionStatus(summary.collection_state)],
+    ['Execution', sessionStatus(summary.execution_state)],
+  ]) {
+    const row = text('div', ''); row.append(text('dt', label), text('dd', value)); facts.append(row);
+  }
+  const open = text('button', 'Open Trajectory', 'text-button') as HTMLButtonElement;
+  open.type = 'button';
+  open.onclick = () => void attempt(() => showTrajectory(summary.id));
+  holder.append(facts, open);
 }
 async function setSessionTab(next: SessionTab, updateLocation = true) {
   sessionTab = next;
   renderSessionTab();
+  renderContextNav('Session', SESSION_TABS.map(name => ({
+    id: name,
+    label: contextLabel(name),
+    activate: () => void attempt(() => setSessionTab(name)),
+  })), next);
   if (updateLocation && environment) setLocation(sessionPath(environment.id, next));
   await refreshCurrentSession();
 }
@@ -2283,7 +2688,7 @@ el<HTMLFormElement>('connect-form').onsubmit = event => {event.preventDefault();
 async function restoreRoute() {
   const route = routeFromLocation();
   if (!route) {
-    showHome(false);
+    showOverview(false);
     setLocation('/overview', true);
   } else if (route.kind === 'session') {
     await attach(route.id, route.tab, false);
@@ -2294,15 +2699,25 @@ async function restoreRoute() {
     if (selected.size >= 2) await runCompare([...selected], route.view);
     else setLocation(selectionPath('/comparisons', [...selected], route.view), true);
   } else if (route.kind === 'experiment') {
-    showExperiment(route.id, route.tab, route.scenario, false);
-    setLocation(experimentPath(route.id, route.tab, route.scenario), true);
+    showExperiment(route.id, route.tab, route.scenario, false, route.scenarioTab ?? 'overview');
+    setLocation(experimentPath(route.id, route.tab, route.scenario, route.scenarioTab ?? 'overview'), true);
   } else if (route.kind === 'trajectory') {
-    await showTrajectory(route.id, false);
-    setLocation(`/trajectories/${encodeURIComponent(route.id)}`, true);
+    await showTrajectory(route.id, route.tab, false);
+    setLocation(trajectoryPath(route.id, route.tab), true);
+  } else if (route.kind === 'experiments') {
+    showExperimentsIndex(false);
+    setLocation('/experiments', true);
+  } else if (route.kind === 'trajectories') {
+    showTrajectoriesIndex(false);
+    setLocation('/trajectories', true);
+  } else if (route.kind === 'sessions') {
+    restoreSelected(route.environments);
+    showSessionsIndex(false);
+    setLocation(selectionPath('/sessions', [...selected]), true);
   } else {
     restoreSelected(route.environments);
-    showHome(false);
-    setLocation(selectionPath('/overview', [...selected]), true);
+    showOverview(false);
+    setLocation('/overview', true);
   }
 }
 
@@ -2335,13 +2750,21 @@ void connectViewer();
 el('attach').onclick = () => void attempt(() => attach(el<HTMLInputElement>('environment-id').value.trim()));
 el('refresh').onclick = () => void refreshFromButton();
 el('empty-refresh').onclick = () => void attempt(refresh);
-el('home').onclick = event => {event.preventDefault(); void attempt(async () => {
-  selected.clear();
-  el<HTMLInputElement>('session-search').value = '';
-  el<HTMLSelectElement>('session-status').value = '';
-  showHome();
-  await list();
-});};
+for (const link of document.querySelectorAll<HTMLAnchorElement>('[data-destination]')) {
+  link.onclick = event => {event.preventDefault(); void attempt(async () => {
+    const destination = link.dataset.destination as Destination;
+    if (destination === 'sessions' || destination === 'overview') {
+      selected.clear();
+      el<HTMLInputElement>('session-search').value = '';
+      el<HTMLSelectElement>('session-status').value = '';
+    }
+    await showDestination(destination);
+    await list();
+    // A newer destination may have been chosen while the catalog request was in flight.
+    if (routeFromLocation()?.kind === destination) await showDestination(destination, false);
+  });};
+}
+window.addEventListener('resize', paintBreadcrumbs);
 el('clear-session-selection').onclick = () => {selected.clear(); persistSelection(); renderList();};
 el<HTMLInputElement>('session-search').oninput = resetHomePage;
 el<HTMLSelectElement>('session-status').onchange = resetHomePage;
@@ -2361,20 +2784,8 @@ el('run-comparison').onclick = () => void attempt(async () => {
   setComparisonPickerVisible(false);
 });
 el('copy-id').onclick = () => void attempt(async () => {if (environment) {await navigator.clipboard.writeText(environment.id); message('Environment ID copied.');}});
-for (const tab of document.querySelectorAll<HTMLButtonElement>('[data-session-tab]')) {
-  tab.onclick = () => void attempt(() => setSessionTab(tab.dataset.sessionTab === 'turns' ? 'turns'
-    : tab.dataset.sessionTab === 'progression' ? 'progression'
-      : tab.dataset.sessionTab === 'reports' ? 'reports' : 'overview'));
-}
-for (const tab of document.querySelectorAll<HTMLButtonElement>('[data-experiment-tab]')) {
-  tab.onclick = () => {
-    if (!focusedExperiment) return;
-    const next = tab.dataset.experimentTab as ExperimentTab;
-    showExperiment(focusedExperiment, next);
-  };
-}
 el('reports-progression').onclick = () => void attempt(() => setSessionTab('progression'));
-el('reports-records').onclick = () => void attempt(() => setSessionTab('reports'));
+el('reports-records').onclick = () => void attempt(() => setSessionTab('configuration'));
 el<HTMLInputElement>('compare-turn-start').oninput = renderProgression;
 el<HTMLInputElement>('compare-turn-end').oninput = renderProgression;
 el<HTMLSelectElement>('turn-series-select').onchange = renderProgression;

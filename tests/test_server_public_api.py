@@ -441,10 +441,20 @@ def test_interactive_api_reference_has_route_scoped_asset_policy(tmp_path):
     assert client.get("/experiments/example/scenarios").status_code == 200
     assert client.get("/experiments/example/scenarios/one").status_code == 200
     assert client.get("/experiments/example/sessions").status_code == 200
+    assert client.get("/experiments/example/trajectories").status_code == 200
+    assert client.get("/experiments/example/configuration").status_code == 200
+    assert client.get("/experiments/example/scenarios/one/sessions").status_code == 200
+    assert client.get("/experiments/example/scenarios/one/trajectories").status_code == 200
+    assert client.get("/experiments").status_code == 200
+    assert client.get("/sessions").status_code == 200
+    assert client.get("/trajectories").status_code == 200
     assert client.get("/trajectories/source-example").status_code == 200
     assert client.get("/trajectories/source-example/records").status_code == 200
+    assert client.get("/trajectories/source-example/provenance").status_code == 200
     assert client.get("/experiments/example/unknown").status_code == 404
+    assert client.get("/experiments/example/scenarios/one/unknown").status_code == 404
     assert client.get("/sessions/example/unknown").status_code == 404
+    assert client.get("/trajectories/source-example/unknown").status_code == 404
 
 
 def test_activity_openapi_records_json_response_contracts(tmp_path):

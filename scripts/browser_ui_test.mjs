@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import {writeFileSync} from 'node:fs';
 
-const [origin, debugPort, trajectoryId] = process.argv.slice(2);
-if (!origin || !debugPort || !trajectoryId) throw new Error('origin, debug port, and trajectory ID are required');
+const [origin, debugPort, trajectoryId, importedTrajectoryId] = process.argv.slice(2);
+if (!origin || !debugPort || !trajectoryId || !importedTrajectoryId) {
+  throw new Error('origin, debug port, and native and imported trajectory IDs are required');
+}
 
 const target = await fetch(
   `http://127.0.0.1:${debugPort}/json/new?${encodeURIComponent(origin)}`,
@@ -49,6 +51,15 @@ async function waitFor(expression, timeout = 10000) {
     await new Promise(resolve => setTimeout(resolve, 50));
   }
   throw new Error(`timed out waiting for ${expression}`);
+}
+
+async function backUntil(expression, limit = 16) {
+  for (let step = 0; step < limit; step += 1) {
+    if (await evaluate(expression)) return;
+    await evaluate('history.back()');
+    await new Promise(resolve => setTimeout(resolve, 150));
+  }
+  throw new Error(`browser Back never restored ${expression}`);
 }
 
 async function secondTabConnects(url) {
@@ -201,16 +212,74 @@ try {
   assert.equal(new URL(await evaluate('location.href')).pathname, '/overview', 'Overview has a stable URL');
   assert.deepEqual(
     await evaluate(`[
-      document.querySelector('#home')?.tagName,
-      document.querySelector('.global-breadcrumb')?.getAttribute('aria-label'),
-      getComputedStyle(document.querySelector('#home')).borderBottomWidth,
+      Array.from(document.querySelectorAll('#global-destinations [data-destination]')).map(node => node.textContent),
+      document.querySelector('#global-destinations')?.getAttribute('aria-label'),
+      document.querySelector('[data-destination=overview]')?.getAttribute('aria-current'),
+      document.querySelectorAll('#global-destinations [aria-current=page]').length,
+      document.querySelector('#global-destinations svg') === null,
       document.querySelector('.home-heading .eyebrow')?.textContent,
       getComputedStyle(document.querySelector('.home-heading .eyebrow')).textTransform,
-      document.querySelector('#home svg') === null,
-      getComputedStyle(document.querySelector('#home'), '::before').content,
     ]`),
-    ['A', 'Breadcrumb', '0px', 'Overview', 'none', true, 'none'],
-    'Home uses a text breadcrumb without an icon or leading separator',
+    [
+      ['Overview', 'Experiments', 'Sessions', 'Trajectories'],
+      'Global Navigation', 'page', 1, true, 'Overview', 'none',
+    ],
+    'the viewer exposes exactly four text-only global destinations and highlights the current one',
+  );
+  assert.deepEqual(
+    await evaluate(`(() => {
+      const bar = document.querySelector('#context-bar').getBoundingClientRect();
+      return [
+        document.querySelector('#overview-summary')?.hidden,
+        document.querySelector('#home-list-content')?.hidden,
+        document.querySelector('#context-nav')?.hidden,
+        document.body.classList.contains('viewer-contextual'),
+        Array.from(document.querySelectorAll('#overview-summary [data-overview-destination]')).map(node => node.dataset.overviewDestination),
+        document.querySelector('#breadcrumb-trail')?.childElementCount,
+        Math.round(bar.height),
+      ];
+    })()`),
+    [false, true, true, false, ['experiments', 'sessions', 'trajectories'], 0, 38],
+    'Overview is a collection landing page with no contextual drawer and a reserved breadcrumb bar',
+  );
+  await evaluate(`document.querySelector('[data-destination=experiments]').click()`);
+  await waitFor(`location.pathname === '/experiments'`);
+  assert.deepEqual(
+    await evaluate(`[
+      document.querySelector('#experiment-index')?.hidden,
+      document.querySelectorAll('#experiment-index-list [data-experiment-id]').length,
+      document.querySelector('[data-destination=experiments]')?.getAttribute('aria-current'),
+      document.querySelectorAll('#global-destinations [aria-current=page]').length,
+      document.querySelector('#context-nav')?.hidden,
+      document.querySelector('.home-heading h1')?.textContent,
+    ]`),
+    [false, 1, 'page', 1, true, 'Experiments'],
+    'Experiments is a full-width collection index without a contextual drawer',
+  );
+  await evaluate(`document.querySelector('[data-destination=trajectories]').click()`);
+  await waitFor(`location.pathname === '/trajectories'`);
+  assert.deepEqual(
+    await evaluate(`[
+      document.querySelector('#trajectory-index')?.hidden,
+      document.querySelectorAll('#trajectory-index-list [data-trajectory-id]').length >= 3,
+      [...new Set(Array.from(document.querySelectorAll('#trajectory-index-list [data-trajectory-origin]'))
+        .map(node => node.dataset.trajectoryOrigin))].sort(),
+      document.querySelector('[data-destination=trajectories]')?.getAttribute('aria-current'),
+      document.querySelector('#context-nav')?.hidden,
+    ]`),
+    [false, true, ['imported', 'native'], 'page', true],
+    'Trajectories lists native and imported evidence in one global index',
+  );
+  await evaluate(`document.querySelector('[data-destination=sessions]').click()`);
+  await waitFor(`location.pathname === '/sessions'`);
+  assert.deepEqual(
+    await evaluate(`[
+      document.querySelector('#home-list-content')?.hidden,
+      document.querySelector('[data-destination=sessions]')?.getAttribute('aria-current'),
+      document.querySelector('#context-nav')?.hidden,
+    ]`),
+    [false, 'page', true],
+    'Sessions is the global environment-session index',
   );
   assert.equal(
     await evaluate('document.querySelectorAll("#home-session-list [data-session-id]").length'),
@@ -294,7 +363,8 @@ try {
   await evaluate(`document.querySelector('#home-session-list .standalone-session input').click()`);
   await waitFor(`document.querySelector('#compare')?.textContent === 'Compare 2 Sessions'`);
   assert.equal(
-    await evaluate(`document.querySelector('#home-selection').getBoundingClientRect().top <
+    await evaluate(`document.querySelector('#home-list-content').hidden === false &&
+      document.querySelector('#home-selection').getBoundingClientRect().top <
       document.querySelector('#home-session-list').getBoundingClientRect().top`),
     true,
     'selection persists across pages and keeps Compare above the scrolling table',
@@ -311,6 +381,7 @@ try {
     trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowDown', bubbles:true}));
   })()`);
   await waitFor('document.querySelector("#session-status-options")?.hidden === false');
+  await waitFor('document.activeElement?.closest("#session-status-options") !== null');
   assert.deepEqual(
     await evaluate(`[
       document.querySelector('#session-status-trigger')?.getAttribute('aria-expanded'),
@@ -388,7 +459,7 @@ try {
       document.querySelectorAll('.scenario-row[data-scenario-id]').length,
       document.querySelectorAll('.standalone-session[data-session-id]').length,
     ]`),
-    ['/overview', 'A', true, 0, 3],
+    ['/sessions', 'A', true, 0, 3],
     'expanding an experiment keeps the index URL while its name links to dedicated details',
   );
   assert.equal(
@@ -454,26 +525,69 @@ try {
     await evaluate(`[
       /^\\/experiments\\/[^/]+$/.test(location.pathname),
       document.querySelector('.home-heading h1')?.textContent,
-      Array.from(document.querySelectorAll('#experiment-tabs [role=tab]')).map(tab => tab.textContent),
-      document.querySelector('[data-experiment-tab="training"]')?.hidden,
-      document.querySelector('#experiment-tabs')?.hidden,
+      Array.from(document.querySelectorAll('#context-nav [data-context-item]')).map(tab => tab.textContent),
+      document.querySelector('#context-nav .context-nav-heading')?.textContent,
+      document.querySelector('#context-nav')?.hidden,
+      document.body.classList.contains('viewer-contextual'),
+      document.querySelectorAll('#context-nav [aria-current=page]').length,
+      document.querySelector('[data-context-item=overview]')?.getAttribute('aria-current'),
       document.querySelector('#experiment-overview')?.hidden,
       document.querySelector('#home-list-content')?.hidden,
-      document.querySelector('#experiment-frozen-summary')?.textContent.includes('synthetic-protocol@1'),
+      document.querySelector('[data-destination=experiments]')?.getAttribute('aria-current'),
+      Array.from(document.querySelectorAll('#breadcrumb-trail a')).map(node => node.textContent),
+      document.querySelector('#breadcrumb-trail')?.textContent.includes('Support response evaluation'),
       getComputedStyle(document.querySelector('#home-view')).backgroundColor,
     ]`),
-    [true, 'Support response evaluation', ['Overview', 'Scenarios', 'Sessions', 'Training'], true, false, false, true, true, 'rgb(255, 255, 255)'],
-    'the experiment name opens its configuration overview with subordinate navigation on the session canvas',
+    [
+      true, 'Support response evaluation',
+      ['Overview', 'Scenarios', 'Sessions', 'Trajectories', 'Configuration'],
+      'Experiment', false, true, 1, 'page', false, true, 'page', ['Experiments'], false,
+      'rgb(255, 255, 255)',
+    ],
+    'an experiment opens one contextual left navigation and a breadcrumb that stops at its parent',
   );
-  await evaluate(`document.querySelector('[data-experiment-tab="scenarios"]').click()`);
+  assert.equal(
+    await evaluate(`(() => {
+      const nav = document.querySelector('#context-nav').getBoundingClientRect();
+      const content = document.querySelector('#home-view').getBoundingClientRect();
+      return document.querySelectorAll('.context-nav, .session-drawer').length === 1 &&
+        nav.right <= content.left + 1;
+    })()`),
+    true,
+    'the contextual drawer never stacks with a second permanent drawer',
+  );
+  await evaluate(`document.querySelector('[data-context-item=configuration]').click()`);
+  await waitFor(`location.pathname.endsWith('/configuration')`);
+  assert.deepEqual(
+    await evaluate(`[
+      document.querySelector('#experiment-configuration')?.hidden,
+      document.querySelector('#experiment-frozen-summary')?.textContent.includes('synthetic-protocol@1'),
+      document.querySelector('[data-context-item=configuration]')?.getAttribute('aria-current'),
+      Math.round(document.querySelector('#context-bar').getBoundingClientRect().height),
+    ]`),
+    [false, true, 'page', 38],
+    'Configuration holds the frozen experiment and leaves the breadcrumb height unchanged',
+  );
+  await evaluate(`document.querySelector('[data-context-item=trajectories]').click()`);
+  await waitFor(`location.pathname.endsWith('/trajectories')`);
+  assert.deepEqual(
+    await evaluate(`[
+      document.querySelector('#experiment-trajectories')?.hidden,
+      document.querySelectorAll('#experiment-trajectory-list [data-trajectory-id]').length,
+      Math.round(document.querySelector('#context-bar').getBoundingClientRect().height),
+    ]`),
+    [false, 4, 38],
+    'an experiment lists the trajectories its sessions recorded',
+  );
+  await evaluate(`document.querySelector('[data-context-item=scenarios]').click()`);
   await waitFor(`location.pathname.endsWith('/scenarios')`);
   assert.deepEqual(
     await evaluate(`[
       document.querySelectorAll('.experiment-scenario-row').length,
       document.querySelector('.experiment-scenario-row')?.textContent.includes('Routine request'),
-      document.querySelector('[data-experiment-tab="scenarios"]')?.getAttribute('aria-selected'),
+      document.querySelector('[data-context-item=scenarios]')?.getAttribute('aria-current'),
     ]`),
-    [2, true, 'true'],
+    [2, true, 'page'],
     'meaningful scenario snapshots have a dedicated experiment page',
   );
   await evaluate(`document.querySelector('.experiment-scenario-row').click()`);
@@ -484,41 +598,61 @@ try {
       document.querySelector('#scenario-detail')?.textContent.includes('Input'),
       document.querySelector('#scenario-detail')?.textContent.includes('Metadata'),
       document.querySelector('#scenario-view-sessions')?.textContent,
+      document.querySelector('.home-heading h1')?.textContent,
+      Array.from(document.querySelectorAll('#context-nav [data-context-item]')).map(tab => tab.textContent),
+      document.querySelector('#context-nav .context-nav-heading')?.textContent,
+      Array.from(document.querySelectorAll('#breadcrumb-trail a')).map(node => node.textContent),
+      document.querySelector('[data-destination=experiments]')?.getAttribute('aria-current'),
+      Math.round(document.querySelector('#context-bar').getBoundingClientRect().height),
     ]`),
-    ['Routine request', true, true, 'View Sessions'],
-    'a scenario opens its immutable inputs and navigation to produced sessions',
+    [
+      'Routine request', true, true, 'View Sessions', 'Routine request',
+      ['Overview', 'Sessions', 'Trajectories'], 'Scenario',
+      ['Experiments', 'Support response evaluation'], 'page', 38,
+    ],
+    'a scenario opens its own contextual navigation, keeps Experiments highlighted, and shows ownership ancestry',
   );
   await evaluate(`document.querySelector('#scenario-view-sessions').click()`);
-  await waitFor(`location.pathname.endsWith('/sessions')`);
+  await waitFor(`location.pathname.endsWith('/scenarios/easy-case/sessions')`);
   assert.deepEqual(
     await evaluate(`[
       document.querySelector('.home-list-heading h2')?.textContent,
       document.querySelectorAll('.scenario-session[data-session-id]').length,
       document.querySelector('#session-search')?.value,
+      document.querySelector('[data-context-item=sessions]')?.getAttribute('aria-current'),
     ]`),
-    ['Experiment Sessions', 2, 'easy-case'],
+    ['Scenario Sessions', 2, 'easy-case', 'page'],
     'View Sessions opens the session list filtered to the selected scenario',
   );
   await evaluate(`document.querySelector('.scenario-session .session-name').click()`);
   await waitFor(`location.pathname.startsWith('/sessions/')`);
+  const nestedSessionId = await evaluate('document.querySelector("#environment-identity")?.textContent');
   assert.deepEqual(
     await evaluate(`[
-      location.pathname.endsWith('/overview'),
-      document.querySelector('.breadcrumb-link')?.textContent,
-      document.querySelector('.breadcrumb-link')?.getAttribute('href')?.startsWith('/experiments/'),
-      document.querySelector('.breadcrumb-current')?.textContent,
+      /^\\/sessions\\/[^/]+$/.test(location.pathname),
+      Array.from(document.querySelectorAll('#breadcrumb-trail a')).map(node => node.textContent),
+      document.querySelector('#breadcrumb-trail a:nth-of-type(2)')?.getAttribute('href')?.startsWith('/experiments/'),
+      document.querySelector('#breadcrumb-trail')?.textContent.includes('Routine request · Trial 1'),
+      document.querySelector('#context-title')?.textContent,
+      document.querySelector('[data-destination=experiments]')?.getAttribute('aria-current'),
+      Array.from(document.querySelectorAll('#context-nav [data-context-item]')).map(tab => tab.textContent),
+      Math.round(document.querySelector('#context-bar').getBoundingClientRect().height),
     ]`),
-    [true, 'Support response evaluation', true, 'Routine request · Trial 1'],
-    'a produced session keeps its canonical route and links back to its parent experiment',
+    [
+      true, ['Experiments', 'Support response evaluation', 'Routine request'], true, false,
+      'Routine request · Trial 1', 'page',
+      ['Overview', 'Turns', 'Progression', 'Trajectory', 'Configuration'], 38,
+    ],
+    'a Session shows ownership ancestry that stops at its Scenario while the heading owns its name',
   );
-  await evaluate(`document.querySelector('.breadcrumb-link').click()`);
+  await evaluate(`document.querySelectorAll('#breadcrumb-trail a')[1].click()`);
   await waitFor(`/^\\/experiments\\/[^/]+$/.test(location.pathname)`);
   if (process.env.BROWSER_UI_SCREENSHOT_DIR) {
     const screenshot = await command('Page.captureScreenshot', {format: 'png', captureBeyondViewport: false});
     writeFileSync(`${process.env.BROWSER_UI_SCREENSHOT_DIR}/experiment.png`, screenshot.data, 'base64');
   }
-  await evaluate(`document.querySelector('#home').click()`);
-  await waitFor(`location.pathname === '/overview'`);
+  await evaluate(`document.querySelector('[data-destination=sessions]').click()`);
+  await waitFor(`location.pathname === '/sessions'`);
   await evaluate(`document.querySelector('.experiment-parent > input[type=checkbox]').click()`);
   await waitFor('document.querySelector("#compare")?.textContent === "Compare 4 Sessions"');
   assert.equal(
@@ -627,8 +761,8 @@ try {
   const openedSessionId = await evaluate('document.querySelector("#environment-identity")?.textContent');
   assert.equal(
     new URL(await evaluate('location.href')).pathname,
-    `/sessions/${openedSessionId}/overview`,
-    'opening an environment session updates the URL',
+    `/sessions/${openedSessionId}`,
+    'opening an environment session updates the URL to its canonical detail root',
   );
 
   assert.equal(
@@ -648,16 +782,16 @@ try {
   );
   assert.deepEqual(
     await evaluate(`[
-      document.querySelector('#home span')?.textContent,
+      document.querySelector('[data-destination=overview] span')?.textContent,
       getComputedStyle(document.querySelector('.navbar-actions')).display,
       Array.from(document.querySelectorAll('#breadcrumb-trail > *')).map(node => node.textContent).join(''),
-      document.querySelector('[aria-label="Selected Session Navigation"]')?.previousElementSibling?.classList.contains('page-context'),
-      document.querySelector('#home svg') === null,
-      getComputedStyle(document.querySelector('#home')).fontSize,
-      getComputedStyle(document.querySelector('.breadcrumb-current')).fontSize,
+      document.querySelector('#context-nav')?.previousElementSibling === null,
+      document.querySelector('#global-destinations svg') === null,
+      getComputedStyle(document.querySelector('[data-destination=overview]')).fontSize,
+      getComputedStyle(document.querySelector('.breadcrumb-link')).fontSize,
     ]`),
-    ['Overview', 'flex', '/12 Participants', true, true, '12px', '12px'],
-    'the navbar and local navigation change when a user enters an environment session',
+    ['Overview', 'flex', 'Sessions', true, true, '12px', '12px'],
+    'the navbar and contextual navigation change when a user enters an environment session',
   );
   assert.equal(
     await evaluate('parseFloat(getComputedStyle(document.querySelector(".page-context")).paddingLeft) >= 40'),
@@ -665,18 +799,19 @@ try {
     'the selected environment session uses the same generous side gutter as Home',
   );
   assert.deepEqual(
-    await evaluate(`Array.from(document.querySelectorAll('[data-session-tab]')).map(node => node.textContent)`),
-    ['Overview', 'Turns', 'Progression', 'Reports'],
-    'a selected environment session separates summary, inspection, progression, and report records',
+    await evaluate(`Array.from(document.querySelectorAll('#context-nav [data-context-item]')).map(node => node.textContent)`),
+    ['Overview', 'Turns', 'Progression', 'Trajectory', 'Configuration'],
+    'a selected environment session separates summary, inspection, progression, trajectory, and configuration',
   );
   assert.equal(
-    await evaluate('document.querySelector("[data-session-tab=overview]")?.getAttribute("aria-selected")'),
-    'true',
+    await evaluate('document.querySelector("[data-context-item=overview]")?.getAttribute("aria-current")'),
+    'page',
     'opening a session starts at its session-level overview',
   );
   await waitFor('document.querySelectorAll("#evaluation-metrics .evaluation-metric:not(.evaluation-metric-heading)").length === 3');
   assert.equal(
-    await evaluate(`document.querySelector('#session-overview')?.textContent.includes('Max Turns') &&
+    await evaluate(`document.querySelector('#session-configuration')?.textContent.includes('Max Turns') &&
+      document.querySelector('#session-overview')?.textContent.includes('Scores and Findings') &&
       document.querySelector('#reports')?.textContent.includes('Synthetic total') &&
       document.querySelector('#reports')?.textContent.includes('Latest') &&
       document.querySelector('#reports')?.textContent.includes('Change') &&
@@ -706,7 +841,7 @@ try {
       return viewerFetch(...args);
     };
   })()`);
-  await evaluate('document.querySelector("[data-session-tab=turns]").click()');
+  await evaluate('document.querySelector("[data-context-item=turns]").click()');
   await waitFor('location.pathname.endsWith("/turns")');
   await waitFor(`window.__viewerRequests.includes('/v1/sessions/${openedSessionId}') &&
     window.__viewerRequests.includes('/v1/sessions/${openedSessionId}/scores')`);
@@ -895,8 +1030,8 @@ try {
     'scrolling over the range moves it sideways and shows active feedback',
   );
 
-  await evaluate('document.querySelector("[data-session-tab=reports]").click()');
-  await waitFor('location.pathname.endsWith("/reports")');
+  await evaluate('document.querySelector("[data-context-item=overview]").click()');
+  await waitFor('location.pathname.endsWith("' + openedSessionId + '")');
   assert.equal(
     await evaluate(`document.querySelectorAll('#report-history .report-record').length === 24 &&
       document.querySelectorAll('#report-history .report-line-card').length === 3 &&
@@ -904,7 +1039,7 @@ try {
       Array.from(document.querySelectorAll('#report-history .report-record')).every(node => !node.open) &&
       Array.from(document.querySelectorAll('#report-history .report-record-body > details > summary')).every(node => node.textContent === 'Raw')`),
     true,
-    'Reports summarizes latest values and progression while preserving expandable versioned records',
+    'session Overview summarizes latest values and progression while preserving expandable versioned records',
   );
   assert.deepEqual(
     await evaluate(`(() => {
@@ -925,32 +1060,35 @@ try {
     writeFileSync(`${process.env.BROWSER_UI_SCREENSHOT_DIR}/reports.png`, screenshot.data, 'base64');
   }
 
-  await evaluate(`(() => { window.__viewerRequests = []; document.querySelector('#home').click(); })()`);
+  await evaluate(`(() => { window.__viewerRequests = []; document.querySelector('[data-destination=sessions]').click(); })()`);
   await waitFor('document.querySelector("#home-view")?.hidden === false');
   await waitFor(`window.__viewerRequests.includes('/v1/sessions') &&
     window.__viewerRequests.includes('/v1/activity/hierarchy')`);
-  assert.equal(new URL(await evaluate('location.href')).pathname, '/overview', 'Overview updates the URL');
+  assert.equal(new URL(await evaluate('location.href')).pathname, '/sessions', 'Sessions updates the URL');
   assert.deepEqual(
     await evaluate(`[new URL(location.href).searchParams.getAll('environment').length,
       document.querySelector('#home-selection').hidden,
-      document.querySelectorAll('#home-session-list input[type=checkbox]:checked').length]`),
-    [0, true, 0],
-    'clicking the Home breadcrumb clears the current selection and writes a clean Home URL',
+      document.querySelectorAll('#home-session-list input[type=checkbox]:checked').length,
+      document.querySelector('#context-nav')?.hidden,
+      document.querySelector('#breadcrumb-trail')?.childElementCount]`),
+    [0, true, 0, true, 0],
+    'returning to the Sessions destination clears the selection, the drawer, and the breadcrumb trail',
   );
   assert.equal(
     await evaluate(`window.__viewerRequests.includes('/v1/sessions') &&
       window.__viewerRequests.includes('/v1/activity/hierarchy')`),
     true,
-    'entering Home refreshes the environment-session catalog and activity snapshot',
+    'entering the Sessions destination refreshes the catalog and activity snapshot',
   );
-  await evaluate('history.go(-5)');
-  await waitFor(`location.pathname === '/overview' &&
+  await backUntil(`location.pathname === '/sessions' &&
+    new URL(location.href).searchParams.getAll('environment').length === 1`);
+  await waitFor(`location.pathname === '/sessions' &&
     new URL(location.href).searchParams.getAll('environment').length === 1 &&
     document.querySelectorAll('#home-session-list input[type=checkbox]:checked').length === 1`);
   assert.equal(
     await evaluate(`document.querySelector('#home-selection-count')?.textContent`),
     '1 session selected',
-    'browser Back restores the selection encoded in the earlier Home history entry',
+    'browser Back restores the selection encoded in the earlier Sessions history entry',
   );
   await evaluate(`document.querySelector('#clear-session-selection').click()`);
   await waitFor(`document.querySelector('#home-selection')?.hidden === true`);
@@ -1077,39 +1215,153 @@ try {
     document.querySelectorAll('#compare-results .comparison-card').length === 2 &&
     document.querySelector('[data-metric="cumulative-reward"]')?.getAttribute('aria-pressed') === 'true' &&
     Array.from(document.querySelectorAll('.comparison-turn-range .turn-range-values dd')).map(node => node.textContent).join() === 'Turn 5,Turn 10'`);
-  assert.equal(
-    await evaluate('document.querySelector("#home span")?.textContent'),
-    'Overview',
-    'cross-session comparison remains a Home-level destination',
+  assert.deepEqual(
+    await evaluate(`[
+      document.querySelector('[data-destination=sessions]')?.getAttribute('aria-current'),
+      document.querySelectorAll('#global-destinations [aria-current=page]').length,
+      Array.from(document.querySelectorAll('#breadcrumb-trail a')).map(node => node.textContent),
+      document.querySelector('#context-nav')?.hidden,
+    ]`),
+    ['page', 1, ['Sessions'], true],
+    'a comparison highlights Sessions rather than introducing its own global destination',
   );
   if (process.env.BROWSER_UI_SCREENSHOT_DIR) {
     const screenshot = await command('Page.captureScreenshot', {format: 'png', captureBeyondViewport: false});
     writeFileSync(`${process.env.BROWSER_UI_SCREENSHOT_DIR}/compare.png`, screenshot.data, 'base64');
   }
-  await evaluate('document.querySelector("#home").click()');
+  await evaluate('document.querySelector("[data-destination=sessions]").click()');
   await evaluate('history.back()');
   await waitFor('document.querySelector("#compare-sessions-view")?.hidden === false');
   await evaluate('history.back()');
   await waitFor('document.querySelector("#home-view")?.hidden === false');
   await command('Page.navigate', {url: `${origin}/trajectories/${encodeURIComponent(trajectoryId)}`});
   await waitFor('document.querySelector("#trajectory-shell")?.hidden === false');
+  await waitFor('document.querySelectorAll("#context-nav [data-context-item]").length === 4');
   assert.deepEqual(
     await evaluate(`[
+      Array.from(document.querySelectorAll('#context-nav [data-context-item]')).map(node => node.textContent),
+      document.querySelector('#context-nav .context-nav-heading')?.textContent,
+      Array.from(document.querySelectorAll('#breadcrumb-trail a')).map(node => node.textContent),
+      document.querySelector('[data-destination=trajectories]')?.getAttribute('aria-current'),
+      document.querySelector('#trajectory-overview-panel')?.hidden,
+      document.querySelector('#trajectory-snapshots-panel')?.hidden,
+      document.querySelector('#trajectory-title')?.textContent.length > 0,
+      Math.round(document.querySelector('#context-bar').getBoundingClientRect().height),
+    ]`),
+    [
+      ['Overview', 'Records', 'Snapshots', 'Provenance'], 'Trajectory',
+      ['Sessions', '12 Participants'], null, false, true, true, 38,
+    ],
+    'a native Trajectory is owned by its Session and opens its own contextual navigation',
+  );
+  assert.equal(
+    await evaluate(`document.querySelector('[data-destination=sessions]')?.getAttribute('aria-current')`),
+    'page',
+    'a native Trajectory keeps its owning destination highlighted',
+  );
+  await command('Page.navigate', {url: `${origin}/trajectories/${encodeURIComponent(importedTrajectoryId)}`});
+  await waitFor('document.querySelector("#trajectory-shell")?.hidden === false');
+  await waitFor(`document.querySelector('#breadcrumb-trail')?.dataset.state === 'ready'`);
+  assert.deepEqual(
+    await evaluate(`[
+      Array.from(document.querySelectorAll('#breadcrumb-trail a')).map(node => node.textContent),
+      document.querySelector('[data-destination=trajectories]')?.getAttribute('aria-current'),
+      document.querySelector('#trajectory-title')?.textContent,
+      Math.round(document.querySelector('#context-bar').getBoundingClientRect().height),
+    ]`),
+    [['Trajectories'], 'page', 'external-run-104', 38],
+    'an imported Trajectory is owned by the Trajectories destination rather than a Session',
+  );
+  await command('Page.navigate', {url: `${origin}/trajectories/${encodeURIComponent(trajectoryId)}`});
+  await waitFor('document.querySelector("#trajectory-shell")?.hidden === false');
+  await waitFor('document.querySelectorAll("#context-nav [data-context-item]").length === 4');
+  await evaluate('document.querySelector("[data-context-item=snapshots]").click()');
+  await waitFor(`document.querySelector('#trajectory-snapshots-panel')?.hidden === false &&
+    location.pathname.endsWith('/snapshots')`);
+  assert.deepEqual(
+    await evaluate(`[
+      location.pathname.endsWith('/snapshots'),
       document.querySelectorAll('#trajectory-snapshots .trajectory-segment').length,
       document.querySelector('#trajectory-snapshots .trajectory-segment p')?.textContent.includes('frozen'),
       document.querySelector('#trajectory-records')?.textContent.includes('payload'),
+      Math.round(document.querySelector('#context-bar').getBoundingClientRect().height),
     ]`),
-    [1, true, false],
-    'trajectory inspection shows immutable snapshot boundaries without sensitive record payloads',
+    [true, 1, true, false, 38],
+    'trajectory Snapshots shows immutable boundaries without sensitive record payloads or a height change',
+  );
+  await evaluate('document.querySelector("[data-context-item=provenance]").click()');
+  await waitFor(`location.pathname.endsWith('/provenance') &&
+    !document.querySelector('#trajectory-provenance')?.textContent.includes('Loading provenance')`);
+  assert.deepEqual(
+    await evaluate(`[
+      document.querySelector('#trajectory-provenance-panel')?.hidden,
+      document.querySelector('#trajectory-provenance')?.textContent.includes('Native session evidence'),
+      document.querySelector('#trajectory-provenance')?.textContent.includes('Trajectory Digest'),
+      document.querySelectorAll('[data-destination]').length,
+    ]`),
+    [false, true, true, 4],
+    'contextual training provenance stays inside the Trajectory rather than becoming a destination',
   );
   await command('Page.reload');
-  await waitFor('document.querySelector("#trajectory-shell")?.hidden === false && document.querySelectorAll("#trajectory-snapshots .trajectory-segment").length === 1');
+  await waitFor('document.querySelector("#trajectory-shell")?.hidden === false && document.querySelector("#trajectory-provenance-panel")?.hidden === false');
   assert.equal(
     await evaluate('location.pathname'),
-    `/trajectories/${trajectoryId}`,
-    'trajectory snapshot inspection survives a deep-link refresh',
+    `/trajectories/${trajectoryId}/provenance`,
+    'a trajectory tab survives a deep-link refresh',
   );
-  await evaluate('document.querySelector("#home").click()');
+  await evaluate(`(() => {
+    window.__skeletonStates = [];
+    const bar = document.querySelector('#context-bar');
+    const trail = document.querySelector('#breadcrumb-trail');
+    window.__skeletonObserver = new MutationObserver(() => window.__skeletonStates.push([
+      trail.dataset.state, Math.round(bar.getBoundingClientRect().height)]));
+    window.__skeletonObserver.observe(trail, {childList: true, attributes: true});
+  })()`);
+  await evaluate(`document.querySelector('[data-context-item=records]').click()`);
+  await waitFor(`location.pathname.endsWith('/records') && window.__skeletonStates.some(state => state[0] === 'ready')`);
+  assert.deepEqual(
+    await evaluate(`(() => {
+      window.__skeletonObserver.disconnect();
+      const states = window.__skeletonStates;
+      return [
+        states.some(state => state[0] === 'loading'),
+        states.at(-1)[0],
+        [...new Set(states.map(state => state[1]))],
+      ];
+    })()`),
+    [true, 'ready', [38]],
+    'ancestry loads through a same-height skeleton so the reserved breadcrumb space never changes',
+  );
+  await command('Emulation.setDeviceMetricsOverride', {width: 420, height: 800, deviceScaleFactor: 1, mobile: true});
+  await command('Page.navigate', {url: `${origin}/sessions/${encodeURIComponent(nestedSessionId)}`});
+  await waitFor('document.querySelectorAll("#breadcrumb-trail > a").length === 2');
+  assert.deepEqual(
+    await evaluate(`[
+      Array.from(document.querySelectorAll('#breadcrumb-trail > a')).map(node => node.textContent),
+      Array.from(document.querySelectorAll('.breadcrumb-overflow-menu a')).map(node => node.textContent),
+      document.querySelector('.breadcrumb-ellipsis')?.getAttribute('aria-label'),
+      document.querySelector('.breadcrumb-overflow-menu')?.hidden,
+      document.querySelector('#breadcrumb-trail').scrollWidth <= document.querySelector('#breadcrumb-trail').clientWidth + 1,
+      getComputedStyle(document.querySelector('#context-nav')).flexDirection,
+    ]`),
+    [
+      ['Experiments', 'Routine request'], ['Support response evaluation'],
+      'Show 1 hidden ancestor', true, true, 'row',
+    ],
+    'a narrow viewport keeps the root and nearest ancestor and collapses the rest into an accessible menu',
+  );
+  await evaluate(`document.querySelector('.breadcrumb-ellipsis').click()`);
+  assert.deepEqual(
+    await evaluate(`[
+      document.querySelector('.breadcrumb-overflow-menu')?.hidden,
+      document.querySelector('.breadcrumb-ellipsis')?.getAttribute('aria-expanded'),
+    ]`),
+    [false, 'true'],
+    'the collapsed ancestry opens on demand',
+  );
+  await command('Emulation.setDeviceMetricsOverride', {width: 1440, height: 900, deviceScaleFactor: 1, mobile: false});
+  await waitFor(`document.querySelectorAll('#breadcrumb-trail > a').length === 3`);
+  await evaluate('document.querySelector("[data-destination=sessions]").click()');
   await waitFor('document.querySelector("#home-view")?.hidden === false');
   for (const [width, label] of [[768, 'tablet'], [375, 'mobile'], [241, 'narrow-mobile']]) {
     await command('Emulation.setDeviceMetricsOverride', {width, height: 800, deviceScaleFactor: 1, mobile: width < 500});
@@ -1117,7 +1369,7 @@ try {
     assert.equal(
       await evaluate('document.documentElement.scrollWidth === window.innerWidth'),
       true,
-      `Home avoids horizontal document scrolling at the ${label} viewport`,
+      `the Sessions index avoids horizontal document scrolling at the ${label} viewport`,
     );
     assert.equal(
       await evaluate(`(() => {
@@ -1129,7 +1381,7 @@ try {
           tabs.getBoundingClientRect().right <= actions.getBoundingClientRect().left + 1;
       })()`),
       true,
-      `The brand, breadcrumb, and attach controls do not overlap at the ${label} viewport`,
+      `the brand, global destinations, and attach controls do not overlap at the ${label} viewport`,
     );
     assert.equal(
       await evaluate(`document.querySelector('#home-session-list').scrollWidth >

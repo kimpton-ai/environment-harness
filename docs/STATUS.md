@@ -33,14 +33,19 @@ Landed since the baseline:
   hierarchy, with a typed management-list envelope, ETags, `Location` headers, deployment
   capabilities, and one stable error taxonomy. Every 0.2 operation is classified exactly once in
   the enforced [HTTP migration](HTTP-MIGRATION.md) manifest.
+- **Inference capture levels.** `none`, `summary`, and `training` are explicit, token-faithful
+  capture requires a training entitlement and a bounded budget, and a cumulative per-Session
+  artifact budget fails closed. See [Training](TRAINING.md).
+- **Viewer information architecture.** The viewer has exactly four global destinations —
+  `Overview | Experiments | Sessions | Trajectories` — one contextual left navigation per selected
+  resource, ownership-ancestry breadcrumbs that stop at the parent, a reserved-height context bar
+  with same-height loading skeletons, and narrow-screen ancestry collapse. Training provenance
+  stays contextual. See [Viewer maintenance](VIEWER-MAINTENANCE.md).
 
 Remaining before the candidate:
 
-- inference capture levels (`none`, `summary`, `training`) with a cumulative per-Session artifact
-  budget and representative storage estimates;
-- the accepted Overview / Experiments / Sessions / Trajectories viewer information architecture
-  with contextual left navigation, ancestry breadcrumbs, and reserved-height skeletons; and
-- the remaining guide rewrites named in the plan's documentation section.
+- the remaining guide rewrites named in the plan's documentation section, including the new
+  decision-runtime guide and the release downstream-impact appendix.
 
 ## Unreleased trajectory scope
 
@@ -71,7 +76,7 @@ The release checks cover the documented synthetic experiment, parent and branch 
 - The example's synthetic total is a protocol illustration, not a measure of model intelligence, safety or economic performance.
 - Branches share lineage. One parent and its descendants cannot establish uncertainty across independent environments.
 - Agent-state recovery requires explicit serialization hooks. Arbitrary process memory, sockets and external effects are not restored by a checkpoint.
-- Researcher credentials authorize all evidence in their scope. Viewer perspective selection is a display filter; participant credentials enforce the actual HTTP boundary.
+- Management credentials authorize all evidence in their scope. Viewer perspective selection is a display filter; participant credentials enforce the actual HTTP boundary.
 - The trusted local Python API and command subprocess do not isolate hostile code. Container boundaries and scoped network access are separate requirements.
 - Resume marks committed state ready for execution. Advancing turns still requires the runner and matching agent implementations.
 - Hosted capacity, extended lifecycle, backup/restore operations and external-provider integrations require their own acceptance evidence. This local release makes no availability or throughput guarantee.
