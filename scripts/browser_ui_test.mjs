@@ -102,7 +102,7 @@ try {
     deviceScaleFactor: 1,
     mobile: false,
   });
-  await command('Page.navigate', {url: `${origin}/home`});
+  await command('Page.navigate', {url: `${origin}/overview`});
   await waitFor('document.readyState === "complete"');
   await waitFor('document.querySelector("#workspace")?.hidden === false');
   await waitFor('document.querySelector("#home-view")?.hidden === false');
@@ -194,11 +194,11 @@ try {
   await command('Page.reload');
   await waitFor('document.querySelector("#workspace")?.hidden === false');
   assert.equal(
-    await secondTabConnects(`${origin}/home`),
+    await secondTabConnects(`${origin}/overview`),
     true,
     'A second local viewer tab connects without sharing browser storage',
   );
-  assert.equal(new URL(await evaluate('location.href')).pathname, '/home', 'the session index has a stable URL');
+  assert.equal(new URL(await evaluate('location.href')).pathname, '/overview', 'Overview has a stable URL');
   assert.deepEqual(
     await evaluate(`[
       document.querySelector('#home')?.tagName,
@@ -209,7 +209,7 @@ try {
       document.querySelector('#home svg') === null,
       getComputedStyle(document.querySelector('#home'), '::before').content,
     ]`),
-    ['A', 'Breadcrumb', '0px', 'Home', 'none', true, 'none'],
+    ['A', 'Breadcrumb', '0px', 'Overview', 'none', true, 'none'],
     'Home uses a text breadcrumb without an icon or leading separator',
   );
   assert.equal(
@@ -384,11 +384,11 @@ try {
     await evaluate(`[
       location.pathname,
       document.querySelector('.experiment-name')?.tagName,
-      document.querySelector('.experiment-name')?.getAttribute('href')?.startsWith('/experiment/'),
+      document.querySelector('.experiment-name')?.getAttribute('href')?.startsWith('/experiments/'),
       document.querySelectorAll('.scenario-row[data-scenario-id]').length,
       document.querySelectorAll('.standalone-session[data-session-id]').length,
     ]`),
-    ['/home', 'A', true, 0, 3],
+    ['/overview', 'A', true, 0, 3],
     'expanding an experiment keeps the index URL while its name links to dedicated details',
   );
   assert.equal(
@@ -449,10 +449,10 @@ try {
     writeFileSync(`${process.env.BROWSER_UI_SCREENSHOT_DIR}/home-hierarchy.png`, screenshot.data, 'base64');
   }
   await evaluate(`document.querySelector('.experiment-name').click()`);
-  await waitFor(`location.pathname.startsWith('/experiment/')`);
+  await waitFor(`location.pathname.startsWith('/experiments/')`);
   assert.deepEqual(
     await evaluate(`[
-      /^\\/experiment\\/[^/]+$/.test(location.pathname),
+      /^\\/experiments\\/[^/]+$/.test(location.pathname),
       document.querySelector('.home-heading h1')?.textContent,
       Array.from(document.querySelectorAll('#experiment-tabs [role=tab]')).map(tab => tab.textContent),
       document.querySelector('[data-experiment-tab="training"]')?.hidden,
@@ -500,25 +500,25 @@ try {
     'View Sessions opens the session list filtered to the selected scenario',
   );
   await evaluate(`document.querySelector('.scenario-session .session-name').click()`);
-  await waitFor(`location.pathname.startsWith('/session/')`);
+  await waitFor(`location.pathname.startsWith('/sessions/')`);
   assert.deepEqual(
     await evaluate(`[
       location.pathname.endsWith('/overview'),
       document.querySelector('.breadcrumb-link')?.textContent,
-      document.querySelector('.breadcrumb-link')?.getAttribute('href')?.startsWith('/experiment/'),
+      document.querySelector('.breadcrumb-link')?.getAttribute('href')?.startsWith('/experiments/'),
       document.querySelector('.breadcrumb-current')?.textContent,
     ]`),
     [true, 'Support response evaluation', true, 'Routine request · Trial 1'],
     'a produced session keeps its canonical route and links back to its parent experiment',
   );
   await evaluate(`document.querySelector('.breadcrumb-link').click()`);
-  await waitFor(`/^\\/experiment\\/[^/]+$/.test(location.pathname)`);
+  await waitFor(`/^\\/experiments\\/[^/]+$/.test(location.pathname)`);
   if (process.env.BROWSER_UI_SCREENSHOT_DIR) {
     const screenshot = await command('Page.captureScreenshot', {format: 'png', captureBeyondViewport: false});
     writeFileSync(`${process.env.BROWSER_UI_SCREENSHOT_DIR}/experiment.png`, screenshot.data, 'base64');
   }
   await evaluate(`document.querySelector('#home').click()`);
-  await waitFor(`location.pathname === '/home'`);
+  await waitFor(`location.pathname === '/overview'`);
   await evaluate(`document.querySelector('.experiment-parent > input[type=checkbox]').click()`);
   await waitFor('document.querySelector("#compare")?.textContent === "Compare 4 Sessions"');
   assert.equal(
@@ -627,7 +627,7 @@ try {
   const openedSessionId = await evaluate('document.querySelector("#environment-identity")?.textContent');
   assert.equal(
     new URL(await evaluate('location.href')).pathname,
-    `/session/${openedSessionId}/overview`,
+    `/sessions/${openedSessionId}/overview`,
     'opening an environment session updates the URL',
   );
 
@@ -656,7 +656,7 @@ try {
       getComputedStyle(document.querySelector('#home')).fontSize,
       getComputedStyle(document.querySelector('.breadcrumb-current')).fontSize,
     ]`),
-    ['Home', 'flex', '/12 Participants', true, true, '12px', '12px'],
+    ['Overview', 'flex', '/12 Participants', true, true, '12px', '12px'],
     'the navbar and local navigation change when a user enters an environment session',
   );
   assert.equal(
@@ -708,12 +708,12 @@ try {
   })()`);
   await evaluate('document.querySelector("[data-session-tab=turns]").click()');
   await waitFor('location.pathname.endsWith("/turns")');
-  await waitFor(`window.__viewerRequests.includes('/v1/environments/${openedSessionId}') &&
-    window.__viewerRequests.includes('/v1/environments/${openedSessionId}/reports')`);
+  await waitFor(`window.__viewerRequests.includes('/v1/sessions/${openedSessionId}') &&
+    window.__viewerRequests.includes('/v1/sessions/${openedSessionId}/scores')`);
   assert.equal(
-    await evaluate(`window.__viewerRequests.includes('/v1/environments/${openedSessionId}') &&
-      window.__viewerRequests.includes('/v1/environments/${openedSessionId}/events') &&
-      window.__viewerRequests.includes('/v1/environments/${openedSessionId}/reports')`),
+    await evaluate(`window.__viewerRequests.includes('/v1/sessions/${openedSessionId}') &&
+      window.__viewerRequests.includes('/v1/sessions/${openedSessionId}/evidence') &&
+      window.__viewerRequests.includes('/v1/sessions/${openedSessionId}/scores')`),
     true,
     'entering a session section refreshes its metadata, evidence, and reports',
   );
@@ -927,9 +927,9 @@ try {
 
   await evaluate(`(() => { window.__viewerRequests = []; document.querySelector('#home').click(); })()`);
   await waitFor('document.querySelector("#home-view")?.hidden === false');
-  await waitFor(`window.__viewerRequests.includes('/v1/environments') &&
-    window.__viewerRequests.includes('/v1/activity/snapshot')`);
-  assert.equal(new URL(await evaluate('location.href')).pathname, '/home', 'Home updates the URL');
+  await waitFor(`window.__viewerRequests.includes('/v1/sessions') &&
+    window.__viewerRequests.includes('/v1/activity/hierarchy')`);
+  assert.equal(new URL(await evaluate('location.href')).pathname, '/overview', 'Overview updates the URL');
   assert.deepEqual(
     await evaluate(`[new URL(location.href).searchParams.getAll('environment').length,
       document.querySelector('#home-selection').hidden,
@@ -938,13 +938,13 @@ try {
     'clicking the Home breadcrumb clears the current selection and writes a clean Home URL',
   );
   assert.equal(
-    await evaluate(`window.__viewerRequests.includes('/v1/environments') &&
-      window.__viewerRequests.includes('/v1/activity/snapshot')`),
+    await evaluate(`window.__viewerRequests.includes('/v1/sessions') &&
+      window.__viewerRequests.includes('/v1/activity/hierarchy')`),
     true,
     'entering Home refreshes the environment-session catalog and activity snapshot',
   );
   await evaluate('history.go(-5)');
-  await waitFor(`location.pathname === '/home' &&
+  await waitFor(`location.pathname === '/overview' &&
     new URL(location.href).searchParams.getAll('environment').length === 1 &&
     document.querySelectorAll('#home-session-list input[type=checkbox]:checked').length === 1`);
   assert.equal(
@@ -966,7 +966,7 @@ try {
   await waitFor('document.querySelector("#compare")?.textContent === "Compare 2 Sessions"');
   await evaluate('document.querySelector("#compare").click()');
   await waitFor('document.querySelector("#compare-sessions-view")?.hidden === false');
-  assert.equal(new URL(await evaluate('location.href')).pathname, '/compare', 'session comparison has a stable URL');
+  assert.equal(new URL(await evaluate('location.href')).pathname, '/comparisons', 'session comparison has a stable URL');
   await waitFor('document.querySelectorAll("#compare-results .comparison-card").length === 2');
   assert.deepEqual(
     await evaluate(`[
@@ -1079,7 +1079,7 @@ try {
     Array.from(document.querySelectorAll('.comparison-turn-range .turn-range-values dd')).map(node => node.textContent).join() === 'Turn 5,Turn 10'`);
   assert.equal(
     await evaluate('document.querySelector("#home span")?.textContent'),
-    'Home',
+    'Overview',
     'cross-session comparison remains a Home-level destination',
   );
   if (process.env.BROWSER_UI_SCREENSHOT_DIR) {
@@ -1091,7 +1091,7 @@ try {
   await waitFor('document.querySelector("#compare-sessions-view")?.hidden === false');
   await evaluate('history.back()');
   await waitFor('document.querySelector("#home-view")?.hidden === false');
-  await command('Page.navigate', {url: `${origin}/trajectory/${encodeURIComponent(trajectoryId)}`});
+  await command('Page.navigate', {url: `${origin}/trajectories/${encodeURIComponent(trajectoryId)}`});
   await waitFor('document.querySelector("#trajectory-shell")?.hidden === false');
   assert.deepEqual(
     await evaluate(`[
@@ -1106,7 +1106,7 @@ try {
   await waitFor('document.querySelector("#trajectory-shell")?.hidden === false && document.querySelectorAll("#trajectory-snapshots .trajectory-segment").length === 1');
   assert.equal(
     await evaluate('location.pathname'),
-    `/trajectory/${trajectoryId}`,
+    `/trajectories/${trajectoryId}`,
     'trajectory snapshot inspection survives a deep-link refresh',
   );
   await evaluate('document.querySelector("#home").click()');

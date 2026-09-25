@@ -52,9 +52,15 @@ def service(tmp_path):
 # server decides from the policy it persisted beside that credential's hash.
 ROUTE_POLICY_MATRIX = {
     "health": {"management": 200, "viewer": 200, "participant": 200},
-    "environment-schema": {"management": 200, "viewer": 200, "participant": 200},
-    "create": {"management": 200, "viewer": 403, "participant": 403},
+    "capabilities": {"management": 200, "viewer": 200, "participant": 200},
+    "create": {"management": 201, "viewer": 403, "participant": 403},
     "list": {"management": 200, "viewer": 200, "participant": 200},
+    "experiment-list": {"management": 200, "viewer": 200, "participant": 403},
+    "scenario-set-list": {"management": 200, "viewer": 200, "participant": 403},
+    "policy-list": {"management": 200, "viewer": 200, "participant": 200},
+    "snapshot-list": {"management": 200, "viewer": 200, "participant": 403},
+    "source-list": {"management": 200, "viewer": 200, "participant": 403},
+    "checkpoint-list": {"management": 200, "viewer": 200, "participant": 200},
     "trajectory-list": {"management": 200, "viewer": 200, "participant": 403},
     "trajectory-get": {"management": 200, "viewer": 200, "participant": 403},
     "get": {"management": 200, "viewer": 200, "participant": 200},
@@ -63,14 +69,13 @@ ROUTE_POLICY_MATRIX = {
     "events": {"management": 200, "viewer": 200, "participant": 200},
     "turn-series": {"management": 200, "viewer": 200, "participant": 403},
     "agent-work": {"management": 200, "viewer": 200, "participant": 200},
-    "commands": {"management": 200, "viewer": 403, "participant": 403},
+    "commands": {"management": 202, "viewer": 403, "participant": 403},
     "credentials": {"management": 200, "viewer": 403, "participant": 403},
     "operations": {"management": 403, "viewer": 403, "participant": 200},
     "artifacts": {"management": 200, "viewer": 403, "participant": 200},
     "artifact-read": {"management": 200, "viewer": 200, "participant": 200},
     "reports": {"management": 200, "viewer": 200, "participant": 403},
-    "report": {"management": 200, "viewer": 403, "participant": 403},
-    "export": {"management": 200, "viewer": 200, "participant": 200},
+    "report": {"management": 201, "viewer": 403, "participant": 403},
     "compare": {"management": 200, "viewer": 200, "participant": 403},
     "viewer": {"management": 200, "viewer": 200, "participant": 200},
     "viewer-asset": {"management": 200, "viewer": 200, "participant": 200},
@@ -104,26 +109,36 @@ def test_every_http_route_has_an_explicit_credential_policy_decision(tmp_path, c
 
     if case == "health":
         response = client.get("/health", headers=headers)
-    elif case == "environment-schema":
-        response = client.get("/v1/environment", headers=headers)
+    elif case == "capabilities":
+        response = client.get("/v1/capabilities", headers=headers)
     elif case == "create":
         response = client.post(
-            "/v1/environments",
+            "/v1/experiments",
             headers=headers | {"X-Operation-ID": "a" * 32},
             json=spec.model_dump(mode="json"),
         )
     elif case == "list":
-        response = client.get("/v1/environments", headers=headers)
+        response = client.get("/v1/sessions", headers=headers)
+    elif case == "experiment-list":
+        response = client.get("/v1/experiments", headers=headers)
+    elif case == "scenario-set-list":
+        response = client.get("/v1/scenario-sets", headers=headers)
+    elif case == "policy-list":
+        response = client.get("/v1/policies", headers=headers)
+    elif case == "snapshot-list":
+        response = client.get("/v1/snapshots", headers=headers)
+    elif case == "source-list":
+        response = client.get("/v1/sources", headers=headers)
+    elif case == "checkpoint-list":
+        response = client.get(f"/v1/sessions/{environment}/checkpoints", headers=headers)
     elif case == "trajectory-list":
         response = client.get("/v1/trajectories", headers=headers)
     elif case == "trajectory-get":
         response = client.get(f"/v1/trajectories/{environment}", headers=headers)
     elif case == "get":
-        response = client.get(f"/v1/environments/{environment}", headers=headers)
+        response = client.get(f"/v1/sessions/{environment}", headers=headers)
     elif case == "observation":
-        response = client.get(
-            f"/v1/environments/{environment}/observation?participant=alice", headers=headers
-        )
+        response = client.get(f"/v1/sessions/{environment}/participants/alice/observation", headers=headers)
     elif case == "actions":
         observation = session.observe(environment, agent)
         action = Action(
@@ -134,31 +149,31 @@ def test_every_http_route_has_an_explicit_credential_policy_decision(tmp_path, c
             payload={"value": 1},
         )
         response = client.post(
-            f"/v1/environments/{environment}/actions",
+            f"/v1/sessions/{environment}/participants/alice/actions",
             headers=headers,
             json=action.model_dump(mode="json"),
         )
     elif case == "events":
-        response = client.get(f"/v1/environments/{environment}/events", headers=headers)
+        response = client.get(f"/v1/sessions/{environment}/evidence", headers=headers)
     elif case == "turn-series":
-        response = client.get(f"/v1/environments/{environment}/turn-series", headers=headers)
+        response = client.get(f"/v1/sessions/{environment}/turn-series", headers=headers)
     elif case == "agent-work":
-        response = client.get(f"/v1/environments/{environment}/agent-work", headers=headers)
+        response = client.get(f"/v1/sessions/{environment}/invocations", headers=headers)
     elif case == "commands":
         response = client.post(
-            f"/v1/environments/{environment}/commands",
+            f"/v1/sessions/{environment}/commands",
             headers=headers,
             json={"operation": "lease", "arguments": {"owner": "matrix"}},
         )
     elif case == "credentials":
         response = client.post(
-            f"/v1/environments/{environment}/credentials",
+            f"/v1/sessions/{environment}/participants/alice/credentials",
             headers=headers,
-            json={"participant": "alice"},
+            json={"ttl": 900},
         )
     elif case == "operations":
         response = client.post(
-            f"/v1/environments/{environment}/operations",
+            f"/v1/sessions/{environment}/operations",
             headers=headers,
             json={
                 "operation_id": "matrix-operation",
@@ -168,14 +183,12 @@ def test_every_http_route_has_an_explicit_credential_policy_decision(tmp_path, c
             },
         )
     elif case == "artifacts":
-        response = client.post(
-            f"/v1/environments/{environment}/artifacts", headers=headers, content=b"matrix"
-        )
+        response = client.post(f"/v1/sessions/{environment}/artifacts", headers=headers, content=b"matrix")
     elif case == "artifact-read":
         key = store.artifact(environment, researcher, b"matrix", audience=("*",))["id"]
-        response = client.get(f"/v1/environments/{environment}/artifacts/{key}", headers=headers)
+        response = client.get(f"/v1/sessions/{environment}/artifacts/{key}", headers=headers)
     elif case == "reports":
-        response = client.get(f"/v1/environments/{environment}/reports", headers=headers)
+        response = client.get(f"/v1/sessions/{environment}/scores", headers=headers)
     elif case == "report":
         report = ScoreReport(
             scorer="control",
@@ -187,14 +200,12 @@ def test_every_http_route_has_an_explicit_credential_policy_decision(tmp_path, c
             provenance={"synthetic": True},
         )
         response = client.post(
-            f"/v1/environments/{environment}/reports",
+            f"/v1/sessions/{environment}/scores",
             headers=headers,
             json=report.model_dump(mode="json"),
         )
-    elif case == "export":
-        response = client.get(f"/v1/environments/{environment}/export", headers=headers)
     elif case == "compare":
-        response = client.post("/v1/compare", headers=headers, json={"environments": [environment]})
+        response = client.post("/v1/comparisons", headers=headers, json={"sessions": [environment]})
     elif case == "viewer":
         response = client.get("/", headers=headers)
     else:
@@ -206,7 +217,7 @@ def test_every_http_route_has_an_explicit_credential_policy_decision(tmp_path, c
 
 def test_http_negative_credential_matrix(tmp_path):
     client, store, session, researcher, spec, environment, headers, agent_headers = service(tmp_path)
-    protected = "/v1/environments"
+    protected = "/v1/sessions"
     assert client.get(protected).status_code == 401
     assert client.get(protected, headers={"Authorization": "Basic value"}).status_code == 401
     # An invalid credential is an authentication failure, never authorization.
@@ -228,13 +239,14 @@ def test_http_negative_credential_matrix(tmp_path):
 
     other_tenant = _AccessContext(tenant="other", subject="researcher", policy="trusted-local")
     other_headers = {"Authorization": "Bearer " + bearer(store, other_tenant)}
-    assert client.get(f"/v1/environments/{environment}", headers=other_headers).status_code == 403
+    assert client.get(f"/v1/sessions/{environment}", headers=other_headers).status_code == 403
 
     second = session.create(spec, researcher, environment_id="b" * 32)["id"]
-    assert client.get(f"/v1/environments/{second}", headers=agent_headers).status_code == 403
+    assert client.get(f"/v1/sessions/{second}", headers=agent_headers).status_code == 403
+    # Participant scope is in the route: another participant is out of bounds.
     assert (
         client.get(
-            f"/v1/environments/{environment}/observation?participant=bob", headers=agent_headers
+            f"/v1/sessions/{environment}/participants/bob/observation", headers=agent_headers
         ).status_code
         == 403
     )
@@ -247,27 +259,27 @@ def test_http_negative_credential_matrix(tmp_path):
             "UPDATE environments SET participants=? WHERE id=?",
             (json.dumps(participants, separators=(",", ":"), sort_keys=True), environment),
         )
-    assert client.get(f"/v1/environments/{environment}", headers=agent_headers).status_code == 403
+    assert client.get(f"/v1/sessions/{environment}", headers=agent_headers).status_code == 403
 
 
 def test_http_errors_share_one_traceable_envelope(tmp_path):
     client, store, session, researcher, spec, environment, headers, agent_headers = service(tmp_path)
 
     responses = (
-        (client.get("/v1/environments"), 401, "unauthorized"),
-        (client.get("/v1/environments", headers={"Authorization": "Bearer invalid"}), 401, "unauthorized"),
-        (client.get("/v1/environments?limit=0", headers=headers), 422, "invalid_request"),
+        (client.get("/v1/sessions"), 401, "unauthorized"),
+        (client.get("/v1/sessions", headers={"Authorization": "Bearer invalid"}), 401, "unauthorized"),
+        (client.get("/v1/sessions?limit=0", headers=headers), 422, "validation_error"),
         (
             client.get(
-                f"/v1/environments/{environment}/events",
+                f"/v1/sessions/{environment}/evidence",
                 headers=headers | {"Last-Event-ID": "invalid"},
             ),
             422,
-            "invalid_request",
+            "validation_error",
         ),
         (client.get("/viewer/private.txt"), 404, "not_found"),
         (client.put("/health"), 405, "method_not_allowed"),
-        (client.get("/health", headers={"Origin": "https://attacker.invalid"}), 403, "cross_origin_denied"),
+        (client.get("/health", headers={"Origin": "https://attacker.invalid"}), 403, "forbidden"),
     )
     for response, status, code in responses:
         assert response.status_code == status
@@ -296,10 +308,10 @@ def test_http_unexpected_errors_are_logged_and_redacted(tmp_path, caplog):
     def explode(*_args, **_kwargs):
         raise RuntimeError("private supplier failure")
 
-    session.list_page = explode
+    session.observe = explode
     client = TestClient(create_app(session), base_url="http://testserver", raise_server_exceptions=False)
     with caplog.at_level("ERROR", logger="environment_harness.server"):
-        response = client.get("/v1/environments", headers=headers)
+        response = client.get(f"/v1/sessions/{environment}/participants/alice/observation", headers=headers)
 
     assert response.status_code == 500
     error = response.json()["error"]
@@ -314,7 +326,7 @@ def test_openapi_documents_the_shared_error_envelope(tmp_path):
     document = client.get("/openapi.json").json()
 
     assert {"ApiError", "ErrorDetail", "ErrorEnvelope"} <= set(document["components"]["schemas"])
-    responses = document["paths"]["/v1/environments"]["get"]["responses"]
+    responses = document["paths"]["/v1/sessions"]["get"]["responses"]
     for status in ("401", "403", "405", "409", "413", "422", "500", "503"):
         assert responses[status]["content"]["application/json"]["schema"] == {
             "$ref": "#/components/schemas/ErrorEnvelope"
@@ -336,56 +348,70 @@ def test_openapi_is_a_public_authenticated_api_reference(tmp_path):
         "bearerFormat": "opaque",
     }
     assert document["paths"]["/health"]["get"].get("security") is None
-    assert document["paths"]["/v1/environments"]["get"]["security"] == [{"BearerAuth": []}]
+    assert document["paths"]["/v1/sessions"]["get"]["security"] == [{"BearerAuth": []}]
     # OpenAPI uses only the standard HTTP bearer scheme: no custom role,
     # permission, or principal-kind extension is published.
     serialized = json.dumps(document)
     assert "x-roles" not in serialized and "x-principal" not in serialized
     assert "permissions" not in document.get("components", {}).get("schemas", {})
-    commands = document["paths"]["/v1/environments/{environment}/commands"]["post"]
+    commands = document["paths"]["/v1/sessions/{session_id}/commands"]["post"]
     assert "advance" in commands["x-command-operations"]
     command_schema = document["components"]["schemas"]["CommandOperation"]
     assert set(command_schema["enum"]) == set(commands["x-command-operations"])
-    assert document["paths"]["/v1/environments/{environment}/credentials"]["post"]["requestBody"]["content"][
-        "application/json"
-    ]["schema"] == {"$ref": "#/components/schemas/CredentialRequest"}
-    assert document["paths"]["/v1/environments/{environment}/operations"]["post"]["requestBody"]["content"][
+    credentials = document["paths"]["/v1/sessions/{session_id}/participants/{participant_id}/credentials"][
+        "post"
+    ]
+    assert credentials["requestBody"]["content"]["application/json"]["schema"]["anyOf"][0] == {
+        "$ref": "#/components/schemas/CredentialRequest"
+    }
+    assert credentials["x-capability"] == "participant-credentials"
+    assert document["paths"]["/v1/sessions/{session_id}/operations"]["post"]["requestBody"]["content"][
         "application/json"
     ]["schema"] == {"$ref": "#/components/schemas/OperationIntentRequest"}
     assert {tag["name"] for tag in document["tags"]} >= {
         "Service",
-        "Environment sessions",
+        "Experiments",
+        "Sessions",
+        "Sources",
         "Evidence",
         "Activity",
         "Evaluation",
     }
-    assert "/home" not in document["paths"]
-    assert "/session/{environment}" not in document["paths"]
+    # The removed `/v1/environments` surface and viewer shell stay out of the
+    # published contract.
+    assert not any(path.startswith("/v1/environment") for path in document["paths"])
+    assert "/overview" not in document["paths"]
+    assert "/sessions/{session_id}" not in document["paths"]
 
 
 def test_environment_session_list_uses_a_stable_bounded_cursor(tmp_path):
     client, store, session, researcher, spec, environment, headers, agent_headers = service(tmp_path)
     for digit in ("1", "2", "3"):
         response = client.post(
-            "/v1/environments",
+            "/v1/experiments",
             headers=headers | {"X-Operation-ID": digit * 32},
             json=spec.model_dump(mode="json"),
         )
-        assert response.status_code == 200
+        assert response.status_code == 201
+        assert response.headers["location"] == f"/v1/sessions/{digit * 32}"
 
-    first = client.get("/v1/environments?limit=2", headers=headers)
+    first = client.get("/v1/sessions?limit=2", headers=headers)
     cursor = first.headers["x-next-cursor"]
-    second = client.get(f"/v1/environments?limit=2&cursor={cursor}", headers=headers)
+    second = client.get(f"/v1/sessions?limit=2&cursor={cursor}", headers=headers)
 
-    first_ids = [item["id"] for item in first.json()]
-    second_ids = [item["id"] for item in second.json()]
+    # Management collections share one typed envelope with an opaque cursor.
+    assert set(first.json()) == {"items", "nextCursor", "links"}
+    assert first.json()["nextCursor"] == cursor
+    assert first.json()["links"]["next"].endswith(f"cursor={cursor}")
+    first_ids = [item["metadata"]["id"] for item in first.json()["items"]]
+    second_ids = [item["metadata"]["id"] for item in second.json()["items"]]
     assert len(first_ids) == len(second_ids) == 2
     assert set(first_ids).isdisjoint(second_ids)
-    assert first_ids + second_ids == sorted(first_ids + second_ids, reverse=True)
     assert f"cursor={cursor}" in first.headers["link"]
+    assert second.json()["links"]["self"].endswith(f"cursor={cursor}")
     assert 'rel="next"' in first.headers["link"]
     assert "x-next-cursor" not in second.headers
-    assert client.get("/v1/environments?cursor=not-a-cursor", headers=headers).status_code == 422
+    assert client.get("/v1/sessions?cursor=not-a-cursor", headers=headers).status_code == 422
 
 
 def test_interactive_api_reference_has_route_scoped_asset_policy(tmp_path):
@@ -407,14 +433,18 @@ def test_interactive_api_reference_has_route_scoped_asset_policy(tmp_path):
         "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; "
         "object-src 'none'; frame-ancestors 'none'"
     )
-    assert client.get("/session/example").status_code == 200
-    assert client.get("/experiment/example").status_code == 200
-    assert client.get("/experiment/example/scenarios").status_code == 200
-    assert client.get("/experiment/example/scenarios/one").status_code == 200
-    assert client.get("/experiment/example/sessions").status_code == 200
-    assert client.get("/experiment/example/training").status_code == 200
-    assert client.get("/trajectory/source-example").status_code == 200
-    assert client.get("/experiment/example/unknown").status_code == 404
+    # Canonical browser routes use plural nouns.
+    assert client.get("/overview").status_code == 200
+    assert client.get("/sessions/example").status_code == 200
+    assert client.get("/sessions/example/turns").status_code == 200
+    assert client.get("/experiments/example").status_code == 200
+    assert client.get("/experiments/example/scenarios").status_code == 200
+    assert client.get("/experiments/example/scenarios/one").status_code == 200
+    assert client.get("/experiments/example/sessions").status_code == 200
+    assert client.get("/trajectories/source-example").status_code == 200
+    assert client.get("/trajectories/source-example/records").status_code == 200
+    assert client.get("/experiments/example/unknown").status_code == 404
+    assert client.get("/sessions/example/unknown").status_code == 404
 
 
 def test_activity_openapi_records_json_response_contracts(tmp_path):
@@ -422,16 +452,16 @@ def test_activity_openapi_records_json_response_contracts(tmp_path):
 
     document = client.get("/openapi.json").json()
 
-    assert document["paths"]["/v1/activity/events"]["get"]["responses"]["200"]["content"]["application/json"][
+    assert document["paths"]["/v1/activity"]["get"]["responses"]["200"]["content"]["application/json"][
         "schema"
     ] == {"$ref": "#/components/schemas/ActivityPage"}
-    assert document["paths"]["/v1/experiments/{experiment}/events"]["get"]["responses"]["200"]["content"][
+    assert document["paths"]["/v1/experiments/{experiment_id}/activity"]["get"]["responses"]["200"][
+        "content"
+    ]["application/json"]["schema"] == {"$ref": "#/components/schemas/ActivityPage"}
+    assert document["paths"]["/v1/sessions/{session_id}/activity"]["get"]["responses"]["200"]["content"][
         "application/json"
     ]["schema"] == {"$ref": "#/components/schemas/ActivityPage"}
-    assert document["paths"]["/v1/environments/{environment}/activity"]["get"]["responses"]["200"]["content"][
-        "application/json"
-    ]["schema"] == {"$ref": "#/components/schemas/ActivityPage"}
-    assert document["paths"]["/v1/activity/snapshot"]["get"]["responses"]["200"]["content"][
+    assert document["paths"]["/v1/activity/hierarchy"]["get"]["responses"]["200"]["content"][
         "application/json"
     ]["schema"] == {"$ref": "#/components/schemas/ActivityHierarchy"}
 
@@ -439,25 +469,23 @@ def test_activity_openapi_records_json_response_contracts(tmp_path):
 def test_http_boundaries_reject_oversize_invalid_and_unavailable_requests(tmp_path, monkeypatch):
     client, store, session, researcher, spec, environment, headers, agent_headers = service(tmp_path)
 
-    oversized = client.post("/v1/compare", content=b"x" * 16777217, headers=headers)
+    oversized = client.post("/v1/comparisons", content=b"x" * 16777217, headers=headers)
     assert oversized.status_code == 413
-    assert oversized.json()["error"]["code"] == "request_too_large"
+    assert oversized.json()["error"]["code"] == "payload_too_large"
     invalid_control = client.post(
-        f"/v1/environments/{environment}/commands",
+        f"/v1/sessions/{environment}/commands",
         headers=headers,
         json={"operation": "control", "arguments": {"lease": {}, "command": "unknown"}},
     )
     assert invalid_control.status_code == 422
-    assert invalid_control.json()["error"]["code"] == "invalid_request"
-    assert (
-        client.get("/v1/activity/events", headers=headers | {"Last-Event-ID": "invalid"}).status_code == 422
-    )
+    assert invalid_control.json()["error"]["code"] == "validation_error"
+    assert client.get("/v1/activity", headers=headers | {"Last-Event-ID": "invalid"}).status_code == 422
 
     def unavailable(*_args, **_kwargs):
         raise HarnessError("synthetic unavailable")
 
     monkeypatch.setattr(store, "activity", unavailable)
-    failure = client.get("/v1/activity/events", headers=headers)
+    failure = client.get("/v1/activity", headers=headers)
     assert failure.status_code == 503
     assert failure.json()["error"]["code"] == "harness_error"
 
@@ -471,20 +499,31 @@ def test_http_route_and_role_matrix(tmp_path):
     assert health.headers["x-content-type-options"] == "nosniff"
     assert health.headers["referrer-policy"] == "no-referrer"
     assert "frame-ancestors 'none'" in health.headers["content-security-policy"]
-    assert client.get("/v1/environment", headers=headers).json()["id"] == "synthetic-protocol"
-    assert client.get("/v1/environments", headers=headers).json()[0]["id"] == environment
-    assert client.get(f"/v1/environments/{environment}", headers=headers).json()["id"] == environment
-    assert client.get(f"/v1/environments/{environment}/observation", headers=agent_headers).status_code == 200
+    listed = client.get("/v1/sessions", headers=headers).json()
+    assert listed["items"][0]["metadata"]["id"] == environment
+    # EnvironmentSpec is embedded in the Session, not a separate resource.
+    resource = client.get(f"/v1/sessions/{environment}", headers=headers).json()
+    assert resource["metadata"]["id"] == environment
+    assert resource["spec"]["environment"]["id"] == "synthetic-protocol"
+    assert (
+        client.get(
+            f"/v1/sessions/{environment}/participants/alice/observation", headers=agent_headers
+        ).status_code
+        == 200
+    )
 
     http_identifier = "a" * 32
     created = client.post(
-        "/v1/environments",
+        "/v1/experiments",
         headers=headers | {"X-Operation-ID": http_identifier},
         json=spec.model_dump(mode="json"),
     )
-    assert created.status_code == 200 and created.json()["id"] == http_identifier
+    assert created.status_code == 201 and created.json()["id"] == http_identifier
+    assert created.headers["location"] == f"/v1/sessions/{http_identifier}"
 
-    observation = client.get(f"/v1/environments/{environment}/observation", headers=agent_headers).json()
+    observation = client.get(
+        f"/v1/sessions/{environment}/participants/alice/observation", headers=agent_headers
+    ).json()
     action = Action(
         operation_id=uid(),
         participant="alice",
@@ -494,40 +533,40 @@ def test_http_route_and_role_matrix(tmp_path):
     )
     assert (
         client.post(
-            f"/v1/environments/{environment}/actions",
+            f"/v1/sessions/{environment}/participants/alice/actions",
             headers=agent_headers,
             json=action.model_dump(mode="json"),
         ).status_code
         == 200
     )
 
-    events = client.get(f"/v1/environments/{environment}/events", headers=headers).json()
+    events = client.get(f"/v1/sessions/{environment}/evidence", headers=headers).json()
     assert events["events"] and events["cursor"] >= 1
     resumed = client.get(
-        f"/v1/environments/{environment}/events",
+        f"/v1/sessions/{environment}/evidence",
         headers=headers | {"Last-Event-ID": str(events["cursor"])},
     ).json()
     assert resumed == {"events": [], "cursor": events["cursor"]}
     caught_up = client.get(
-        f"/v1/environments/{environment}/events",
+        f"/v1/sessions/{environment}/evidence",
         headers=headers | {"Accept": "text/event-stream", "Last-Event-ID": str(events["cursor"])},
     )
     assert caught_up.headers["content-type"].startswith("text/event-stream")
     assert caught_up.text == ": caught up\n\n"
     assert (
         client.get(
-            f"/v1/environments/{environment}/events", headers=headers | {"Last-Event-ID": "invalid"}
+            f"/v1/sessions/{environment}/evidence", headers=headers | {"Last-Event-ID": "invalid"}
         ).status_code
         == 422
     )
-    assert client.get(f"/v1/environments/{environment}/agent-work", headers=headers).status_code == 200
+    assert client.get(f"/v1/sessions/{environment}/invocations", headers=headers).status_code == 200
 
 
 def test_turn_series_bounds_long_sessions_and_preserves_range_endpoints(tmp_path):
     client, store, session, researcher, spec, environment, headers, _ = service(tmp_path)
     run(session, environment, researcher, {"alice": SyntheticAgent()}, turns=30)
 
-    response = client.get(f"/v1/environments/{environment}/turn-series?max_points=20", headers=headers)
+    response = client.get(f"/v1/sessions/{environment}/turn-series?max_points=20", headers=headers)
     assert response.status_code == 200
     projection = response.json()
     assert projection["total_turns"] == 30
@@ -539,20 +578,20 @@ def test_turn_series_bounds_long_sessions_and_preserves_range_endpoints(tmp_path
     assert [cumulative["points"][0]["turn"], cumulative["points"][-1]["turn"]] == [1, 30]
 
     window = client.get(
-        f"/v1/environments/{environment}/turn-series?start_turn=10&end_turn=15&max_points=20",
+        f"/v1/sessions/{environment}/turn-series?start_turn=10&end_turn=15&max_points=20",
         headers=headers,
     ).json()
     assert window["range"] == {"start_turn": 10, "end_turn": 15}
     assert all(10 <= point["turn"] <= 15 for item in window["series"] for point in item["points"])
     after_session = client.get(
-        f"/v1/environments/{environment}/turn-series?start_turn=40&end_turn=50&max_points=20",
+        f"/v1/sessions/{environment}/turn-series?start_turn=40&end_turn=50&max_points=20",
         headers=headers,
     ).json()
     assert after_session["range"] == {"start_turn": 40, "end_turn": 50}
     assert all(not item["points"] for item in after_session["series"])
     assert (
         client.get(
-            f"/v1/environments/{environment}/turn-series?start_turn=15&end_turn=10",
+            f"/v1/sessions/{environment}/turn-series?start_turn=15&end_turn=10",
             headers=headers,
         ).status_code
         == 422
@@ -620,35 +659,35 @@ def test_http_commands_credentials_operations_artifacts_and_reports(tmp_path):
     client, store, session, researcher, spec, environment, headers, agent_headers = service(tmp_path)
 
     lease = client.post(
-        f"/v1/environments/{environment}/commands",
+        f"/v1/sessions/{environment}/commands",
         headers=headers,
         json={"operation": "lease", "arguments": {"owner": "http"}},
-    ).json()
+    ).json()["result"]
     assert lease["owner"] == "http"
     released = client.post(
-        f"/v1/environments/{environment}/commands",
+        f"/v1/sessions/{environment}/commands",
         headers=headers,
         json={"operation": "release", "arguments": {"lease": lease}},
     )
-    assert released.status_code == 200
+    assert released.status_code == 202
     waiting = client.post(
-        f"/v1/environments/{environment}/commands",
+        f"/v1/sessions/{environment}/commands",
         headers=headers,
         json={"operation": "advance", "arguments": {}},
     )
-    assert waiting.status_code == 200
-    assert waiting.json()["status"] == "waiting"
+    assert waiting.status_code == 202
+    assert waiting.json()["result"]["status"] == "waiting"
     assert (
         client.post(
-            f"/v1/environments/{environment}/commands",
+            f"/v1/sessions/{environment}/commands",
             headers=headers,
             json={"operation": "unknown", "arguments": {}},
         ).json()["error"]["code"]
-        == "invalid_request"
+        == "validation_error"
     )
     assert (
         client.post(
-            f"/v1/environments/{environment}/commands",
+            f"/v1/sessions/{environment}/commands",
             headers=headers,
             json={"operation": "lease", "arguments": {"unexpected": True}},
         ).status_code
@@ -656,31 +695,32 @@ def test_http_commands_credentials_operations_artifacts_and_reports(tmp_path):
     )
 
     credential = client.post(
-        f"/v1/environments/{environment}/credentials",
+        f"/v1/sessions/{environment}/participants/alice/credentials",
         headers=headers,
-        json={"participant": "alice", "ttl": 100000},
+        json={"ttl": 100000},
     )
     assert credential.status_code == 200
     assert store.authenticate(credential.json()["token"]).participant == "alice"
     assert (
         client.post(
-            f"/v1/environments/{environment}/credentials",
+            f"/v1/sessions/{environment}/participants/alice/credentials",
             headers=headers,
-            json={"participant": "alice", "unexpected": True},
+            json={"unexpected": True},
         ).json()["error"]["code"]
-        == "invalid_request"
+        == "validation_error"
     )
+    # The participant is named by the route, so an unknown one is forbidden.
     assert (
         client.post(
-            f"/v1/environments/{environment}/credentials",
+            f"/v1/sessions/{environment}/participants/missing/credentials",
             headers=headers,
-            json={"participant": "missing"},
+            json={},
         ).status_code
         == 403
     )
 
     prepared = client.post(
-        f"/v1/environments/{environment}/operations",
+        f"/v1/sessions/{environment}/operations",
         headers=agent_headers,
         json={
             "operation_id": "http-op",
@@ -693,13 +733,13 @@ def test_http_commands_credentials_operations_artifacts_and_reports(tmp_path):
     assert prepared.json() == {"id": "http-op", "status": "prepared"}
 
     uploaded = client.post(
-        f"/v1/environments/{environment}/artifacts",
+        f"/v1/sessions/{environment}/artifacts",
         headers=agent_headers | {"Content-Type": "application/synthetic"},
         content=b"public SDK artifact",
     )
     assert uploaded.status_code == 200
     downloaded = client.get(
-        f"/v1/environments/{environment}/artifacts/{uploaded.json()['id']}", headers=agent_headers
+        f"/v1/sessions/{environment}/artifacts/{uploaded.json()['id']}", headers=agent_headers
     )
     assert downloaded.content == b"public SDK artifact"
     assert downloaded.headers["content-disposition"].startswith("attachment")
@@ -715,29 +755,39 @@ def test_http_commands_credentials_operations_artifacts_and_reports(tmp_path):
     )
     assert (
         client.post(
-            f"/v1/environments/{environment}/reports",
+            f"/v1/sessions/{environment}/scores",
             headers=headers,
             json=report.model_dump(mode="json"),
         ).status_code
-        == 200
+        == 201
     )
-    assert len(client.get(f"/v1/environments/{environment}/reports", headers=headers).json()) == 1
+    assert len(client.get(f"/v1/sessions/{environment}/scores", headers=headers).json()["items"]) == 1
 
 
 def test_http_exports_comparison_viewer_and_invalid_requests(tmp_path):
     client, store, session, researcher, spec, environment, headers, agent_headers = service(tmp_path)
 
-    evidence = client.get(f"/v1/environments/{environment}/export", headers=headers)
-    assert evidence.status_code == 200 and '"kind":"session.created"' in evidence.text
-    assert (
-        client.get(f"/v1/environments/{environment}/export?format=unknown", headers=headers).status_code
-        == 422
+    # The corrected export is a frozen snapshot, not a session verb path.
+    assert client.get(f"/v1/sessions/{environment}/export", headers=headers).status_code == 404
+    frozen = client.post(f"/v1/trajectories/{environment}/snapshots", headers=headers)
+    assert frozen.status_code == 201
+    identity = frozen.json()["metadata"]["id"]
+    assert frozen.headers["location"] == f"/v1/snapshots/{identity}"
+    streamed = client.get(
+        f"/v1/snapshots/{identity}/records",
+        headers=headers | {"Accept": "application/x-ndjson"},
     )
+    assert streamed.status_code == 200
+    assert streamed.headers["content-type"].startswith("application/x-ndjson")
+    assert '"type":"session.created"' in streamed.text
+    paged = client.get(f"/v1/snapshots/{identity}/records", headers=headers)
+    assert paged.headers["content-type"].startswith("application/json")
+    assert paged.json()["records"]
     assert (
-        client.post("/v1/compare", headers=headers, json={"environments": [environment]}).status_code == 200
+        client.post("/v1/comparisons", headers=headers, json={"sessions": [environment]}).status_code == 200
     )
     for bad in ([], "not-a-list", [str(index) for index in range(101)]):
-        assert client.post("/v1/compare", headers=headers, json={"environments": bad}).status_code == 422
+        assert client.post("/v1/comparisons", headers=headers, json={"sessions": bad}).status_code == 422
     viewer = client.get("/")
     assert viewer.status_code == 200
     assert "What am I looking at?" in viewer.text
@@ -748,29 +798,34 @@ def test_http_exports_comparison_viewer_and_invalid_requests(tmp_path):
         assert client.get(f"/viewer/{asset}").status_code == 200
     assert client.get("/viewer/private.txt").status_code == 404
 
-    assert client.get("/v1/environments", headers={"Authorization": "Basic invalid"}).status_code == 401
-    assert client.get("/v1/environments", headers={"Authorization": "Bearer invalid"}).status_code == 401
+    assert client.get("/v1/sessions", headers={"Authorization": "Basic invalid"}).status_code == 401
+    assert client.get("/v1/sessions", headers={"Authorization": "Bearer invalid"}).status_code == 401
     other = _AccessContext(tenant="other", subject="researcher", policy="trusted-local")
     other_headers = {"Authorization": "Bearer " + bearer(store, other)}
-    assert client.get(f"/v1/environments/{environment}", headers=other_headers).status_code == 403
+    assert client.get(f"/v1/sessions/{environment}", headers=other_headers).status_code == 403
     assert (
         client.get("/health", headers={"Origin": "https://attacker.invalid"}).json()["error"]["code"]
-        == "cross_origin_denied"
+        == "forbidden"
     )
-    assert client.get("/v1/environments?limit=0", headers=headers).status_code == 422
+    assert client.get("/v1/sessions?limit=0", headers=headers).status_code == 422
 
 
 def test_http_training_export_entitlement_and_value_error(tmp_path):
     client, store, session, researcher, spec, environment, headers, agent_headers = service(tmp_path)
+    # Evaluation evidence cannot be relabeled as a training dataset.
     assert (
-        client.get(f"/v1/environments/{environment}/export?format=training", headers=headers).status_code
+        client.post(
+            "/v1/datasets",
+            headers=headers,
+            json={"name": "denied", "trajectories": [environment]},
+        ).status_code
         == 403
     )
     assert (
         client.post(
-            f"/v1/environments/{environment}/credentials",
+            f"/v1/sessions/{environment}/participants/alice/credentials",
             headers=headers,
-            json={"participant": "alice", "ttl": "invalid"},
+            json={"ttl": "invalid"},
         ).json()["error"]["code"]
-        == "invalid_request"
+        == "validation_error"
     )

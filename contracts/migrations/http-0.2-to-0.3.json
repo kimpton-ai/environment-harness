@@ -1,0 +1,1423 @@
+{
+  "addedOperations": [
+    "create_branch_v1_sessions__session_id__branches_post",
+    "create_checkpoint_v1_sessions__session_id__checkpoints_post",
+    "deployment_capabilities_v1_capabilities_get",
+    "experiment_scores_v1_experiments__experiment_id__scores_get",
+    "experiment_sessions_v1_experiments__experiment_id__sessions_get",
+    "experiment_v1_experiments__experiment_id__get",
+    "experiments_v1_experiments_get",
+    "get_checkpoint_v1_sessions__session_id__checkpoints__checkpoint_id__get",
+    "policy_index_v1_policies_get",
+    "policy_v1_policies__policy_id__get",
+    "scenario_set_v1_scenario_sets__scenario_set_id__get",
+    "scenario_sets_v1_scenario_sets_get",
+    "session_checkpoints_v1_sessions__session_id__checkpoints_get",
+    "snapshots_v1_snapshots_get",
+    "source_records_v1_sources__source_id__records_get",
+    "source_v1_sources__source_id__get",
+    "sources_v1_sources_get",
+    "trajectory_scores_v1_trajectories__trajectory_id__scores_get"
+  ],
+  "authorizationModel": {
+    "current": {
+      "issuable": [
+        "management",
+        "viewer",
+        "participant"
+      ],
+      "kind": "server-owned credential policies",
+      "policies": {
+        "management": [
+          "activity.read",
+          "artifact.read",
+          "artifact.write",
+          "capabilities.read",
+          "comparison.read",
+          "credential.participant.issue",
+          "dataset.create",
+          "dataset.read",
+          "evidence.read.full",
+          "observation.read",
+          "score.read",
+          "score.write",
+          "session.control",
+          "session.create",
+          "session.read",
+          "session.write",
+          "snapshot.create",
+          "source.ingest",
+          "source.register",
+          "source.status.write",
+          "training.read",
+          "trajectory.read"
+        ],
+        "participant": [
+          "artifact.read",
+          "artifact.write",
+          "capabilities.read",
+          "evidence.read.scoped",
+          "observation.read",
+          "operation.prepare",
+          "participant.act",
+          "participant.memory.write",
+          "session.read"
+        ],
+        "trusted-local": [
+          "activity.read",
+          "artifact.read",
+          "artifact.write",
+          "capabilities.read",
+          "comparison.read",
+          "credential.participant.issue",
+          "dataset.create",
+          "dataset.read",
+          "evidence.read.full",
+          "evidence.read.scoped",
+          "observation.read",
+          "operation.prepare",
+          "participant.act",
+          "participant.memory.write",
+          "score.read",
+          "score.write",
+          "session.control",
+          "session.create",
+          "session.read",
+          "session.write",
+          "snapshot.create",
+          "source.ingest",
+          "source.register",
+          "source.status.write",
+          "training.execute",
+          "training.read",
+          "trajectory.read"
+        ],
+        "viewer": [
+          "activity.read",
+          "artifact.read",
+          "capabilities.read",
+          "comparison.read",
+          "dataset.read",
+          "evidence.read.full",
+          "observation.read",
+          "score.read",
+          "session.read",
+          "training.read",
+          "trajectory.read"
+        ]
+      }
+    },
+    "previous": {
+      "kind": "public four-role literal",
+      "note": "Removed in 0.3.0rc1 and replaced by server-owned credential policies.",
+      "roles": [
+        "agent",
+        "researcher",
+        "scorer",
+        "worker"
+      ]
+    }
+  },
+  "authorizationRegistryFingerprint": "07ffb8d6489e1f56e824cf1e8850c72afd6ffdfb9237a6b4c12e4cf68a5a709a",
+  "candidateFingerprint": "f3a7fac1360cb32e7754e455cce9fc42e6f81ef4a6215bea34897c14a390f29f",
+  "contract": "environmentharness.dev/v1alpha1",
+  "from": "0.2.4rc2",
+  "operations": [
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "submit_action_v1_sessions__session_id__participants__participant_id__actions_post",
+      "destinationCapability": null,
+      "destinationMethod": "POST",
+      "destinationPath": "/v1/sessions/{session_id}/participants/{participant_id}/actions",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "POST",
+      "operationId": "action_v1_environments__environment__actions_post",
+      "pagination": "unchanged",
+      "path": "/v1/environments/{environment}/actions",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "participant-scoped agent credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}/actions",
+        "roles": [
+          "agent"
+        ]
+      },
+      "rationale": "Only a participant credential bound to this session and participant may submit.",
+      "request": "unchanged",
+      "resource_constraints": "breaking",
+      "response": "unchanged",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "activity_hierarchy_v1_activity_hierarchy_get",
+      "destinationCapability": null,
+      "destinationMethod": "GET",
+      "destinationPath": "/v1/activity/hierarchy",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "GET",
+      "operationId": "activity_snapshot_v1_activity_snapshot_get",
+      "pagination": "unchanged",
+      "path": "/v1/activity/snapshot",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "worker credential"
+        ],
+        "resource_scope": "/v1/activity/snapshot",
+        "roles": [
+          "researcher",
+          "worker"
+        ]
+      },
+      "rationale": "`snapshot` is the name of the immutable TrajectorySnapshot resource, so the activity projection is renamed `hierarchy`. `ActivitySnapshot` becomes `ActivityHierarchy`.",
+      "request": "unchanged",
+      "resource_constraints": "unchanged",
+      "response": "compatible",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "invocations_v1_sessions__session_id__invocations_get",
+      "destinationCapability": null,
+      "destinationMethod": "GET",
+      "destinationPath": "/v1/sessions/{session_id}/invocations",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "GET",
+      "operationId": "agent_work_v1_environments__environment__agent_work_get",
+      "pagination": "unchanged",
+      "path": "/v1/environments/{environment}/agent-work",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "worker credential",
+          "participant-scoped agent credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}/agent-work",
+        "roles": [
+          "researcher",
+          "worker",
+          "agent"
+        ]
+      },
+      "rationale": "Hyphenated `agent-work` becomes `invocations`; the body key becomes `items`.",
+      "request": "unchanged",
+      "resource_constraints": "compatible",
+      "response": "breaking",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "artifact_v1_sessions__session_id__artifacts_post",
+      "destinationCapability": null,
+      "destinationMethod": "POST",
+      "destinationPath": "/v1/sessions/{session_id}/artifacts",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "POST",
+      "operationId": "artifact_v1_environments__environment__artifacts_post",
+      "pagination": "unchanged",
+      "path": "/v1/environments/{environment}/artifacts",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "worker credential",
+          "scorer credential",
+          "participant-scoped agent credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}/artifacts",
+        "roles": [
+          "researcher",
+          "worker",
+          "scorer",
+          "agent"
+        ]
+      },
+      "rationale": "Route rename only. Oversize bodies now return the payload_too_large code.",
+      "request": "unchanged",
+      "resource_constraints": "unchanged",
+      "response": "unchanged",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "command_v1_sessions__session_id__commands_post",
+      "destinationCapability": null,
+      "destinationMethod": "POST",
+      "destinationPath": "/v1/sessions/{session_id}/commands",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "POST",
+      "operationId": "command_v1_environments__environment__commands_post",
+      "pagination": "unchanged",
+      "path": "/v1/environments/{environment}/commands",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "worker credential",
+          "participant-scoped agent credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}/commands",
+        "roles": [
+          "researcher",
+          "worker",
+          "agent"
+        ]
+      },
+      "rationale": "Queued lifecycle commands return 202 with a typed receipt whose result carries the previous body.",
+      "request": "unchanged",
+      "resource_constraints": "compatible",
+      "response": "breaking",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "comparison_v1_comparisons_post",
+      "destinationCapability": null,
+      "destinationMethod": "POST",
+      "destinationPath": "/v1/comparisons",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "POST",
+      "operationId": "comparison_v1_compare_post",
+      "pagination": "unchanged",
+      "path": "/v1/compare",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/compare",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "rationale": "The verb path becomes the plural resource, and the request key `environments` becomes `sessions`. No comparison authority is persisted.",
+      "request": "breaking",
+      "resource_constraints": "unchanged",
+      "response": "unchanged",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "create_experiment_v1_experiments_post",
+      "destinationCapability": null,
+      "destinationMethod": "POST",
+      "destinationPath": "/v1/experiments",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "POST",
+      "operationId": "create_v1_environments_post",
+      "pagination": "unchanged",
+      "path": "/v1/environments",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential"
+        ],
+        "resource_scope": "/v1/environments",
+        "roles": [
+          "researcher"
+        ]
+      },
+      "rationale": "Every Session is derived from an Experiment, so the supported one-off path creates an implicit experiment-of-one. The response now returns 201 with a Location header.",
+      "request": "unchanged",
+      "resource_constraints": "unchanged",
+      "response": "breaking",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "credential_v1_sessions__session_id__participants__participant_id__credentials_post",
+      "destinationCapability": "participant-credentials",
+      "destinationMethod": "POST",
+      "destinationPath": "/v1/sessions/{session_id}/participants/{participant_id}/credentials",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "POST",
+      "operationId": "credential_v1_environments__environment__credentials_post",
+      "pagination": "unchanged",
+      "path": "/v1/environments/{environment}/credentials",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}/credentials",
+        "roles": [
+          "researcher"
+        ]
+      },
+      "rationale": "The participant is named by the route, never the body, and the operation declares the participant-credentials capability.",
+      "request": "breaking",
+      "resource_constraints": "breaking",
+      "response": "unchanged",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "session_activity_v1_sessions__session_id__activity_get",
+      "destinationCapability": null,
+      "destinationMethod": "GET",
+      "destinationPath": "/v1/sessions/{session_id}/activity",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "GET",
+      "operationId": "environment_activity_v1_environments__environment__activity_get",
+      "pagination": "unchanged",
+      "path": "/v1/environments/{environment}/activity",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "worker credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}/activity",
+        "roles": [
+          "researcher",
+          "worker"
+        ]
+      },
+      "rationale": "Route rename only; the durable activity cursor is preserved.",
+      "request": "unchanged",
+      "resource_constraints": "unchanged",
+      "response": "unchanged",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "session_turn_series_v1_sessions__session_id__turn_series_get",
+      "destinationCapability": null,
+      "destinationMethod": "GET",
+      "destinationPath": "/v1/sessions/{session_id}/turn-series",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "GET",
+      "operationId": "environment_turn_series_v1_environments__environment__turn_series_get",
+      "pagination": "unchanged",
+      "path": "/v1/environments/{environment}/turn-series",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}/turn-series",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "rationale": "Route rename only.",
+      "request": "unchanged",
+      "resource_constraints": "unchanged",
+      "response": "unchanged",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": null,
+      "destinationCapability": null,
+      "destinationMethod": null,
+      "destinationPath": null,
+      "disposition": "removed",
+      "errors": "breaking",
+      "method": "GET",
+      "operationId": "environment_v1_environment_get",
+      "pagination": "unchanged",
+      "path": "/v1/environment",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "worker credential",
+          "scorer credential",
+          "participant-scoped agent credential"
+        ],
+        "resource_scope": "/v1/environment",
+        "roles": [
+          "researcher",
+          "worker",
+          "scorer",
+          "agent"
+        ]
+      },
+      "rationale": "There is no Environment singleton. EnvironmentSpec is frozen inside each Experiment and inherited by its Sessions; read it from Experiment.spec.environment or Session.spec.environment.",
+      "request": "breaking",
+      "resource_constraints": "breaking",
+      "response": "breaking",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "sessions_v1_sessions_get",
+      "destinationCapability": null,
+      "destinationMethod": "GET",
+      "destinationPath": "/v1/sessions",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "GET",
+      "operationId": "environments_v1_environments_get",
+      "pagination": "breaking",
+      "path": "/v1/environments",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential"
+        ],
+        "resource_scope": "/v1/environments",
+        "roles": [
+          "researcher"
+        ]
+      },
+      "rationale": "The bare list is replaced by the typed management envelope with an opaque cursor, and items are portable Session resources.",
+      "request": "compatible",
+      "resource_constraints": "compatible",
+      "response": "breaking",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "evidence_v1_sessions__session_id__evidence_get",
+      "destinationCapability": null,
+      "destinationMethod": "GET",
+      "destinationPath": "/v1/sessions/{session_id}/evidence",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "GET",
+      "operationId": "events_v1_environments__environment__events_get",
+      "pagination": "unchanged",
+      "path": "/v1/environments/{environment}/events",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "worker credential",
+          "scorer credential",
+          "participant-scoped agent credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}/events",
+        "roles": [
+          "researcher",
+          "worker",
+          "scorer",
+          "agent"
+        ]
+      },
+      "rationale": "Renamed to `evidence` and given a typed EvidencePage response; the durable integer cursor and SSE resume are unchanged.",
+      "request": "unchanged",
+      "resource_constraints": "compatible",
+      "response": "compatible",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "experiment_activity_v1_experiments__experiment_id__activity_get",
+      "destinationCapability": null,
+      "destinationMethod": "GET",
+      "destinationPath": "/v1/experiments/{experiment_id}/activity",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "GET",
+      "operationId": "experiment_activity_v1_experiments__experiment__events_get",
+      "pagination": "unchanged",
+      "path": "/v1/experiments/{experiment}/events",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "worker credential"
+        ],
+        "resource_scope": "/v1/experiments/{experiment}/events",
+        "roles": [
+          "researcher",
+          "worker"
+        ]
+      },
+      "rationale": "Experiment activity is scoped consistently at `/activity`.",
+      "request": "unchanged",
+      "resource_constraints": "unchanged",
+      "response": "unchanged",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "dataset_records_v1_datasets__dataset_id__records_get",
+      "destinationCapability": null,
+      "destinationMethod": "GET",
+      "destinationPath": "/v1/datasets/{dataset_id}/records",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "GET",
+      "operationId": "export_trajectory_dataset_v1_trajectory_datasets__dataset__export_get",
+      "pagination": "breaking",
+      "path": "/v1/trajectory-datasets/{dataset}/export",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/trajectory-datasets/{dataset}/export",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "rationale": "Content negotiation replaces the `/export` verb path.",
+      "request": "compatible",
+      "resource_constraints": "unchanged",
+      "response": "breaking",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "snapshot_records_v1_snapshots__snapshot_id__records_get",
+      "destinationCapability": null,
+      "destinationMethod": "GET",
+      "destinationPath": "/v1/snapshots/{snapshot_id}/records",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "GET",
+      "operationId": "export_trajectory_snapshot_v1_trajectory_snapshots__snapshot__export_get",
+      "pagination": "breaking",
+      "path": "/v1/trajectory-snapshots/{snapshot}/export",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/trajectory-snapshots/{snapshot}/export",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "rationale": "Content negotiation replaces the `/export` verb path: the typed JSON cursor page is the generated-client response and `Accept: application/x-ndjson` streams NDJSON.",
+      "request": "compatible",
+      "resource_constraints": "unchanged",
+      "response": "breaking",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": null,
+      "destinationCapability": null,
+      "destinationMethod": null,
+      "destinationPath": null,
+      "disposition": "removed",
+      "errors": "breaking",
+      "method": "GET",
+      "operationId": "export_v1_environments__environment__export_get",
+      "pagination": "breaking",
+      "path": "/v1/environments/{environment}/export",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "worker credential",
+          "scorer credential",
+          "participant-scoped agent credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}/export",
+        "roles": [
+          "researcher",
+          "worker",
+          "scorer",
+          "agent"
+        ]
+      },
+      "rationale": "The action-row `environment-rollout.v1` export is corrected once before 0.3.0rc1. Freeze a TrajectorySnapshot and read `/v1/snapshots/{id}/records`, or freeze a TrajectoryDataset and read `/v1/datasets/{id}/records`, with `Accept: application/x-ndjson` for streaming. Stored evidence stays readable through the trajectory projection.",
+      "request": "breaking",
+      "resource_constraints": "breaking",
+      "response": "breaking",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "freeze_trajectory_dataset_v1_datasets_post",
+      "destinationCapability": null,
+      "destinationMethod": "POST",
+      "destinationPath": "/v1/datasets",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "POST",
+      "operationId": "freeze_trajectory_dataset_v1_trajectory_datasets_post",
+      "pagination": "unchanged",
+      "path": "/v1/trajectory-datasets",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential"
+        ],
+        "resource_scope": "/v1/trajectory-datasets",
+        "roles": [
+          "researcher"
+        ]
+      },
+      "rationale": "One-word plural collection name; creation returns 201 with Location.",
+      "request": "unchanged",
+      "resource_constraints": "unchanged",
+      "response": "compatible",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "freeze_trajectory_snapshot_v1_trajectories__trajectory_id__snapshots_post",
+      "destinationCapability": null,
+      "destinationMethod": "POST",
+      "destinationPath": "/v1/trajectories/{trajectory_id}/snapshots",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "POST",
+      "operationId": "freeze_trajectory_snapshot_v1_trajectories__trajectory__snapshots_post",
+      "pagination": "unchanged",
+      "path": "/v1/trajectories/{trajectory}/snapshots",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/trajectories/{trajectory}/snapshots",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "rationale": "Creation now returns 201 with a Location header for the frozen snapshot.",
+      "request": "unchanged",
+      "resource_constraints": "unchanged",
+      "response": "compatible",
+      "route": "compatible"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "get_session_v1_sessions__session_id__get",
+      "destinationCapability": null,
+      "destinationMethod": "GET",
+      "destinationPath": "/v1/sessions/{session_id}",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "GET",
+      "operationId": "get_v1_environments__environment__get",
+      "pagination": "unchanged",
+      "path": "/v1/environments/{environment}",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant + optional principal.environment + agent generation",
+        "policies": [
+          "unscoped researcher credential",
+          "worker credential",
+          "scorer credential",
+          "participant-scoped agent credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}",
+        "roles": [
+          "researcher",
+          "worker",
+          "scorer",
+          "agent"
+        ]
+      },
+      "rationale": "The response is the portable Session resource with independent status dimensions.",
+      "request": "unchanged",
+      "resource_constraints": "compatible",
+      "response": "breaking",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "global_activity_v1_activity_get",
+      "destinationCapability": null,
+      "destinationMethod": "GET",
+      "destinationPath": "/v1/activity",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "GET",
+      "operationId": "global_activity_v1_activity_events_get",
+      "pagination": "unchanged",
+      "path": "/v1/activity/events",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "worker credential"
+        ],
+        "resource_scope": "/v1/activity/events",
+        "roles": [
+          "researcher",
+          "worker"
+        ]
+      },
+      "rationale": "`/v1/activity/events` becomes the collection itself at `/v1/activity`.",
+      "request": "unchanged",
+      "resource_constraints": "unchanged",
+      "response": "unchanged",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "unchanged",
+      "authentication": "unchanged",
+      "destination": "health_health_get",
+      "destinationCapability": null,
+      "destinationMethod": "GET",
+      "destinationPath": "/health",
+      "disposition": "retained",
+      "errors": "compatible",
+      "method": "GET",
+      "operationId": "health_health_get",
+      "pagination": "unchanged",
+      "path": "/health",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": null,
+        "policies": [],
+        "resource_scope": "/health",
+        "roles": null
+      },
+      "rationale": "Operational health is unauthenticated and unchanged.",
+      "request": "unchanged",
+      "resource_constraints": "unchanged",
+      "response": "unchanged",
+      "route": "unchanged"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "ingest_source_records_v1_sources__source_id__records_post",
+      "destinationCapability": "historical-ingestion",
+      "destinationMethod": "POST",
+      "destinationPath": "/v1/sources/{source_id}/records",
+      "disposition": "mapped",
+      "errors": "breaking",
+      "method": "POST",
+      "operationId": "ingest_trajectory_records_v1_trajectory_sources__source__records_post",
+      "pagination": "unchanged",
+      "path": "/v1/trajectory-sources/{source}/records",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential"
+        ],
+        "resource_scope": "/v1/trajectory-sources/{source}/records",
+        "roles": [
+          "researcher"
+        ]
+      },
+      "rationale": "Route rename plus the declared historical-ingestion capability.",
+      "request": "unchanged",
+      "resource_constraints": "unchanged",
+      "response": "unchanged",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "observation_v1_sessions__session_id__participants__participant_id__observation_get",
+      "destinationCapability": null,
+      "destinationMethod": "GET",
+      "destinationPath": "/v1/sessions/{session_id}/participants/{participant_id}/observation",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "GET",
+      "operationId": "observation_v1_environments__environment__observation_get",
+      "pagination": "unchanged",
+      "path": "/v1/environments/{environment}/observation",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "worker credential",
+          "scorer credential",
+          "participant-scoped agent credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}/observation",
+        "roles": [
+          "researcher",
+          "worker",
+          "scorer",
+          "agent"
+        ]
+      },
+      "rationale": "Participant scope moves from a query parameter into genuine path ownership.",
+      "request": "breaking",
+      "resource_constraints": "breaking",
+      "response": "unchanged",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "prepare_v1_sessions__session_id__operations_post",
+      "destinationCapability": null,
+      "destinationMethod": "POST",
+      "destinationPath": "/v1/sessions/{session_id}/operations",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "POST",
+      "operationId": "prepare_v1_environments__environment__operations_post",
+      "pagination": "unchanged",
+      "path": "/v1/environments/{environment}/operations",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "participant-scoped agent credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}/operations",
+        "roles": [
+          "agent"
+        ]
+      },
+      "rationale": "Route rename only; operation preparation remains a participant operation.",
+      "request": "unchanged",
+      "resource_constraints": "unchanged",
+      "response": "unchanged",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "read_artifact_v1_sessions__session_id__artifacts__artifact_id__get",
+      "destinationCapability": null,
+      "destinationMethod": "GET",
+      "destinationPath": "/v1/sessions/{session_id}/artifacts/{artifact_id}",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "GET",
+      "operationId": "read_artifact_v1_environments__environment__artifacts__key__get",
+      "pagination": "unchanged",
+      "path": "/v1/environments/{environment}/artifacts/{key}",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "worker credential",
+          "scorer credential",
+          "participant-scoped agent credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}/artifacts/{key}",
+        "roles": [
+          "researcher",
+          "worker",
+          "scorer",
+          "agent"
+        ]
+      },
+      "rationale": "Route rename and a named `artifact_id` path parameter.",
+      "request": "unchanged",
+      "resource_constraints": "unchanged",
+      "response": "unchanged",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "register_source_v1_sources_post",
+      "destinationCapability": "historical-ingestion",
+      "destinationMethod": "POST",
+      "destinationPath": "/v1/sources",
+      "disposition": "mapped",
+      "errors": "breaking",
+      "method": "POST",
+      "operationId": "register_trajectory_source_v1_trajectory_sources_post",
+      "pagination": "unchanged",
+      "path": "/v1/trajectory-sources",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential"
+        ],
+        "resource_scope": "/v1/trajectory-sources",
+        "roles": [
+          "researcher"
+        ]
+      },
+      "rationale": "One-word plural collection name, 201 with Location, and a declared historical-ingestion capability that returns 501 when disabled instead of hiding the route.",
+      "request": "unchanged",
+      "resource_constraints": "unchanged",
+      "response": "compatible",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "publish_score_v1_sessions__session_id__scores_post",
+      "destinationCapability": null,
+      "destinationMethod": "POST",
+      "destinationPath": "/v1/sessions/{session_id}/scores",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "POST",
+      "operationId": "report_v1_environments__environment__reports_post",
+      "pagination": "unchanged",
+      "path": "/v1/environments/{environment}/reports",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}/reports",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "rationale": "Publishing a report returns 201 with Location and an ETag on the stored hash.",
+      "request": "unchanged",
+      "resource_constraints": "unchanged",
+      "response": "compatible",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "scores_v1_sessions__session_id__scores_get",
+      "destinationCapability": null,
+      "destinationMethod": "GET",
+      "destinationPath": "/v1/sessions/{session_id}/scores",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "GET",
+      "operationId": "reports_v1_environments__environment__reports_get",
+      "pagination": "unchanged",
+      "path": "/v1/environments/{environment}/reports",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/environments/{environment}/reports",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "rationale": "ScoreReport is returned through contextual `/scores` collections. The Python contract keeps its name; the body key becomes `items`.",
+      "request": "unchanged",
+      "resource_constraints": "unchanged",
+      "response": "breaking",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "training_run_v1_training_runs__training_run_id__get",
+      "destinationCapability": null,
+      "destinationMethod": "GET",
+      "destinationPath": "/v1/training-runs/{training_run_id}",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "GET",
+      "operationId": "training_run_v1_training_runs__training_run__get",
+      "pagination": "unchanged",
+      "path": "/v1/training-runs/{training_run}",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/training-runs/{training_run}",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "rationale": "Path parameter rename only.",
+      "request": "unchanged",
+      "resource_constraints": "unchanged",
+      "response": "unchanged",
+      "route": "compatible"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "training_runs_v1_training_runs_get",
+      "destinationCapability": null,
+      "destinationMethod": "GET",
+      "destinationPath": "/v1/training-runs",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "GET",
+      "operationId": "training_runs_v1_training_runs_get",
+      "pagination": "breaking",
+      "path": "/v1/training-runs",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/training-runs",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "rationale": "The bare list becomes the typed management envelope.",
+      "request": "compatible",
+      "resource_constraints": "unchanged",
+      "response": "breaking",
+      "route": "unchanged"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "trajectory_dataset_v1_datasets__dataset_id__get",
+      "destinationCapability": null,
+      "destinationMethod": "GET",
+      "destinationPath": "/v1/datasets/{dataset_id}",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "GET",
+      "operationId": "trajectory_dataset_v1_trajectory_datasets__dataset__get",
+      "pagination": "unchanged",
+      "path": "/v1/trajectory-datasets/{dataset}",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/trajectory-datasets/{dataset}",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "rationale": "One-word plural collection name plus an ETag on the dataset digest.",
+      "request": "unchanged",
+      "resource_constraints": "unchanged",
+      "response": "unchanged",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "trajectory_datasets_v1_datasets_get",
+      "destinationCapability": null,
+      "destinationMethod": "GET",
+      "destinationPath": "/v1/datasets",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "GET",
+      "operationId": "trajectory_datasets_v1_trajectory_datasets_get",
+      "pagination": "breaking",
+      "path": "/v1/trajectory-datasets",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/trajectory-datasets",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "rationale": "One-word plural collection name plus the typed management envelope.",
+      "request": "compatible",
+      "resource_constraints": "unchanged",
+      "response": "breaking",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "trajectory_index_v1_trajectories_get",
+      "destinationCapability": null,
+      "destinationMethod": "GET",
+      "destinationPath": "/v1/trajectories",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "GET",
+      "operationId": "trajectory_index_v1_trajectories_get",
+      "pagination": "breaking",
+      "path": "/v1/trajectories",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/trajectories",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "rationale": "The bare list becomes the typed management envelope.",
+      "request": "unchanged",
+      "resource_constraints": "unchanged",
+      "response": "breaking",
+      "route": "unchanged"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "trajectory_records_v1_trajectories__trajectory_id__records_get",
+      "destinationCapability": null,
+      "destinationMethod": "GET",
+      "destinationPath": "/v1/trajectories/{trajectory_id}/records",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "GET",
+      "operationId": "trajectory_records_v1_trajectories__trajectory__records_get",
+      "pagination": "unchanged",
+      "path": "/v1/trajectories/{trajectory}/records",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/trajectories/{trajectory}/records",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "rationale": "Path parameter rename only; the durable integer sequence cursor is preserved.",
+      "request": "unchanged",
+      "resource_constraints": "unchanged",
+      "response": "unchanged",
+      "route": "compatible"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "trajectory_resource_v1_trajectories__trajectory_id__get",
+      "destinationCapability": null,
+      "destinationMethod": "GET",
+      "destinationPath": "/v1/trajectories/{trajectory_id}",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "GET",
+      "operationId": "trajectory_resource_v1_trajectories__trajectory__get",
+      "pagination": "unchanged",
+      "path": "/v1/trajectories/{trajectory}",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/trajectories/{trajectory}",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "rationale": "`status.records` is removed. Read records through `/v1/trajectories/{id}/records`; status now carries segments, a record count, the sequence boundary, and typed collection health.",
+      "request": "unchanged",
+      "resource_constraints": "unchanged",
+      "response": "breaking",
+      "route": "compatible"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "trajectory_snapshot_v1_snapshots__snapshot_id__get",
+      "destinationCapability": null,
+      "destinationMethod": "GET",
+      "destinationPath": "/v1/snapshots/{snapshot_id}",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "GET",
+      "operationId": "trajectory_snapshot_v1_trajectory_snapshots__snapshot__get",
+      "pagination": "unchanged",
+      "path": "/v1/trajectory-snapshots/{snapshot}",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/trajectory-snapshots/{snapshot}",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "rationale": "One-word plural collection name plus an ETag on the snapshot digest.",
+      "request": "unchanged",
+      "resource_constraints": "unchanged",
+      "response": "unchanged",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "trajectory_snapshots_v1_trajectories__trajectory_id__snapshots_get",
+      "destinationCapability": null,
+      "destinationMethod": "GET",
+      "destinationPath": "/v1/trajectories/{trajectory_id}/snapshots",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "GET",
+      "operationId": "trajectory_snapshots_v1_trajectory_snapshots_get",
+      "pagination": "breaking",
+      "path": "/v1/trajectory-snapshots",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/trajectory-snapshots",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "rationale": "Listing a trajectory's snapshots is nested under its owner; `/v1/snapshots` remains a top-level index because a snapshot is independently addressable.",
+      "request": "breaking",
+      "resource_constraints": "unchanged",
+      "response": "breaking",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "source_status_v1_sources__source_id__status_get",
+      "destinationCapability": null,
+      "destinationMethod": "GET",
+      "destinationPath": "/v1/sources/{source_id}/status",
+      "disposition": "mapped",
+      "errors": "compatible",
+      "method": "GET",
+      "operationId": "trajectory_source_status_v1_trajectory_sources__source__status_get",
+      "pagination": "unchanged",
+      "path": "/v1/trajectory-sources/{source}/status",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential",
+          "scorer credential"
+        ],
+        "resource_scope": "/v1/trajectory-sources/{source}/status",
+        "roles": [
+          "researcher",
+          "scorer"
+        ]
+      },
+      "rationale": "One-word plural collection name.",
+      "request": "unchanged",
+      "resource_constraints": "unchanged",
+      "response": "unchanged",
+      "route": "breaking"
+    },
+    {
+      "access_policy": "breaking",
+      "authentication": "unchanged",
+      "destination": "report_source_status_v1_sources__source_id__status_reports_post",
+      "destinationCapability": "historical-ingestion",
+      "destinationMethod": "POST",
+      "destinationPath": "/v1/sources/{source_id}/status-reports",
+      "disposition": "mapped",
+      "errors": "breaking",
+      "method": "PUT",
+      "operationId": "update_trajectory_source_status_v1_trajectory_sources__source__status_put",
+      "pagination": "unchanged",
+      "path": "/v1/trajectory-sources/{source}/status",
+      "previousAuthorization": {
+        "model": "public four-role literal",
+        "object_constraint": "tenant; agent credentials are additionally bound to principal.environment, participant, and generation",
+        "policies": [
+          "unscoped researcher credential"
+        ],
+        "resource_scope": "/v1/trajectory-sources/{source}/status",
+        "roles": [
+          "researcher"
+        ]
+      },
+      "rationale": "Declaring collection health is an appended status report, not an idempotent PUT, so the operation becomes `POST /v1/sources/{id}/status-reports` and returns 201.",
+      "request": "unchanged",
+      "resource_constraints": "unchanged",
+      "response": "unchanged",
+      "route": "breaking"
+    }
+  ],
+  "outOfHierarchy": {
+    "/local/connect": "loopback viewer handshake on the operational routes",
+    "/v1/worker/call": "separate create_worker_app process on environment-worker.v1",
+    "/viewer/config": "operational viewer configuration"
+  },
+  "previousFingerprint": "3ae73f8ae41e5014e8e6fd1c9e7bf02adc17db9f0d9cf8fb98bb72b56a545410",
+  "schema": "environment-harness.http-migration.v1",
+  "to": "0.3.0rc1"
+}

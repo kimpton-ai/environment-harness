@@ -99,7 +99,7 @@ record = SourceRecord.create(
     data={"available": True},
     audience=("alice",),
 )
-acknowledgement = repository.ingest(source.id, (record,), researcher)
+acknowledgement = repository.ingest(source.id, (record,))
 print(acknowledgement.position, acknowledgement.hash)
 ```
 
@@ -127,15 +127,24 @@ environment-harness --store .local/evidence source-status SOURCE_ID
 ## Inspect, page, snapshot, and export
 
 ```python
-trajectory = repository.get(source.id, researcher)
-page = repository.records_page(source.id, researcher, after=0, limit=200)
-snapshot = repository.freeze(source.id, researcher)
+trajectory = repository.trajectory(source.id)
+page = repository.records(source.id, after=0, limit=200)
+snapshot = repository.freeze(source.id)
 
-for row in repository.export_snapshot(snapshot.metadata.id, researcher):
+for row in repository.export_snapshot(snapshot.metadata.id):
     process(row)  # one bounded manifest or record at a time
 ```
 
-The remote Python and TypeScript clients expose cursor-paged records and incremental JSONL export.
+`Trajectory.status` never materializes a record tuple. The detail resource carries segment
+summaries, a record count, the sequence boundary, typed collection health, the independent
+lifecycle states, the evidence head, and the digest; records are read only through the paged
+stream. `TrajectoryRepository.stream_records` iterates that stream page by page, and freezing a
+snapshot computes its ordered record digest incrementally while streaming.
+
+Over HTTP the records live at `GET /v1/trajectories/{id}/records`, and a frozen snapshot's records
+at `GET /v1/snapshots/{id}/records` — a typed JSON cursor page by default, or NDJSON when the
+request sends `Accept: application/x-ndjson`. The remote Python and TypeScript clients expose both
+the paged reader and an explicit streaming iterator.
 Snapshot identity covers its manifest, ordered records, source/evidence boundary, selected score
 report revisions, artifact digests, schema, and audience projection. Appending evidence, regrading,
 or later disclosure creates new records or a new snapshot; it never changes an existing one.

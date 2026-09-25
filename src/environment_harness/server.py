@@ -3,6 +3,7 @@
 import json
 import logging
 import secrets
+from contextlib import suppress
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -15,14 +16,37 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from .contracts import Action, ActivityHierarchy, ActivityPage, ExperimentSpec, ScoreReport
+from . import capabilities as capability_module
+from .capabilities import CapabilityDocument
+from .contracts import (
+    Action,
+    ActivityHierarchy,
+    ActivityPage,
+    BranchRequest,
+    EvidencePage,
+    ExperimentSpec,
+    ScoreReport,
+)
 from .coordinator import advance
-from .errors import BudgetExceeded, Conflict, Forbidden, HarnessError, Unauthenticated, Unsupported
-from .evaluation import compare, rollouts, turn_series
+from .errors import (
+    BudgetExceeded,
+    CapabilityUnavailable,
+    Conflict,
+    EvidenceIncomplete,
+    Forbidden,
+    HarnessError,
+    PayloadTooLarge,
+    Unauthenticated,
+    Unavailable,
+    Unsupported,
+)
+from .evaluation import compare, turn_series
 from .operations import Operations
+from .resources import Checkpoint, Experiment, PolicyProjection, ResourceProjection, ScenarioSet, Session
 from .store import encode
 from .training import DatasetCreate, TrainingRepository, TrainingRun, TrajectoryDataset
 from .trajectories import (
+    Policy,
     SourceAcknowledgement,
     SourceIngestionBatch,
     SourceRegistration,
@@ -64,13 +88,29 @@ class Command(BaseModel):
 
 
 class CredentialRequest(BaseModel):
+    """Participant credentials are scoped by the route, never by the body."""
+
     model_config = ConfigDict(extra="forbid")
-    participant: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,80}$")
     ttl: int = Field(
         default=3600,
         ge=1,
         description="Credential lifetime in seconds. Values above 86400 are capped at 86400.",
     )
+
+
+class CheckpointRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    exact_agents: bool = Field(
+        default=False,
+        description="Require exact participant continuation state for every participant.",
+    )
+
+
+class ComparisonRequest(BaseModel):
+    """A typed derived-comparison request. No comparison authority is stored."""
+
+    model_config = ConfigDict(extra="forbid")
+    sessions: tuple[str, ...] = Field(min_length=1, max_length=100)
 
 
 class CredentialResponse(BaseModel):
@@ -150,15 +190,25 @@ ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     }.items()
 }
 
+ERROR_RESPONSES[501] = {"model": ErrorEnvelope, "description": "Capability not enabled"}
+
 OPENAPI_TAGS = [
-    {"name": "Service", "description": "Service health and the active environment contract."},
+    {"name": "Service", "description": "Service health and deployment capability discovery."},
     {
-        "name": "Environment sessions",
-        "description": "Create, list, inspect, observe, and control environment sessions.",
+        "name": "Experiments",
+        "description": "Create and inspect experiments, their scenario sets, and their sessions.",
+    },
+    {
+        "name": "Sessions",
+        "description": "Inspect, observe, control, checkpoint, and branch environment sessions.",
     },
     {
         "name": "Trajectories",
-        "description": "Inspect native and imported trajectory resources and immutable snapshots.",
+        "description": "Inspect native and imported trajectories, snapshots, datasets, and policies.",
+    },
+    {
+        "name": "Sources",
+        "description": "Register external sources, ingest bounded evidence, and inspect collection health.",
     },
     {
         "name": "Evidence",
@@ -166,13 +216,55 @@ OPENAPI_TAGS = [
     },
     {
         "name": "Activity",
-        "description": "Read resumable activity feeds and the hierarchy snapshot used by the viewer.",
+        "description": "Read resumable activity feeds and the ownership hierarchy used by the viewer.",
     },
     {
         "name": "Evaluation",
         "description": "Publish score reports, export evidence, and compare environment sessions.",
     },
 ]
+
+
+class ListLinks(BaseModel):
+    """Relative navigation for one management collection page."""
+
+    self: str = Field(min_length=1)
+    next: str | None = None
+
+
+def _page_model(name: str, item):
+    """Build one typed management-list envelope for a resource kind.
+
+    Ordered evidence and activity feeds keep their durable integer cursors; only
+    management collections use this opaque-cursor envelope.
+    """
+
+    return type(
+        name,
+        (BaseModel,),
+        {
+            "__annotations__": {
+                "items": tuple[item, ...],
+                "nextCursor": str | None,
+                "links": ListLinks,
+            },
+            "nextCursor": None,
+            "model_config": ConfigDict(extra="forbid"),
+            "__doc__": f"A cursor-paged index of {item.__name__} resources.",
+        },
+    )
+
+
+ScenarioSetPage = _page_model("ScenarioSetPage", ScenarioSet)
+ExperimentPage = _page_model("ExperimentPage", Experiment)
+SessionPage = _page_model("SessionPage", Session)
+CheckpointPage = _page_model("CheckpointPage", Checkpoint)
+PolicyPage = _page_model("PolicyPage", Policy)
+TrajectoryPage = _page_model("TrajectoryPage", TrajectorySummary)
+SnapshotPage = _page_model("SnapshotPage", TrajectorySnapshot)
+DatasetPage = _page_model("DatasetPage", TrajectoryDataset)
+SourcePage = _page_model("SourcePage", SourceStatus)
+TrainingRunPage = _page_model("TrainingRunPage", TrainingRun)
 
 
 def _error_response(request: Request, code: str, message: str, status: int, details=None):
@@ -238,7 +330,7 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         if request.headers.get("origin") and request.headers["origin"] != str(request.base_url).rstrip("/"):
             response = _error_response(
                 request,
-                "cross_origin_denied",
+                "forbidden",
                 "Cross-origin requests are not allowed",
                 403,
             )
@@ -249,7 +341,7 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
                 if len(body) > 16777216:
                     response = _error_response(
                         request,
-                        "request_too_large",
+                        "payload_too_large",
                         "Request body exceeds the 16 MiB limit",
                         413,
                     )
@@ -280,17 +372,25 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
 
     @app.exception_handler(HarnessError)
     async def failure(request, error):
+        # One error taxonomy: every code maps to exactly one status, and no
+        # client depends on message text.
         status = (
             401
             if isinstance(error, Unauthenticated)
             else 403
             if isinstance(error, Forbidden)
             else 409
-            if isinstance(error, Conflict)
+            if isinstance(error, (Conflict, EvidenceIncomplete))
             else 422
             if isinstance(error, Unsupported)
+            else 413
+            if isinstance(error, PayloadTooLarge)
+            else 501
+            if isinstance(error, CapabilityUnavailable)
             else 402
             if isinstance(error, BudgetExceeded)
+            else 503
+            if isinstance(error, Unavailable)
             else 503
         )
         if status >= 500:
@@ -306,7 +406,7 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
     @app.exception_handler(ValueError)
     async def invalid_value(request, error):
         del error
-        return _error_response(request, "invalid_request", "Invalid request", 422)
+        return _error_response(request, "validation_error", "Invalid request", 422)
 
     @app.exception_handler(RequestValidationError)
     async def invalid_request(request, error):
@@ -320,7 +420,7 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         ]
         return _error_response(
             request,
-            "invalid_request",
+            "validation_error",
             "Request validation failed",
             422,
             details,
@@ -330,14 +430,16 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
     async def http_failure(request, error):
         status = error.status_code
         code = {
-            400: "invalid_request",
+            400: "validation_error",
             401: "unauthorized",
             403: "forbidden",
             404: "not_found",
             405: "method_not_allowed",
-            413: "request_too_large",
-            422: "invalid_request",
-            503: "unavailable",
+            409: "conflict",
+            413: "payload_too_large",
+            422: "validation_error",
+            501: "capability_unavailable",
+            503: "service_unavailable",
         }.get(status, "http_error" if status < 500 else "internal_error")
         message = str(error.detail) if isinstance(error.detail, str) and status < 500 else "Request failed"
         return _error_response(request, code, message, status)
@@ -377,6 +479,62 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
                 raise HTTPException(403, "Local connection requires the loopback viewer origin")
             return {"token": local_access.credential}
 
+    projection = ResourceProjection(store)
+    policies = PolicyProjection(store)
+    capability_document = capability_module.document(
+        trajectory_ingestion=trajectory_ingestion, local_access=local_access is not None
+    )
+
+    def page(request: Request, items, next_cursor, *, parameter="cursor"):
+        """Return one typed management-list envelope plus its RFC Link header."""
+
+        path = request.url.path
+        query = dict(request.query_params)
+        query.pop(parameter, None)
+        base = path + ("?" + "&".join(f"{k}={v}" for k, v in sorted(query.items())) if query else "")
+        following = None
+        if next_cursor is not None:
+            separator = "&" if "?" in base else "?"
+            following = f"{base}{separator}{parameter}={next_cursor}"
+        return {
+            "items": list(items),
+            "nextCursor": next_cursor,
+            "links": {
+                "self": str(request.url.path) + (("?" + request.url.query) if request.url.query else ""),
+                "next": following,
+            },
+        }
+
+    def link_header(response: Response, envelope):
+        following = envelope["links"]["next"]
+        if following is not None:
+            response.headers["Link"] = f'<{following}>; rel="next"'
+            response.headers["X-Next-Cursor"] = envelope["nextCursor"]
+        return envelope
+
+    def slice_page(items, cursor, limit, key=lambda item: item.metadata.id):
+        """Apply one opaque management cursor to an ordered projection."""
+
+        ordered = list(items)
+        start = 0
+        if cursor is not None:
+            try:
+                start = next(index for index, item in enumerate(ordered) if key(item) == cursor) + 1
+            except StopIteration:
+                raise ValueError("invalid collection cursor") from None
+        selected = ordered[start : start + limit]
+        following = key(selected[-1]) if selected and start + len(selected) < len(ordered) else None
+        return selected, following
+
+    def etag(response: Response, value: str):
+        response.headers["ETag"] = f'"{value}"'
+
+    def require_capability(name: str):
+        for capability in capability_document.capabilities:
+            if capability.name == name and not capability.enabled:
+                raise CapabilityUnavailable(name, capability.reason)
+
+    # -- Service ------------------------------------------------------------
     @app.get("/health", tags=["Service"], summary="Check service health")
     def health():
         return {"status": "ok", "protocol": "environment-session.v1"}
@@ -386,393 +544,290 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         return {"authentication": "local" if local_access is not None else "credential"}
 
     @app.get(
-        "/v1/environment",
+        "/v1/capabilities",
         tags=["Service"],
-        summary="Get the active environment contract",
+        summary="Discover enabled deployment capabilities",
+        response_model=CapabilityDocument,
     )
-    def environment(who=Depends(actor)):
-        return session.environment.spec
+    def deployment_capabilities(who=Depends(actor)):
+        who.require("capabilities.read")
+        return capability_document
 
+    # -- Scenario sets ------------------------------------------------------
     @app.get(
-        "/v1/trajectories",
-        tags=["Trajectories"],
-        summary="List native and imported trajectories",
-        response_model=list[TrajectorySummary],
+        "/v1/scenario-sets",
+        tags=["Experiments"],
+        summary="List frozen scenario sets",
+        response_model=ScenarioSetPage,
     )
-    def trajectory_index(
+    def scenario_sets(
+        request: Request,
         response: Response,
         who=Depends(actor),
         limit: int = Query(100, ge=1, le=1000),
         cursor: str | None = Query(None, min_length=1, max_length=200),
     ):
-        page, next_cursor = trajectories.list_page(who, limit, cursor)
-        if next_cursor is not None:
-            response.headers["X-Next-Cursor"] = next_cursor
-            response.headers["Link"] = f'</v1/trajectories?limit={limit}&cursor={next_cursor}>; rel="next"'
-        return page
+        items, following = slice_page(projection.scenario_sets(who, limit=1000), cursor, limit)
+        return link_header(response, page(request, items, following))
 
     @app.get(
-        "/v1/trajectories/{trajectory}",
-        tags=["Trajectories"],
-        summary="Get a portable trajectory",
-        response_model=Trajectory,
+        "/v1/scenario-sets/{scenario_set_id}",
+        tags=["Experiments"],
+        summary="Get a frozen scenario set",
+        response_model=ScenarioSet,
     )
-    def trajectory_resource(trajectory: str, who=Depends(actor)):
-        return trajectories.get(trajectory, who)
+    def scenario_set(scenario_set_id: str, response: Response, who=Depends(actor)):
+        resource = projection.scenario_set(scenario_set_id, who)
+        etag(response, resource.status.set_digest)
+        return resource
+
+    # -- Experiments --------------------------------------------------------
+    @app.post(
+        "/v1/experiments",
+        tags=["Experiments"],
+        summary="Create an experiment and queue its sessions",
+        status_code=201,
+    )
+    def create_experiment(
+        spec: ExperimentSpec,
+        response: Response,
+        x_operation_id: str = Header(),
+        who=Depends(actor),
+    ):
+        """Create the supported implicit experiment-of-one.
+
+        The request carries the structured environment reference for one
+        server-configured implementation; the server resolves it against its
+        typed factory dependencies and never loads executable code from a
+        request. Multi-scenario experiments are created through the trusted
+        in-process SDK.
+        """
+
+        created = session.create(spec, who, environment_id=x_operation_id)
+        response.headers["Location"] = f"/v1/sessions/{created['id']}"
+        return created
 
     @app.get(
-        "/v1/trajectories/{trajectory}/records",
-        tags=["Trajectories"],
-        summary="Page through trajectory records",
-        response_model=TrajectoryRecordPage,
+        "/v1/experiments",
+        tags=["Experiments"],
+        summary="List experiments",
+        response_model=ExperimentPage,
     )
-    def trajectory_records(
-        trajectory: str,
+    def experiments(
+        request: Request,
         response: Response,
         who=Depends(actor),
-        after: int = Query(0, ge=0),
-        limit: int = Query(200, ge=1, le=1000),
-    ):
-        page = trajectories.records_page(trajectory, who, after=after, limit=limit)
-        if page.has_more:
-            response.headers["X-Next-Cursor"] = str(page.cursor)
-            response.headers["Link"] = (
-                f'</v1/trajectories/{trajectory}/records?after={page.cursor}&limit={limit}>; rel="next"'
-            )
-        return page
-
-    @app.post(
-        "/v1/trajectories/{trajectory}/snapshots",
-        tags=["Trajectories"],
-        summary="Freeze an authorized trajectory snapshot",
-        response_model=TrajectorySnapshot,
-    )
-    def freeze_trajectory_snapshot(trajectory: str, who=Depends(actor)):
-        return trajectories.freeze(trajectory, who)
-
-    @app.get(
-        "/v1/trajectory-snapshots",
-        tags=["Trajectories"],
-        summary="List immutable snapshot boundaries for a trajectory",
-        response_model=list[TrajectorySnapshot],
-    )
-    def trajectory_snapshots(
-        trajectory: str = Query(min_length=1),
         limit: int = Query(100, ge=1, le=1000),
-        who=Depends(actor),
+        cursor: str | None = Query(None, min_length=1, max_length=200),
     ):
-        return trajectories.list_snapshots(trajectory, who, limit=limit)
+        items, following = slice_page(projection.experiments(who, limit=1000), cursor, limit)
+        return link_header(response, page(request, items, following))
 
     @app.get(
-        "/v1/trajectory-snapshots/{snapshot}",
-        tags=["Trajectories"],
-        summary="Get an immutable trajectory snapshot",
-        response_model=TrajectorySnapshot,
+        "/v1/experiments/{experiment_id}",
+        tags=["Experiments"],
+        summary="Get an experiment",
+        response_model=Experiment,
     )
-    def trajectory_snapshot(snapshot: str, who=Depends(actor)):
-        return trajectories.get_snapshot(snapshot, who)
+    def experiment(experiment_id: str, response: Response, who=Depends(actor)):
+        resource = projection.experiment(experiment_id, who)
+        etag(response, resource.status.lock_digest)
+        return resource
 
     @app.get(
-        "/v1/trajectory-snapshots/{snapshot}/export",
-        tags=["Trajectories"],
-        summary="Export an immutable trajectory snapshot as JSONL",
+        "/v1/experiments/{experiment_id}/sessions",
+        tags=["Experiments"],
+        summary="List the sessions an experiment derived",
+        response_model=SessionPage,
     )
-    def export_trajectory_snapshot(snapshot: str, who=Depends(actor)):
-        return StreamingResponse(
-            (encode(row) + "\n" for row in trajectories.export_snapshot(snapshot, who)),
-            media_type="application/x-ndjson",
-        )
-
-    @app.post(
-        "/v1/trajectory-datasets",
-        tags=["Trajectories"],
-        summary="Freeze a training-entitled trajectory dataset",
-        response_model=TrajectoryDataset,
-    )
-    def freeze_trajectory_dataset(body: DatasetCreate, who=Depends(actor)):
-        return training.freeze_dataset(body.name, body.trajectories, who)
-
-    @app.get(
-        "/v1/trajectory-datasets",
-        tags=["Trajectories"],
-        summary="List immutable trajectory datasets",
-        response_model=list[TrajectoryDataset],
-    )
-    def trajectory_datasets(who=Depends(actor), limit: int = Query(100, ge=1, le=1000)):
-        return training.list_datasets(who, limit=limit)
-
-    @app.get(
-        "/v1/trajectory-datasets/{dataset}",
-        tags=["Trajectories"],
-        summary="Get an immutable trajectory dataset",
-        response_model=TrajectoryDataset,
-    )
-    def trajectory_dataset(dataset: str, who=Depends(actor)):
-        return training.get_dataset(dataset, who)
-
-    @app.get(
-        "/v1/trajectory-datasets/{dataset}/export",
-        tags=["Trajectories"],
-        summary="Export an immutable trajectory dataset as JSONL",
-    )
-    def export_trajectory_dataset(dataset: str, who=Depends(actor)):
-        return StreamingResponse(
-            (encode(row) + "\n" for row in training.export_dataset(dataset, who)),
-            media_type="application/x-ndjson",
-        )
-
-    @app.get(
-        "/v1/training-runs/{training_run}",
-        tags=["Trajectories"],
-        summary="Get a recorded local training result",
-        response_model=TrainingRun,
-    )
-    def training_run(training_run: str, who=Depends(actor)):
-        return training.get_run(training_run, who)
-
-    @app.get(
-        "/v1/training-runs",
-        tags=["Trajectories"],
-        summary="List recorded local training results",
-        response_model=list[TrainingRun],
-    )
-    def training_runs(
+    def experiment_sessions(
+        experiment_id: str,
+        request: Request,
+        response: Response,
         who=Depends(actor),
-        dataset: str | None = Query(None, min_length=1, max_length=200),
         limit: int = Query(100, ge=1, le=1000),
+        cursor: str | None = Query(None, min_length=1, max_length=200),
     ):
-        return training.list_runs(who, dataset=dataset, limit=limit)
+        projection.experiment(experiment_id, who)
+        items, following = slice_page(
+            projection.sessions(who, experiment=experiment_id, limit=1000), cursor, limit
+        )
+        return link_header(response, page(request, items, following))
 
     @app.get(
-        "/v1/trajectory-sources/{source}/status",
-        tags=["Trajectories"],
-        summary="Inspect trajectory-source collection and execution status",
-        response_model=SourceStatus,
+        "/v1/experiments/{experiment_id}/scores",
+        tags=["Evaluation"],
+        summary="List score reports across an experiment",
     )
-    def trajectory_source_status(source: str, who=Depends(actor)):
-        return trajectories.source_status(source, who)
+    def experiment_scores(experiment_id: str, who=Depends(actor), limit: int = Query(100, ge=1, le=1000)):
+        projection.experiment(experiment_id, who)
+        with store.transaction() as db:
+            rows = db.execute(
+                "SELECT environment FROM session_runs WHERE experiment=? AND tenant=? "
+                "ORDER BY created LIMIT ?",
+                (experiment_id, who.tenant, limit),
+            ).fetchall()
+        return {"items": [report for row in rows for report in store.reports(row["environment"], who)]}
 
-    if trajectory_ingestion:
-
-        @app.post(
-            "/v1/trajectory-sources",
-            tags=["Trajectories"],
-            summary="Register an external trajectory source",
-            response_model=SourceRegistrationReceipt,
-        )
-        def register_trajectory_source(body: SourceRegistration, who=Depends(actor)):
-            return trajectories.register_source(body, who)
-
-        @app.post(
-            "/v1/trajectory-sources/{source}/records",
-            tags=["Trajectories"],
-            summary="Ingest a bounded trajectory-source batch",
-            response_model=SourceAcknowledgement,
-        )
-        def ingest_trajectory_records(source: str, body: SourceIngestionBatch, who=Depends(actor)):
-            return trajectories.ingest(source, body.records, who)
-
-        @app.put(
-            "/v1/trajectory-sources/{source}/status",
-            tags=["Trajectories"],
-            summary="Update trajectory-source collection and execution status",
-            response_model=SourceStatusUpdate,
-        )
-        def update_trajectory_source_status(source: str, body: SourceStatusUpdate, who=Depends(actor)):
-            return trajectories.update_source_status(source, body, who)
-
-    @app.post(
-        "/v1/environments",
-        tags=["Environment sessions"],
-        summary="Create an environment session",
-    )
-    def create(spec: ExperimentSpec, x_operation_id: str = Header(), who=Depends(actor)):
-        return session.create(spec, who, environment_id=x_operation_id)
-
+    # -- Sessions -----------------------------------------------------------
     @app.get(
-        "/v1/environments",
-        tags=["Environment sessions"],
+        "/v1/sessions",
+        tags=["Sessions"],
         summary="List environment sessions",
-        responses={
-            200: {
-                "description": "A descending page of environment sessions",
-                "headers": {
-                    "X-Next-Cursor": {
-                        "description": "Pass this opaque cursor to retrieve the next page.",
-                        "schema": {"type": "string"},
-                    },
-                    "Link": {
-                        "description": 'Relative next-page link with rel="next".',
-                        "schema": {"type": "string"},
-                    },
-                },
-            }
-        },
+        response_model=SessionPage,
     )
-    def environments(
+    def sessions(
+        request: Request,
         response: Response,
         who=Depends(actor),
+        experiment: str | None = Query(None, min_length=1, max_length=200),
         limit: int = Query(100, ge=1, le=1000),
-        cursor: str | None = Query(None, min_length=32, max_length=32, pattern=r"^[0-9a-f]+$"),
+        cursor: str | None = Query(None, min_length=1, max_length=200),
     ):
-        page, next_cursor = session.list_page(who, limit, cursor)
-        if next_cursor is not None:
-            response.headers["X-Next-Cursor"] = next_cursor
-            response.headers["Link"] = f'</v1/environments?limit={limit}&cursor={next_cursor}>; rel="next"'
-        return page
+        items, following = slice_page(
+            projection.sessions(who, experiment=experiment, limit=1000), cursor, limit
+        )
+        return link_header(response, page(request, items, following))
 
     @app.get(
-        "/v1/environments/{environment}",
-        tags=["Environment sessions"],
+        "/v1/sessions/{session_id}",
+        tags=["Sessions"],
         summary="Get an environment session",
+        response_model=Session,
     )
-    def get(environment: str, who=Depends(actor)):
-        return session.get(environment, who)
+    def get_session(session_id: str, who=Depends(actor)):
+        return projection.session(session_id, who)
 
     @app.get(
-        "/v1/environments/{environment}/observation",
-        tags=["Environment sessions"],
-        summary="Observe an environment session",
+        "/v1/sessions/{session_id}/participants/{participant_id}/observation",
+        tags=["Sessions"],
+        summary="Read a participant observation",
     )
-    def observation(environment: str, participant: str | None = None, who=Depends(actor)):
-        return session.observe(environment, who, participant)
+    def observation(session_id: str, participant_id: str, who=Depends(actor)):
+        return session.observe(session_id, who, participant_id)
 
     @app.post(
-        "/v1/environments/{environment}/actions",
-        tags=["Environment sessions"],
+        "/v1/sessions/{session_id}/participants/{participant_id}/actions",
+        tags=["Sessions"],
         summary="Submit a participant action",
     )
-    def action(environment: str, action: Action, who=Depends(actor)):
-        return session.submit(environment, who, action)
-
-    @app.get(
-        "/v1/environments/{environment}/events",
-        tags=["Evidence"],
-        summary="Read environment-session evidence events",
-    )
-    def events(
-        environment: str,
-        after: int = Query(0, ge=0),
-        limit: int = Query(200, ge=1, le=1000),
-        last_event_id: str | None = Header(None),
-        accept: str = Header("application/json"),
-        who=Depends(actor),
-    ):
-        if last_event_id:
-            try:
-                after = max(after, int(last_event_id))
-            except ValueError:
-                raise HTTPException(422, "invalid event cursor") from None
-        page = store.events(environment, who, after, limit)
-        if "text/event-stream" in accept:
-            # Finite resumable SSE pages: reconnect with Last-Event-ID. No viewer backpressure on writes.
-            body = "".join(f"id: {e['seq']}\nevent: evidence\ndata: {encode(e)}\n\n" for e in page)
-            return Response(body or ": caught up\n\n", media_type="text/event-stream")
-        return {"events": page, "cursor": page[-1]["seq"] if page else after}
-
-    def activity_response(page, after, accept):
-        cursor = page[-1]["id"] if page else after
-        if "text/event-stream" in accept:
-            body = "retry: 2000\n\n"
-            body += "".join(
-                f"id: {event['id']}\nevent: {event['kind']}\ndata: {encode(event)}\n\n" for event in page
-            )
-            body += ": heartbeat\n\n"
-            return Response(body, media_type="text/event-stream")
-        return {"events": page, "cursor": cursor}
-
-    def activity_cursor(after, last_event_id):
-        if last_event_id:
-            try:
-                return max(after, int(last_event_id))
-            except ValueError:
-                raise HTTPException(422, "invalid event cursor") from None
-        return after
-
-    @app.get(
-        "/v1/activity/events",
-        tags=["Activity"],
-        summary="Read tenant activity",
-        response_model=ActivityPage,
-        responses={200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}}},
-    )
-    def global_activity(
-        after: int = Query(0, ge=0),
-        limit: int = Query(200, ge=1, le=1000),
-        last_event_id: str | None = Header(None),
-        accept: str = Header("application/json"),
-        who=Depends(actor),
-    ):
-        after = activity_cursor(after, last_event_id)
-        return activity_response(store.activity(who, after, limit), after, accept)
-
-    @app.get(
-        "/v1/activity/snapshot",
-        tags=["Activity"],
-        summary="Get the current activity hierarchy",
-        response_model=ActivityHierarchy,
-    )
-    def activity_hierarchy(who=Depends(actor)):
-        return store.activity_hierarchy(who)
-
-    @app.get(
-        "/v1/experiments/{experiment}/events",
-        tags=["Activity"],
-        summary="Read activity for an experiment",
-        response_model=ActivityPage,
-        responses={200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}}},
-    )
-    def experiment_activity(
-        experiment: str,
-        after: int = Query(0, ge=0),
-        limit: int = Query(200, ge=1, le=1000),
-        last_event_id: str | None = Header(None),
-        accept: str = Header("application/json"),
-        who=Depends(actor),
-    ):
-        after = activity_cursor(after, last_event_id)
-        return activity_response(store.activity(who, after, limit, experiment=experiment), after, accept)
-
-    @app.get(
-        "/v1/environments/{environment}/activity",
-        tags=["Activity"],
-        summary="Read activity for an environment session",
-        response_model=ActivityPage,
-        responses={200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}}},
-    )
-    def environment_activity(
-        environment: str,
-        after: int = Query(0, ge=0),
-        limit: int = Query(200, ge=1, le=1000),
-        last_event_id: str | None = Header(None),
-        accept: str = Header("application/json"),
-        who=Depends(actor),
-    ):
-        after = activity_cursor(after, last_event_id)
-        return activity_response(store.activity(who, after, limit, environment=environment), after, accept)
-
-    @app.get(
-        "/v1/environments/{environment}/agent-work",
-        tags=["Environment sessions"],
-        summary="List agent work records",
-    )
-    def agent_work(environment: str, who=Depends(actor), limit: int = Query(100, ge=1, le=1000)):
-        with store.transaction() as db:
-            store.environment(db, environment, who, "session.read")
-            records = db.execute(
-                "SELECT id,revision,participant,generation,status FROM agent_work WHERE environment=? "
-                "AND (? = 1 OR participant=?) ORDER BY revision DESC,participant LIMIT ?",
-                (environment, int(who.full_evidence), who.participant, limit),
-            ).fetchall()
-            return {"work": [dict(record) for record in records]}
+    def submit_action(session_id: str, participant_id: str, action: Action, who=Depends(actor)):
+        if action.participant != participant_id:
+            raise Forbidden("cannot act for another participant")
+        return session.submit(session_id, who, action)
 
     @app.post(
-        "/v1/environments/{environment}/commands",
-        tags=["Environment sessions"],
+        "/v1/sessions/{session_id}/participants/{participant_id}/credentials",
+        tags=["Sessions"],
+        summary="Issue a participant credential",
+        response_model=CredentialResponse,
+        openapi_extra={"x-capability": capability_module.PARTICIPANT_CREDENTIALS},
+    )
+    def credential(
+        session_id: str,
+        participant_id: str,
+        body: CredentialRequest | None = None,
+        who=Depends(actor),
+    ):
+        """Issue a credential constrained to one session, participant, and generation.
+
+        This is the only operation that mints a participant credential, so no
+        other route can widen a caller's scope.
+        """
+
+        require_capability(capability_module.PARTICIPANT_CREDENTIALS)
+        ttl = body.ttl if body is not None else 3600
+        with store.transaction() as db:
+            row = store.environment(db, session_id, who, "credential.participant.issue")
+            participants = json.loads(row["participants"])
+            if participant_id not in participants:
+                raise Forbidden("unknown participant")
+            member = participants[participant_id]
+        return {
+            "token": store.issue_participant(
+                who.tenant,
+                member["controller"],
+                session=session_id,
+                participant=participant_id,
+                generation=member["generation"],
+                ttl=min(ttl, 86400),
+            )
+        }
+
+    @app.get(
+        "/v1/sessions/{session_id}/checkpoints",
+        tags=["Sessions"],
+        summary="List immutable checkpoints",
+        response_model=CheckpointPage,
+    )
+    def session_checkpoints(
+        session_id: str,
+        request: Request,
+        response: Response,
+        who=Depends(actor),
+        limit: int = Query(100, ge=1, le=1000),
+        cursor: str | None = Query(None, min_length=1, max_length=200),
+    ):
+        items, following = slice_page(projection.checkpoints(session_id, who, limit=1000), cursor, limit)
+        return link_header(response, page(request, items, following))
+
+    @app.post(
+        "/v1/sessions/{session_id}/checkpoints",
+        tags=["Sessions"],
+        summary="Freeze an immutable checkpoint",
+        response_model=Checkpoint,
+        status_code=201,
+    )
+    def create_checkpoint(
+        session_id: str, response: Response, body: CheckpointRequest | None = None, who=Depends(actor)
+    ):
+        exact = bool(body.exact_agents) if body is not None else False
+        lease = session.lease(session_id, who, "http-checkpoint", ttl=60)
+        try:
+            created = session.checkpoint(session_id, who, lease, exact_agents=exact)
+        finally:
+            with suppress(Conflict):
+                session.release(session_id, who, lease)
+        response.headers["Location"] = f"/v1/sessions/{session_id}/checkpoints/{created['id']}"
+        return projection.checkpoint(session_id, created["id"], who)
+
+    @app.get(
+        "/v1/sessions/{session_id}/checkpoints/{checkpoint_id}",
+        tags=["Sessions"],
+        summary="Get an immutable checkpoint",
+        response_model=Checkpoint,
+    )
+    def get_checkpoint(session_id: str, checkpoint_id: str, response: Response, who=Depends(actor)):
+        resource = projection.checkpoint(session_id, checkpoint_id, who)
+        etag(response, resource.status.checkpoint_digest)
+        return resource
+
+    @app.post(
+        "/v1/sessions/{session_id}/branches",
+        tags=["Sessions"],
+        summary="Create a child session from a checkpoint",
+        response_model=Session,
+        status_code=201,
+    )
+    def create_branch(session_id: str, body: BranchRequest, response: Response, who=Depends(actor)):
+        """Accept a strict `BranchRequest` and return the created child Session.
+
+        There is no Branch resource: the child Session carries the parent
+        Session, Checkpoint, lineage, and intervention references.
+        """
+
+        child = session.branch(session_id, who, body.checkpoint, body.interventions)
+        response.headers["Location"] = f"/v1/sessions/{child['id']}"
+        return projection.session(child["id"], who)
+
+    @app.post(
+        "/v1/sessions/{session_id}/commands",
+        tags=["Sessions"],
         summary="Run an environment-session command",
+        status_code=202,
         openapi_extra={"x-command-operations": [operation.value for operation in CommandOperation]},
     )
-    def command(environment: str, cmd: Command, who=Depends(actor)):
+    def command(session_id: str, cmd: Command, who=Depends(actor)):
         a = cmd.arguments
         allowed = {
             "advance": lambda environment, who, **arguments: advance(session, environment, who, **arguments),
@@ -795,99 +850,123 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         try:
             import inspect
 
-            inspect.signature(allowed[operation]).bind(environment, who, **a)
-            result = allowed[operation](environment, who, **a)
+            inspect.signature(allowed[operation]).bind(session_id, who, **a)
+            result = allowed[operation](session_id, who, **a)
         except TypeError:
             raise HTTPException(422, "invalid command arguments") from None
-        return result
+        return {"operation": operation, "accepted": True, "result": result}
 
-    @app.post(
-        "/v1/environments/{environment}/credentials",
-        tags=["Environment sessions"],
-        summary="Issue a participant credential",
-        response_model=CredentialResponse,
+    @app.get(
+        "/v1/sessions/{session_id}/invocations",
+        tags=["Sessions"],
+        summary="List durable agent invocations",
     )
-    def credential(environment: str, body: CredentialRequest, who=Depends(actor)):
-        """Issue a credential constrained to one session, participant, and generation.
-
-        This is the only operation that mints a participant credential, so no
-        other route can widen a caller's scope.
-        """
-
+    def invocations(session_id: str, who=Depends(actor), limit: int = Query(100, ge=1, le=1000)):
         with store.transaction() as db:
-            row = store.environment(db, environment, who, "credential.participant.issue")
-            participants = json.loads(row["participants"])
-            participant = body.participant
-            if participant not in participants:
-                raise Forbidden("unknown participant")
-            member = participants[participant]
-        return {
-            "token": store.issue_participant(
-                who.tenant,
-                member["controller"],
-                session=environment,
-                participant=participant,
-                generation=member["generation"],
-                ttl=min(body.ttl, 86400),
-            )
-        }
+            store.environment(db, session_id, who, "session.read")
+            records = db.execute(
+                "SELECT id,revision,participant,generation,status FROM agent_work WHERE environment=? "
+                "AND (? = 1 OR participant=?) ORDER BY revision DESC,participant LIMIT ?",
+                (session_id, int(who.full_evidence), who.participant, limit),
+            ).fetchall()
+            return {"items": [dict(record) for record in records]}
 
     @app.post(
-        "/v1/environments/{environment}/operations",
-        tags=["Environment sessions"],
+        "/v1/sessions/{session_id}/operations",
+        tags=["Sessions"],
         summary="Prepare an external operation",
         response_model=OperationIntentResponse,
     )
-    def prepare(environment: str, body: OperationIntentRequest, who=Depends(actor)):
-        return Operations(store).prepare(environment, who, **body.model_dump())
+    def prepare(session_id: str, body: OperationIntentRequest, who=Depends(actor)):
+        return Operations(store).prepare(session_id, who, **body.model_dump())
+
+    @app.get(
+        "/v1/sessions/{session_id}/evidence",
+        tags=["Evidence"],
+        summary="Read environment-session evidence events",
+        response_model=EvidencePage,
+        responses={200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}}},
+    )
+    def evidence(
+        session_id: str,
+        after: int = Query(0, ge=0),
+        limit: int = Query(200, ge=1, le=1000),
+        last_event_id: str | None = Header(None),
+        accept: str = Header("application/json"),
+        who=Depends(actor),
+    ):
+        if last_event_id:
+            try:
+                after = max(after, int(last_event_id))
+            except ValueError:
+                raise HTTPException(422, "invalid event cursor") from None
+        items = store.events(session_id, who, after, limit)
+        if "text/event-stream" in accept:
+            # Finite resumable SSE pages: reconnect with Last-Event-ID.
+            body = "".join(f"id: {e['seq']}\nevent: evidence\ndata: {encode(e)}\n\n" for e in items)
+            return Response(body or ": caught up\n\n", media_type="text/event-stream")
+        return {"events": items, "cursor": items[-1]["seq"] if items else after}
 
     @app.post(
-        "/v1/environments/{environment}/artifacts",
+        "/v1/sessions/{session_id}/artifacts",
         tags=["Evidence"],
         summary="Store an artifact",
     )
-    async def artifact(environment: str, request: Request, who=Depends(actor)):
+    async def artifact(session_id: str, request: Request, who=Depends(actor)):
         chunks, size = [], 0
         async for chunk in request.stream():
             size += len(chunk)
             if size > 16777216:
-                raise HTTPException(413, "artifact too large")
+                raise PayloadTooLarge("artifact exceeds the 16 MiB limit")
             chunks.append(chunk)
         return store.artifact(
-            environment,
+            session_id,
             who,
             b"".join(chunks),
             media_type=request.headers.get("content-type", "application/octet-stream"),
         )
 
     @app.get(
-        "/v1/environments/{environment}/artifacts/{key}",
+        "/v1/sessions/{session_id}/artifacts/{artifact_id}",
         tags=["Evidence"],
         summary="Download an artifact",
     )
-    def read_artifact(environment: str, key: str, who=Depends(actor)):
-        data, media = store.read_artifact(environment, who, key)
+    def read_artifact(session_id: str, artifact_id: str, who=Depends(actor)):
+        data, media = store.read_artifact(session_id, who, artifact_id)
+        del media
         return Response(
             data,
             media_type="application/octet-stream",
-            headers={"Content-Disposition": f'attachment; filename="{key}"'},
+            headers={"Content-Disposition": f'attachment; filename="{artifact_id}"'},
         )
 
     @app.get(
-        "/v1/environments/{environment}/reports",
+        "/v1/sessions/{session_id}/scores",
         tags=["Evaluation"],
         summary="List score reports",
     )
-    def reports(environment: str, who=Depends(actor)):
-        return store.reports(environment, who)
+    def scores(session_id: str, who=Depends(actor)):
+        return {"items": store.reports(session_id, who)}
+
+    @app.post(
+        "/v1/sessions/{session_id}/scores",
+        tags=["Evaluation"],
+        summary="Publish a score report",
+        status_code=201,
+    )
+    def publish_score(session_id: str, body: ScoreReport, response: Response, who=Depends(actor)):
+        stored = store.report(session_id, who, body)
+        response.headers["Location"] = f"/v1/sessions/{session_id}/scores"
+        etag(response, stored["hash"])
+        return stored
 
     @app.get(
-        "/v1/environments/{environment}/turn-series",
+        "/v1/sessions/{session_id}/turn-series",
         tags=["Evaluation"],
         summary="Read bounded turn-level evidence series",
     )
-    def environment_turn_series(
-        environment: str,
+    def session_turn_series(
+        session_id: str,
         start_turn: int = Query(1, ge=1),
         end_turn: int | None = Query(None, ge=1),
         max_points: int = Query(300, ge=20, le=1000),
@@ -897,95 +976,517 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
             raise HTTPException(422, "end_turn must be greater than or equal to start_turn")
         return turn_series(
             store,
-            environment,
+            session_id,
             who,
             start_turn=start_turn,
             end_turn=end_turn,
             max_points=max_points,
         )
 
-    @app.post(
-        "/v1/environments/{environment}/reports",
-        tags=["Evaluation"],
-        summary="Publish a score report",
+    # -- Policies -----------------------------------------------------------
+    @app.get(
+        "/v1/policies",
+        tags=["Trajectories"],
+        summary="List derived policy resources",
+        response_model=PolicyPage,
     )
-    def report(environment: str, body: ScoreReport, who=Depends(actor)):
-        return store.report(environment, who, body)
+    def policy_index(
+        request: Request,
+        response: Response,
+        who=Depends(actor),
+        limit: int = Query(100, ge=1, le=1000),
+        cursor: str | None = Query(None, min_length=1, max_length=200),
+    ):
+        items, following = slice_page(policies.list(who, limit=1000), cursor, limit)
+        return link_header(response, page(request, items, following))
 
     @app.get(
-        "/v1/environments/{environment}/export",
-        tags=["Evaluation"],
-        summary="Export environment-session records",
+        "/v1/policies/{policy_id}",
+        tags=["Trajectories"],
+        summary="Get a derived policy resource",
+        response_model=Policy,
     )
-    def export(environment: str, format: str = "evidence", who=Depends(actor)):
-        session.get(environment, who)
-        if format == "training":
-            source = rollouts(store, environment, who)
-            # Validate entitlement before starting a streaming HTTP response.
-            first = next(source, None)
+    def policy(policy_id: str, response: Response, who=Depends(actor)):
+        resource = policies.get(policy_id, who)
+        etag(response, resource.status.digest)
+        return resource
 
-            def rows():
-                if first is not None:
-                    yield encode(first) + "\n"
-                for row in source:
-                    yield encode(row) + "\n"
-        elif format == "evidence":
+    # -- Trajectories -------------------------------------------------------
+    @app.get(
+        "/v1/trajectories",
+        tags=["Trajectories"],
+        summary="List native and imported trajectories",
+        response_model=TrajectoryPage,
+    )
+    def trajectory_index(
+        request: Request,
+        response: Response,
+        who=Depends(actor),
+        limit: int = Query(100, ge=1, le=1000),
+        cursor: str | None = Query(None, min_length=1, max_length=200),
+    ):
+        items, following = trajectories.list_page(who, limit, cursor)
+        return link_header(response, page(request, items, following))
 
-            def rows():
-                for row in store.replay(environment, who):
-                    yield encode(row) + "\n"
-        else:
-            raise HTTPException(422, "unknown export format")
-        return StreamingResponse(rows(), media_type="application/x-ndjson")
+    @app.get(
+        "/v1/trajectories/{trajectory_id}",
+        tags=["Trajectories"],
+        summary="Get a portable trajectory",
+        response_model=Trajectory,
+    )
+    def trajectory_resource(trajectory_id: str, response: Response, who=Depends(actor)):
+        resource = trajectories.get(trajectory_id, who)
+        etag(response, resource.status.trajectory_digest)
+        return resource
+
+    @app.get(
+        "/v1/trajectories/{trajectory_id}/records",
+        tags=["Trajectories"],
+        summary="Page through trajectory records",
+        response_model=TrajectoryRecordPage,
+    )
+    def trajectory_records(
+        trajectory_id: str,
+        response: Response,
+        who=Depends(actor),
+        after: int = Query(0, ge=0),
+        limit: int = Query(200, ge=1, le=1000),
+    ):
+        # Ordered evidence keeps its durable integer sequence cursor.
+        result = trajectories.records_page(trajectory_id, who, after=after, limit=limit)
+        if result.has_more:
+            response.headers["X-Next-Cursor"] = str(result.cursor)
+            response.headers["Link"] = (
+                f'</v1/trajectories/{trajectory_id}/records?after={result.cursor}&limit={limit}>; rel="next"'
+            )
+        return result
+
+    @app.get(
+        "/v1/trajectories/{trajectory_id}/scores",
+        tags=["Evaluation"],
+        summary="List score reports referenced by a trajectory",
+    )
+    def trajectory_scores(trajectory_id: str, who=Depends(actor)):
+        trajectories.get(trajectory_id, who)
+        with store.transaction() as db:
+            native = db.execute("SELECT 1 FROM environments WHERE id=?", (trajectory_id,)).fetchone()
+        return {"items": store.reports(trajectory_id, who) if native is not None else []}
+
+    @app.get(
+        "/v1/trajectories/{trajectory_id}/snapshots",
+        tags=["Trajectories"],
+        summary="List snapshot boundaries frozen for a trajectory",
+        response_model=SnapshotPage,
+    )
+    def trajectory_snapshots(
+        trajectory_id: str,
+        request: Request,
+        response: Response,
+        who=Depends(actor),
+        limit: int = Query(100, ge=1, le=1000),
+        cursor: str | None = Query(None, min_length=1, max_length=200),
+    ):
+        items, following = slice_page(
+            trajectories.list_snapshots(trajectory_id, who, limit=1000), cursor, limit
+        )
+        return link_header(response, page(request, items, following))
 
     @app.post(
-        "/v1/compare",
+        "/v1/trajectories/{trajectory_id}/snapshots",
+        tags=["Trajectories"],
+        summary="Freeze an authorized trajectory snapshot",
+        response_model=TrajectorySnapshot,
+        status_code=201,
+    )
+    def freeze_trajectory_snapshot(trajectory_id: str, response: Response, who=Depends(actor)):
+        snapshot = trajectories.freeze(trajectory_id, who)
+        response.headers["Location"] = f"/v1/snapshots/{snapshot.metadata.id}"
+        return snapshot
+
+    # -- Snapshots ----------------------------------------------------------
+    @app.get(
+        "/v1/snapshots",
+        tags=["Trajectories"],
+        summary="List immutable trajectory snapshots",
+        response_model=SnapshotPage,
+    )
+    def snapshots(
+        request: Request,
+        response: Response,
+        who=Depends(actor),
+        trajectory: str | None = Query(None, min_length=1, max_length=200),
+        limit: int = Query(100, ge=1, le=1000),
+        cursor: str | None = Query(None, min_length=1, max_length=200),
+    ):
+        items, following = slice_page(
+            trajectories.list_all_snapshots(who, trajectory=trajectory, limit=1000), cursor, limit
+        )
+        return link_header(response, page(request, items, following))
+
+    @app.get(
+        "/v1/snapshots/{snapshot_id}",
+        tags=["Trajectories"],
+        summary="Get an immutable trajectory snapshot",
+        response_model=TrajectorySnapshot,
+    )
+    def trajectory_snapshot(snapshot_id: str, response: Response, who=Depends(actor)):
+        resource = trajectories.get_snapshot(snapshot_id, who)
+        etag(response, resource.status.snapshot_digest)
+        return resource
+
+    @app.get(
+        "/v1/snapshots/{snapshot_id}/records",
+        tags=["Trajectories"],
+        summary="Read snapshot records as a JSON page or streamed NDJSON",
+        response_model=TrajectoryRecordPage,
+        responses={200: {"content": {"application/x-ndjson": {"schema": {"type": "string"}}}}},
+    )
+    def snapshot_records(
+        snapshot_id: str,
+        accept: str = Header("application/json"),
+        after: int = Query(0, ge=0),
+        limit: int = Query(200, ge=1, le=1000),
+        who=Depends(actor),
+    ):
+        """Content negotiation replaces an `/export` verb path.
+
+        The typed JSON cursor page is the generated-client response; NDJSON
+        streaming is the same authenticated `GET` with an explicit `Accept`.
+        """
+
+        if "application/x-ndjson" in accept:
+            return StreamingResponse(
+                (encode(row) + "\n" for row in trajectories.export_snapshot(snapshot_id, who)),
+                media_type="application/x-ndjson",
+            )
+        return trajectories.snapshot_records_page(snapshot_id, who, after=after, limit=limit)
+
+    # -- Datasets -----------------------------------------------------------
+    @app.post(
+        "/v1/datasets",
+        tags=["Trajectories"],
+        summary="Freeze a training-entitled trajectory dataset",
+        response_model=TrajectoryDataset,
+        status_code=201,
+    )
+    def freeze_trajectory_dataset(body: DatasetCreate, response: Response, who=Depends(actor)):
+        dataset = training.freeze_dataset(body.name, body.trajectories, who)
+        response.headers["Location"] = f"/v1/datasets/{dataset.metadata.id}"
+        return dataset
+
+    @app.get(
+        "/v1/datasets",
+        tags=["Trajectories"],
+        summary="List immutable trajectory datasets",
+        response_model=DatasetPage,
+    )
+    def trajectory_datasets(
+        request: Request,
+        response: Response,
+        who=Depends(actor),
+        limit: int = Query(100, ge=1, le=1000),
+        cursor: str | None = Query(None, min_length=1, max_length=200),
+    ):
+        items, following = slice_page(training.list_datasets(who, limit=1000), cursor, limit)
+        return link_header(response, page(request, items, following))
+
+    @app.get(
+        "/v1/datasets/{dataset_id}",
+        tags=["Trajectories"],
+        summary="Get an immutable trajectory dataset",
+        response_model=TrajectoryDataset,
+    )
+    def trajectory_dataset(dataset_id: str, response: Response, who=Depends(actor)):
+        resource = training.get_dataset(dataset_id, who)
+        etag(response, resource.status.dataset_digest)
+        return resource
+
+    @app.get(
+        "/v1/datasets/{dataset_id}/records",
+        tags=["Trajectories"],
+        summary="Read dataset records as a JSON page or streamed NDJSON",
+        response_model=TrajectoryRecordPage,
+        responses={200: {"content": {"application/x-ndjson": {"schema": {"type": "string"}}}}},
+    )
+    def dataset_records(
+        dataset_id: str,
+        accept: str = Header("application/json"),
+        after: int = Query(0, ge=0),
+        limit: int = Query(200, ge=1, le=1000),
+        who=Depends(actor),
+    ):
+        if "application/x-ndjson" in accept:
+            return StreamingResponse(
+                (encode(row) + "\n" for row in training.export_dataset(dataset_id, who)),
+                media_type="application/x-ndjson",
+            )
+        return training.dataset_records_page(dataset_id, who, after=after, limit=limit)
+
+    # -- Training runs ------------------------------------------------------
+    @app.get(
+        "/v1/training-runs",
+        tags=["Trajectories"],
+        summary="List recorded local training results",
+        response_model=TrainingRunPage,
+    )
+    def training_runs(
+        request: Request,
+        response: Response,
+        who=Depends(actor),
+        dataset: str | None = Query(None, min_length=1, max_length=200),
+        limit: int = Query(100, ge=1, le=1000),
+        cursor: str | None = Query(None, min_length=1, max_length=200),
+    ):
+        items, following = slice_page(training.list_runs(who, dataset=dataset, limit=1000), cursor, limit)
+        return link_header(response, page(request, items, following))
+
+    @app.get(
+        "/v1/training-runs/{training_run_id}",
+        tags=["Trajectories"],
+        summary="Get a recorded local training result",
+        response_model=TrainingRun,
+    )
+    def training_run(training_run_id: str, response: Response, who=Depends(actor)):
+        resource = training.get_run(training_run_id, who)
+        etag(response, resource.spec.dataset_digest)
+        return resource
+
+    # -- Sources ------------------------------------------------------------
+    @app.get(
+        "/v1/sources",
+        tags=["Sources"],
+        summary="List registered external sources",
+        response_model=SourcePage,
+    )
+    def sources(
+        request: Request,
+        response: Response,
+        who=Depends(actor),
+        limit: int = Query(100, ge=1, le=1000),
+        cursor: str | None = Query(None, min_length=1, max_length=200),
+    ):
+        items, following = slice_page(
+            trajectories.list_sources(who, limit=1000), cursor, limit, key=lambda item: item.source
+        )
+        return link_header(response, page(request, items, following))
+
+    @app.get(
+        "/v1/sources/{source_id}",
+        tags=["Sources"],
+        summary="Get a registered external source",
+        response_model=SourceStatus,
+    )
+    def source(source_id: str, who=Depends(actor)):
+        return trajectories.source_status(source_id, who)
+
+    @app.get(
+        "/v1/sources/{source_id}/status",
+        tags=["Sources"],
+        summary="Inspect source collection and execution status",
+        response_model=SourceStatus,
+    )
+    def source_status(source_id: str, who=Depends(actor)):
+        return trajectories.source_status(source_id, who)
+
+    @app.get(
+        "/v1/sources/{source_id}/records",
+        tags=["Sources"],
+        summary="Page through ingested source records",
+        response_model=TrajectoryRecordPage,
+    )
+    def source_records(
+        source_id: str,
+        response: Response,
+        who=Depends(actor),
+        after: int = Query(0, ge=0),
+        limit: int = Query(200, ge=1, le=1000),
+    ):
+        result = trajectories.records_page(source_id, who, after=after, limit=limit)
+        if result.has_more:
+            response.headers["X-Next-Cursor"] = str(result.cursor)
+            response.headers["Link"] = (
+                f'</v1/sources/{source_id}/records?after={result.cursor}&limit={limit}>; rel="next"'
+            )
+        return result
+
+    @app.post(
+        "/v1/sources",
+        tags=["Sources"],
+        summary="Register an external trajectory source",
+        response_model=SourceRegistrationReceipt,
+        status_code=201,
+        openapi_extra={"x-capability": capability_module.HISTORICAL_INGESTION},
+    )
+    def register_source(body: SourceRegistration, response: Response, who=Depends(actor)):
+        require_capability(capability_module.HISTORICAL_INGESTION)
+        receipt = trajectories.register_source(body, who)
+        response.headers["Location"] = f"/v1/sources/{receipt.id}"
+        return receipt
+
+    @app.post(
+        "/v1/sources/{source_id}/records",
+        tags=["Sources"],
+        summary="Ingest a bounded source batch",
+        response_model=SourceAcknowledgement,
+        openapi_extra={"x-capability": capability_module.HISTORICAL_INGESTION},
+    )
+    def ingest_source_records(source_id: str, body: SourceIngestionBatch, who=Depends(actor)):
+        require_capability(capability_module.HISTORICAL_INGESTION)
+        return trajectories.ingest(source_id, body.records, who)
+
+    @app.post(
+        "/v1/sources/{source_id}/status-reports",
+        tags=["Sources"],
+        summary="Declare source collection and execution status",
+        response_model=SourceStatusUpdate,
+        status_code=201,
+        openapi_extra={"x-capability": capability_module.HISTORICAL_INGESTION},
+    )
+    def report_source_status(source_id: str, body: SourceStatusUpdate, who=Depends(actor)):
+        require_capability(capability_module.HISTORICAL_INGESTION)
+        return trajectories.update_source_status(source_id, body, who)
+
+    # -- Comparisons --------------------------------------------------------
+    @app.post(
+        "/v1/comparisons",
         tags=["Evaluation"],
         summary="Compare environment sessions",
     )
-    def comparison(body: dict, who=Depends(actor)):
-        ids = body.get("environments", [])
-        if not isinstance(ids, list) or not 1 <= len(ids) <= 100:
-            raise HTTPException(422, "supply 1 to 100 environments")
-        return compare(store, ids, who)
+    def comparison(body: ComparisonRequest, who=Depends(actor)):
+        """Return a derived comparison. No comparison authority is persisted."""
 
+        return compare(store, list(body.sessions), who)
+
+    # -- Activity -----------------------------------------------------------
+    def activity_response(items, after, accept):
+        cursor = items[-1]["id"] if items else after
+        if "text/event-stream" in accept:
+            body = "retry: 2000\n\n"
+            body += "".join(
+                f"id: {event['id']}\nevent: {event['kind']}\ndata: {encode(event)}\n\n" for event in items
+            )
+            body += ": heartbeat\n\n"
+            return Response(body, media_type="text/event-stream")
+        return {"events": items, "cursor": cursor}
+
+    def activity_cursor(after, last_event_id):
+        if last_event_id:
+            try:
+                return max(after, int(last_event_id))
+            except ValueError:
+                raise HTTPException(422, "invalid event cursor") from None
+        return after
+
+    @app.get(
+        "/v1/activity",
+        tags=["Activity"],
+        summary="Read tenant activity",
+        response_model=ActivityPage,
+        responses={200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}}},
+    )
+    def global_activity(
+        after: int = Query(0, ge=0),
+        limit: int = Query(200, ge=1, le=1000),
+        last_event_id: str | None = Header(None),
+        accept: str = Header("application/json"),
+        who=Depends(actor),
+    ):
+        after = activity_cursor(after, last_event_id)
+        return activity_response(store.activity(who, after, limit), after, accept)
+
+    @app.get(
+        "/v1/activity/hierarchy",
+        tags=["Activity"],
+        summary="Get the current ownership hierarchy",
+        response_model=ActivityHierarchy,
+    )
+    def activity_hierarchy(who=Depends(actor)):
+        return store.activity_hierarchy(who)
+
+    @app.get(
+        "/v1/experiments/{experiment_id}/activity",
+        tags=["Activity"],
+        summary="Read activity for an experiment",
+        response_model=ActivityPage,
+        responses={200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}}},
+    )
+    def experiment_activity(
+        experiment_id: str,
+        after: int = Query(0, ge=0),
+        limit: int = Query(200, ge=1, le=1000),
+        last_event_id: str | None = Header(None),
+        accept: str = Header("application/json"),
+        who=Depends(actor),
+    ):
+        after = activity_cursor(after, last_event_id)
+        return activity_response(store.activity(who, after, limit, experiment=experiment_id), after, accept)
+
+    @app.get(
+        "/v1/sessions/{session_id}/activity",
+        tags=["Activity"],
+        summary="Read activity for an environment session",
+        response_model=ActivityPage,
+        responses={200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}}},
+    )
+    def session_activity(
+        session_id: str,
+        after: int = Query(0, ge=0),
+        limit: int = Query(200, ge=1, le=1000),
+        last_event_id: str | None = Header(None),
+        accept: str = Header("application/json"),
+        who=Depends(actor),
+    ):
+        after = activity_cursor(after, last_event_id)
+        return activity_response(store.activity(who, after, limit, environment=session_id), after, accept)
+
+    # -- Viewer shell -------------------------------------------------------
     @app.get("/", include_in_schema=False)
-    @app.get("/home", include_in_schema=False)
-    @app.get("/compare", include_in_schema=False)
+    @app.get("/overview", include_in_schema=False)
+    @app.get("/comparisons", include_in_schema=False)
+    @app.get("/experiments", include_in_schema=False)
+    @app.get("/sessions", include_in_schema=False)
+    @app.get("/trajectories", include_in_schema=False)
     def viewer():
         return FileResponse(Path(__file__).parent / "viewer" / "index.html")
 
-    @app.get("/session/{environment}", include_in_schema=False)
-    def viewer_session(environment: str):
-        del environment
+    @app.get("/sessions/{session_id}", include_in_schema=False)
+    def viewer_session(session_id: str):
+        del session_id
         return FileResponse(Path(__file__).parent / "viewer" / "index.html")
 
-    @app.get("/session/{environment}/{section}", include_in_schema=False)
-    def viewer_session_section(environment: str, section: str):
-        del environment
-        if section not in ("overview", "turns", "progression", "reports"):
+    @app.get("/sessions/{session_id}/{section}", include_in_schema=False)
+    def viewer_session_section(session_id: str, section: str):
+        del session_id
+        if section not in ("overview", "turns", "progression", "trajectory", "configuration"):
             raise HTTPException(404)
         return FileResponse(Path(__file__).parent / "viewer" / "index.html")
 
-    @app.get("/experiment/{experiment}", include_in_schema=False)
-    def viewer_experiment(experiment: str):
-        del experiment
+    @app.get("/experiments/{experiment_id}", include_in_schema=False)
+    def viewer_experiment(experiment_id: str):
+        del experiment_id
         return FileResponse(Path(__file__).parent / "viewer" / "index.html")
 
-    @app.get("/trajectory/{trajectory}", include_in_schema=False)
-    def viewer_trajectory(trajectory: str):
-        del trajectory
+    @app.get("/experiments/{experiment_id}/scenarios/{scenario_id}", include_in_schema=False)
+    def viewer_experiment_scenario(experiment_id: str, scenario_id: str):
+        del experiment_id, scenario_id
         return FileResponse(Path(__file__).parent / "viewer" / "index.html")
 
-    @app.get("/experiment/{experiment}/scenarios/{scenario}", include_in_schema=False)
-    def viewer_experiment_scenario(experiment: str, scenario: str):
-        del experiment, scenario
+    @app.get("/experiments/{experiment_id}/{section}", include_in_schema=False)
+    def viewer_experiment_section(experiment_id: str, section: str):
+        del experiment_id
+        if section not in ("overview", "scenarios", "sessions", "trajectories", "configuration"):
+            raise HTTPException(404)
         return FileResponse(Path(__file__).parent / "viewer" / "index.html")
 
-    @app.get("/experiment/{experiment}/{section}", include_in_schema=False)
-    def viewer_experiment_section(experiment: str, section: str):
-        del experiment
-        if section not in ("scenarios", "sessions", "training"):
+    @app.get("/trajectories/{trajectory_id}", include_in_schema=False)
+    def viewer_trajectory(trajectory_id: str):
+        del trajectory_id
+        return FileResponse(Path(__file__).parent / "viewer" / "index.html")
+
+    @app.get("/trajectories/{trajectory_id}/{section}", include_in_schema=False)
+    def viewer_trajectory_section(trajectory_id: str, section: str):
+        del trajectory_id
+        if section not in ("overview", "records", "snapshots", "provenance"):
             raise HTTPException(404)
         return FileResponse(Path(__file__).parent / "viewer" / "index.html")
 

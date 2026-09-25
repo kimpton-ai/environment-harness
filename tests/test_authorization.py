@@ -233,10 +233,10 @@ def test_participant_credentials_are_bound_and_do_not_enumerate(tmp_path):
     scoped = {"Authorization": "Bearer " + bearer(store, contexts["participant"])}
     management = {"Authorization": "Bearer " + bearer(store, contexts["management"])}
 
-    assert client.get(f"/v1/environments/{identity}", headers=scoped).status_code == 200
+    assert client.get(f"/v1/sessions/{identity}", headers=scoped).status_code == 200
     other = runtime.create(spec, contexts["trusted-local"], environment_id="d" * 32)["id"]
-    denied = client.get(f"/v1/environments/{other}", headers=scoped)
-    missing = client.get(f"/v1/environments/{'e' * 32}", headers=scoped)
+    denied = client.get(f"/v1/sessions/{other}", headers=scoped)
+    missing = client.get(f"/v1/sessions/{'e' * 32}", headers=scoped)
     # An out-of-scope session and an absent session are indistinguishable.
     assert denied.status_code == missing.status_code == 403
     assert denied.json()["error"]["message"] == missing.json()["error"]["message"]
@@ -244,13 +244,11 @@ def test_participant_credentials_are_bound_and_do_not_enumerate(tmp_path):
     # A participant credential cannot mint another credential.
     assert (
         client.post(
-            f"/v1/environments/{identity}/credentials", headers=scoped, json={"participant": "bob"}
+            f"/v1/sessions/{identity}/participants/bob/credentials", headers=scoped, json={}
         ).status_code
         == 403
     )
-    issued = client.post(
-        f"/v1/environments/{identity}/credentials", headers=management, json={"participant": "bob"}
-    )
+    issued = client.post(f"/v1/sessions/{identity}/participants/bob/credentials", headers=management, json={})
     assert issued.status_code == 200
     resolved = store.authenticate(issued.json()["token"])
     assert (resolved.policy, resolved.session, resolved.participant) == ("participant", identity, "bob")
@@ -261,14 +259,17 @@ def test_requests_cannot_assert_a_policy_or_permission(tmp_path):
     client = TestClient(create_app(runtime), base_url="http://testserver")
     scoped = {"Authorization": "Bearer " + bearer(store, contexts["participant"])}
     for attempt in (
-        {"participant": "bob", "policy": "management"},
-        {"participant": "bob", "permissions": ["session.create"]},
-        {"participant": "bob", "role": "researcher"},
+        {"policy": "management"},
+        {"permissions": ["session.create"]},
+        {"role": "researcher"},
     ):
-        response = client.post(f"/v1/environments/{identity}/credentials", headers=scoped, json=attempt)
+        response = client.post(
+            f"/v1/sessions/{identity}/participants/bob/credentials", headers=scoped, json=attempt
+        )
         # Unknown request fields are rejected before authorization is consulted.
         assert response.status_code in (403, 422)
-    assert client.get("/v1/environments?policy=management", headers=scoped).status_code == 200
+    # An unknown query parameter cannot widen a credential either.
+    assert client.get("/v1/sessions?policy=management", headers=scoped).status_code == 200
 
 
 def test_credential_store_never_trusts_a_client_supplied_policy(tmp_path):

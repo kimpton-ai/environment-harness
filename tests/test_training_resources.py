@@ -234,22 +234,26 @@ def test_http_can_freeze_and_read_datasets_but_exposes_no_training_execution_rou
     headers = {"Authorization": "Bearer " + bearer(store, who)}
 
     created = client.post(
-        "/v1/trajectory-datasets",
+        "/v1/datasets",
         headers=headers,
         json={"name": "api-dataset", "trajectories": [environment_id]},
     )
     dataset_id = created.json()["metadata"]["id"]
-    fetched = client.get(f"/v1/trajectory-datasets/{dataset_id}", headers=headers)
-    listed = client.get("/v1/trajectory-datasets", headers=headers)
-    exported = client.get(f"/v1/trajectory-datasets/{dataset_id}/export", headers=headers)
+    fetched = client.get(f"/v1/datasets/{dataset_id}", headers=headers)
+    listed = client.get("/v1/datasets", headers=headers)
+    exported = client.get(
+        f"/v1/datasets/{dataset_id}/records",
+        headers=headers | {"Accept": "application/x-ndjson"},
+    )
     runs = client.get(f"/v1/training-runs?dataset={dataset_id}", headers=headers)
     missing_run = client.get("/v1/training-runs/missing", headers=headers)
 
-    assert created.status_code == 200
+    assert created.status_code == 201
+    assert created.headers["location"] == f"/v1/datasets/{dataset_id}"
     assert fetched.json() == created.json()
-    assert listed.json() == [created.json()]
+    assert listed.json()["items"] == [created.json()]
     assert exported.headers["content-type"].startswith("application/x-ndjson")
-    assert runs.json() == []
+    assert runs.json()["items"] == []
     assert missing_run.status_code == 403
     assert client.post("/v1/training-runs", headers=headers, json={}).status_code == 405
     assert client.post("/v1/training-runs/not-executable", headers=headers, json={}).status_code == 405

@@ -661,7 +661,9 @@ class ResourceProjection:
                 (identity, access.tenant),
             ).fetchone()
             if run is None:
-                raise Forbidden("environment session unavailable")
+                # The same message as the store so a missing and an
+                # inaccessible session stay indistinguishable.
+                raise Forbidden("environment unavailable")
             row = self.store.environment(db, identity, access, "session.read")
             manifest = json.loads(row["manifest"])
             evidence = db.execute(
@@ -860,3 +862,72 @@ class ResourceProjection:
                 (session, limit),
             ).fetchall()
         return tuple(self.checkpoint(session, row["id"], access) for row in rows)
+
+
+class PolicyProjection:
+    """Derive `Policy` resources from frozen participant specifications.
+
+    Existing stores synthesize a policy reference at read time; no manifest or
+    evidence row is rewritten. ``AgentSpec.policy_version`` keeps its persisted
+    meaning and supplies the default version.
+    """
+
+    def __init__(self, store):
+        self.store = store
+
+    def _policies(self, access, *, session: str | None = None):
+        from .store import digest
+        from .trajectories import API_VERSION as VERSION
+        from .trajectories import Policy
+
+        with self.store.transaction() as db:
+            rows = db.execute(
+                "SELECT id,manifest FROM environments WHERE tenant=? "
+                "AND (CAST(? AS TEXT) IS NULL OR id=?) ORDER BY id",
+                (access.tenant, session or access.session, session or access.session),
+            ).fetchall()
+        found: dict[str, Any] = {}
+        for row in rows:
+            manifest = json.loads(row["manifest"])
+            for participant in manifest.get("participants", []):
+                body = {
+                    "implementation": participant["implementation"],
+                    "version": participant.get("policy_version"),
+                    "lineage": [],
+                    "artifact": None,
+                }
+                identity = "policy-" + digest(body)[:32]
+                found.setdefault(
+                    identity,
+                    Policy.model_validate(
+                        {
+                            "apiVersion": VERSION,
+                            "kind": "Policy",
+                            "metadata": {
+                                "id": identity,
+                                "createdAt": _timestamp(0.0),
+                                "labels": {"participant": participant["id"]},
+                            },
+                            "features": {"required": [], "optional": []},
+                            "spec": body,
+                            "status": {"digest": digest(body)},
+                            "extensions": {},
+                        }
+                    ),
+                )
+        return found
+
+    def list(self, access, *, limit: int = 100):
+        access.require("session.read")
+        if not 1 <= limit <= 1000:
+            raise ValueError("invalid policy page size")
+        return tuple(self._policies(access).values())[:limit]
+
+    def get(self, identity: str, access):
+        from .errors import Forbidden
+
+        access.require("session.read")
+        found = self._policies(access)
+        if identity not in found:
+            raise Forbidden("policy unavailable")
+        return found[identity]

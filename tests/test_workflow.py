@@ -173,35 +173,37 @@ def test_api_and_viewer(setup):
     client = TestClient(create_app(session))
     headers = {"Authorization": "Bearer " + token}
     assert client.get("/").status_code == 200
-    assert client.get("/home").status_code == 200
-    assert client.get(f"/session/{environment}/overview").status_code == 200
-    assert client.get(f"/session/{environment}/turns").status_code == 200
-    assert client.get(f"/session/{environment}/progression").status_code == 200
-    assert client.get(f"/session/{environment}/reports").status_code == 200
-    assert client.get(f"/session/{environment}/compare-turns").status_code == 404
-    assert client.get(f"/session/{environment}/unknown").status_code == 404
+    assert client.get("/overview").status_code == 200
+    assert client.get(f"/sessions/{environment}/overview").status_code == 200
+    assert client.get(f"/sessions/{environment}/turns").status_code == 200
+    assert client.get(f"/sessions/{environment}/progression").status_code == 200
+    assert client.get(f"/sessions/{environment}/trajectory").status_code == 200
+    assert client.get(f"/sessions/{environment}/configuration").status_code == 200
+    assert client.get(f"/sessions/{environment}/reports").status_code == 404
+    assert client.get(f"/sessions/{environment}/unknown").status_code == 404
     assert client.get("/viewer/app.js").status_code == 200
     assert client.get("/viewer/timeline.js").status_code == 200
     page = client.get("/").text
     # The viewer reads evidence. Checkpoint, resume, cancel and branch stay command-line and SDK operations.
     assert 'id="checkpoint"' not in page and "branch-dialog" not in page
-    assert client.get("/v1/environments").status_code == 401
-    assert client.get("/v1/environments", headers=headers).json()[0]["id"] == environment
+    assert client.get("/v1/sessions").status_code == 401
+    assert client.get("/v1/sessions", headers=headers).json()["items"][0]["metadata"]["id"] == environment
     response = client.get(
-        f"/v1/environments/{environment}/events", headers=headers | {"Accept": "text/event-stream"}
+        f"/v1/sessions/{environment}/evidence", headers=headers | {"Accept": "text/event-stream"}
     )
     assert "event: evidence" in response.text
     agent_token = bearer(store, agents["alice"])
     agent_headers = {"Authorization": "Bearer " + agent_token}
     assert (
         client.get(
-            f"/v1/environments/{environment}/observation?participant=bob", headers=agent_headers
+            f"/v1/sessions/{environment}/participants/bob/observation",
+            headers=agent_headers,
         ).status_code
         == 403
     )
     assert (
         client.post(
-            f"/v1/environments/{environment}/commands",
+            f"/v1/sessions/{environment}/commands",
             headers=agent_headers,
             json={"operation": "lease", "arguments": {"owner": "bad"}},
         ).status_code

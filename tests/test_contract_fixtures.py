@@ -401,7 +401,8 @@ def test_resource_projection_bounds_pages_and_hides_unknown_identities(shared):
         projection.experiment("missing", access)
     with pytest.raises(Forbidden, match="scenario set unavailable"):
         projection.scenario_set("scenario-set-missing", access)
-    with pytest.raises(Forbidden, match="session unavailable"):
+    # Missing and inaccessible sessions collapse into the same public error.
+    with pytest.raises(Forbidden, match="environment unavailable"):
         projection.session("f" * 32, access)
     with pytest.raises(Forbidden, match="checkpoint unavailable"):
         projection.checkpoint(shared["solo"].id, "missing", access)
@@ -436,3 +437,95 @@ def test_branched_child_session_records_its_lineage(shared):
     assert resource.spec.lineage.checkpoint == shared["checkpoint"]
     assert resource.spec.lineage.interventions == {"total": 5}
     assert resource.spec.lineage.root == shared["solo"].resource().spec.lineage.root
+
+
+def test_http_migration_manifest_classifies_every_frozen_operation():
+    """Acceptance gate: no 0.2 operation is unclassified or duplicated."""
+
+    import json
+    from pathlib import Path
+
+    from environment_harness.access import registry_fingerprint
+
+    root = Path(__file__).resolve().parents[1]
+    inventory = json.loads((root / "contracts/migrations/http-0.2-operations.json").read_text())
+    manifest = json.loads((root / "contracts/migrations/http-0.2-to-0.3.json").read_text())
+    table = (root / "docs/HTTP-MIGRATION.md").read_text()
+
+    old = [entry["operationId"] for entry in inventory["operations"]]
+    classified = [entry["operationId"] for entry in manifest["operations"]]
+    assert sorted(classified) == sorted(old)
+    assert len(classified) == len(set(classified))
+
+    dispositions = {"mapped", "removed", "retained", "out_of_hierarchy"}
+    grades = {"unchanged", "compatible", "breaking"}
+    for entry in manifest["operations"]:
+        assert entry["disposition"] in dispositions, entry["operationId"]
+        assert entry["rationale"], entry["operationId"]
+        for dimension in (
+            "route",
+            "request",
+            "response",
+            "pagination",
+            "errors",
+            "authentication",
+            "access_policy",
+            "resource_constraints",
+        ):
+            assert entry[dimension] in grades, (entry["operationId"], dimension)
+        if entry["disposition"] == "mapped":
+            assert entry["destinationPath"], entry["operationId"]
+            assert entry["destinationPath"] in table
+        elif entry["disposition"] == "retained":
+            assert entry["destinationPath"] == entry["path"]
+        else:
+            assert entry["destinationPath"] is None
+
+    # The generated tables cannot drift from the enforced registry.
+    assert manifest["authorizationRegistryFingerprint"] == registry_fingerprint()
+    assert registry_fingerprint() in table
+    assert "x-roles" not in table
+    # The removed four-role model is recorded as the previous authorization model.
+    assert manifest["authorizationModel"]["previous"]["kind"] == "public four-role literal"
+    assert manifest["authorizationModel"]["current"]["kind"] == "server-owned credential policies"
+    assert "trusted-local" not in manifest["authorizationModel"]["current"]["issuable"]
+
+
+def test_every_authenticated_operation_is_inside_the_public_hierarchy():
+    import tempfile
+
+    from environment_harness.fixtures import SyntheticEnvironment
+    from environment_harness.runtime import _SessionRuntime
+    from environment_harness.server import create_app
+
+    collections = {
+        "/v1/scenario-sets",
+        "/v1/experiments",
+        "/v1/sessions",
+        "/v1/policies",
+        "/v1/trajectories",
+        "/v1/snapshots",
+        "/v1/datasets",
+        "/v1/sources",
+        "/v1/training-runs",
+        "/v1/comparisons",
+        "/v1/capabilities",
+        "/v1/activity",
+    }
+    with tempfile.TemporaryDirectory() as directory:
+        runtime = _SessionRuntime(EvidenceStore(directory), SyntheticEnvironment())
+        document = create_app(runtime, trajectory_ingestion=True).openapi()
+
+    for path, item in document["paths"].items():
+        for method, operation in item.items():
+            if method not in ("get", "post", "put", "patch", "delete"):
+                continue
+            if not path.startswith("/v1"):
+                continue
+            # Every /v1 operation is authenticated with the standard bearer scheme.
+            assert operation["security"] == [{"BearerAuth": []}], (method, path)
+            assert operation.get("operationId"), (method, path)
+            root = "/".join(path.split("/")[:3])
+            assert root in collections, path
+    # No Environment surface survives.
+    assert not any(path.startswith("/v1/environment") for path in document["paths"])

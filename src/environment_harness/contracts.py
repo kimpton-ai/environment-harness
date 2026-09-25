@@ -170,6 +170,28 @@ class ActivityPage(Record):
     cursor: int = Field(ge=0)
 
 
+class EvidenceEvent(Record):
+    """One hash-chained row from a session's append-only evidence journal."""
+
+    environment: str
+    seq: int = Field(ge=1)
+    revision: int = Field(ge=0)
+    kind: str
+    payload: Json = Field(default_factory=dict)
+    audience: tuple[str, ...] = ()
+    event_time: float | None = None
+    ingested: float
+    previous: str = Field(pattern=r"^[0-9a-f]{64}$")
+    hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class EvidencePage(Record):
+    """A resumable JSON page of session evidence."""
+
+    events: tuple[EvidenceEvent, ...] = ()
+    cursor: int = Field(ge=0)
+
+
 class ActivitySession(Record):
     """Current activity projection for one environment session."""
 

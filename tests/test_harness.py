@@ -324,19 +324,19 @@ def test_activity_outbox_is_resumable_for_global_experiment_and_session_streams(
     client = TestClient(create_app(_SessionRuntime(harness.store, ScenarioEnvironment())))
     headers = {"Authorization": f"Bearer {token}"}
 
-    page = client.get("/v1/activity/events", headers=headers).json()
+    page = client.get("/v1/activity", headers=headers).json()
 
     assert page["events"]
     assert page["cursor"] == page["events"][-1]["id"]
     assert any(event["kind"] == "experiment.updated" for event in page["events"])
     caught_up = client.get(
-        f"/v1/experiments/{result.id}/events",
+        f"/v1/experiments/{result.id}/activity",
         headers=headers | {"Accept": "text/event-stream", "Last-Event-ID": str(page["cursor"])},
     )
     assert caught_up.headers["content-type"].startswith("text/event-stream")
     assert "retry: 2000" in caught_up.text
     assert ": heartbeat" in caught_up.text
-    session_page = client.get(f"/v1/environments/{result.sessions[0].id}/activity", headers=headers).json()
+    session_page = client.get(f"/v1/sessions/{result.sessions[0].id}/activity", headers=headers).json()
     assert all(event["environment"] == result.sessions[0].id for event in session_page["events"])
 
 
@@ -362,9 +362,11 @@ def test_activity_snapshot_groups_experiments_and_keeps_standalone_sessions_top_
     token = bearer(harness.store, _AccessContext(tenant="local", subject="reader", policy="trusted-local"))
     client = TestClient(create_app(_SessionRuntime(harness.store, ScenarioEnvironment())))
 
-    snapshot = client.get("/v1/activity/snapshot", headers={"Authorization": f"Bearer {token}"}).json()
+    snapshot = client.get("/v1/activity/hierarchy", headers={"Authorization": f"Bearer {token}"}).json()
 
-    assert snapshot["summary"] == {"running": 0, "queued": 0, "failed": 0}
+    # Every created Session now has a durable row, including one created
+    # directly through the private runtime.
+    assert snapshot["summary"] == {"running": 1, "queued": 0, "failed": 0}
     assert snapshot["experiments"][0]["id"] == grouped.id
     assert snapshot["experiments"][0]["kind"] == "experiment"
     assert snapshot["experiments"][0]["progress"] == {"completed": 2, "total": 2}
@@ -409,8 +411,11 @@ def test_activity_snapshot_groups_experiments_and_keeps_standalone_sessions_top_
     assert snapshot["standalone"][0]["id"] == standalone.id
     assert snapshot["standalone"][0]["kind"] == "session"
     assert "experiment" not in snapshot["standalone"][0]
-    legacy_snapshot = next(session for session in snapshot["standalone"] if session["id"] == legacy["id"])
-    assert legacy_snapshot["target_turns"] is None
+    runtime_created = next(session for session in snapshot["standalone"] if session["id"] == legacy["id"])
+    # A runtime-created session carries its frozen turn budget rather than
+    # appearing as an ownerless legacy row.
+    assert runtime_created["target_turns"] == 10000
+    assert runtime_created["status"] == "running"
     with pytest.raises(Forbidden, match="policy denies"):
         harness.store.activity_hierarchy(
             _AccessContext(

@@ -704,58 +704,20 @@ class EnvironmentHarness:
             else digest({"parent": session, "key": request.idempotency_key})[:32]
         )
         runtime = self._runtime(self._session_factory(session))
-        created = runtime.branch(
+        runtime.branch(
             session,
             self._access,
             request.checkpoint,
             request.interventions,
             new_environment=child,
+            turns=request.turns,
         )
-        now = time.time()
         with self.store.transaction() as db:
-            parent = db.execute("SELECT * FROM session_runs WHERE environment=?", (session,)).fetchone()
-            existing = db.execute("SELECT * FROM session_runs WHERE environment=?", (child,)).fetchone()
-            if existing is None and parent is not None:
-                db.execute(
-                    _INSERT_SESSION_RUN,
-                    (
-                        child,
-                        self.tenant,
-                        parent["experiment"],
-                        parent["scenario"],
-                        parent["trial"],
-                        parent["seed"],
-                        # A child starts behind explicit resume so branching never
-                        # repeats an externally visible effect without caller intent.
-                        "interrupted",
-                        None,
-                        created["revision"],
-                        request.turns or parent["target_turns"],
-                        "Branched",
-                        parent["scenario_body"],
-                        now,
-                        now,
-                        parent["environment_id"],
-                        parent["environment_version"],
-                        parent["spec_digest"],
-                        None,
-                    ),
-                )
-                self._outbox(
-                    db,
-                    kind="environment_session.branched",
-                    body={
-                        "status": "interrupted",
-                        "scenario_id": parent["scenario"],
-                        "trial": parent["trial"],
-                        "parent": session,
-                        "checkpoint": request.checkpoint,
-                    },
-                    experiment=parent["experiment"],
-                    environment=child,
-                )
-                if parent["experiment"]:
-                    self._refresh_experiment(db, parent["experiment"])
+            parent = db.execute(
+                "SELECT experiment FROM session_runs WHERE environment=?", (session,)
+            ).fetchone()
+            if parent is not None and parent["experiment"]:
+                self._refresh_experiment(db, parent["experiment"])
         return EnvironmentSession(self, child)
 
     def compare(self, sessions) -> dict[str, Any]:

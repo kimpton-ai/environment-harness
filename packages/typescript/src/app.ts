@@ -5,7 +5,7 @@ import {
   MISSING, SLOTS, buildTimeline, buildTurnSeries, cellText, describe, filterEvents, formatCompactCount, formatCost, formatTime, hasActivity,
   inheritedSentence, shortId, summarizeReports, title, turnLabel, scalars, type Slot, type Turn,
 } from './timeline.js';
-import type {ActivityEvent, ActivityExperiment, ActivityScenario, ActivitySession, ActivitySnapshot, EvidenceEvent, Json, Environment, Comparison, ReportEnvelope, TrainingRun, Trajectory, TrajectoryDataset, TrajectorySnapshot, TrajectorySummary, TurnSeriesResponse} from './types.js';
+import type {ActivityEvent, ActivityExperiment, ActivityScenario, ActivitySession, ActivityHierarchy, Session, EvidenceEvent, Json, Environment, Comparison, ReportEnvelope, TrainingRun, Trajectory, TrajectoryDataset, TrajectorySnapshot, TrajectorySummary, TurnSeriesResponse} from './types.js';
 
 // State
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -18,7 +18,7 @@ let reports: ReportEnvelope[] = [];
 let cursor = 0;
 let generation = 0;
 let sessionSync = 0;
-let activitySnapshot: ActivitySnapshot | null = null;
+let activityHierarchy: ActivityHierarchy | null = null;
 let trajectoryIndex: TrajectorySummary[] = [];
 let activityCursor = 0;
 let activityTimer = 0;
@@ -207,8 +207,8 @@ function scenarioTitle(item: {id: string; metadata: Record<string, Json>}) {
   return typeof name === 'string' && name.trim() ? name : item.id;
 }
 function groupedSessionTitle(id: string | undefined) {
-  if (!id || !activitySnapshot) return null;
-  for (const experiment of activitySnapshot.experiments) {
+  if (!id || !activityHierarchy) return null;
+  for (const experiment of activityHierarchy.experiments) {
     for (const scenario of experiment.scenarios) {
       const session = scenario.sessions.find(candidate => candidate.id === id);
       if (session) return `${scenarioTitle(scenario)} · Trial ${session.trial}`;
@@ -232,14 +232,39 @@ function sessionTitle(item: {participants?: string[]; id?: string; parent?: stri
   }
   return title(item);
 }
+/** Project one portable Session resource onto the viewer's session shape. */
+function sessionToEnvironment(session: Session): Environment {
+  const status = session.status;
+  return {
+    id: session.metadata.id,
+    revision: status.revision,
+    status: String(status.execution.state),
+    participants: session.spec.participants.map(participant => participant.id),
+    lineage: session.spec.lineage.root,
+    parent: session.spec.lineage.parent ?? null,
+    checkpoint: session.spec.lineage.checkpoint ?? null,
+    spent_micros: 0,
+    reserved_micros: 0,
+    environment: session.spec.environment,
+    experiment: {
+      environment: session.spec.environment,
+      participants: session.spec.participants as unknown as Json,
+      scenario: session.spec.scenario.id,
+      purpose: session.spec.purpose,
+      split: session.spec.split,
+      interventions: session.spec.lineage.interventions,
+      seed: session.spec.seed,
+    },
+  };
+}
 function mapping(value: Json | undefined): Record<string, Json> {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 const known = (id: string | null | undefined) => catalog.find(row => row.id === id);
 function reference(id: string | null | undefined) {const item = known(id); return item ? `${title(item)} ${shortId(id)}` : shortId(id);}
-const sessionPath = (id: string, tab: SessionTab) => `/session/${encodeURIComponent(id)}/${tab}`;
+const sessionPath = (id: string, tab: SessionTab) => `/sessions/${encodeURIComponent(id)}/${tab}`;
 function experimentPath(id: string, tab: ExperimentTab, scenario?: string) {
-  const root = `/experiment/${encodeURIComponent(id)}`;
+  const root = `/experiments/${encodeURIComponent(id)}`;
   if (tab === 'overview') return root;
   if (tab === 'scenarios' && scenario) return `${root}/scenarios/${encodeURIComponent(scenario)}`;
   return `${root}/${tab}`;
@@ -251,12 +276,12 @@ function positiveTurn(value: string | null) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed >= 1 ? parsed : undefined;
 }
-function selectionPath(path: '/home' | '/compare', environments: string[], view: ComparisonViewState = {}) {
+function selectionPath(path: '/overview' | '/comparisons', environments: string[], view: ComparisonViewState = {}) {
   const parameters = new URLSearchParams();
   for (const environment of [...new Set(environments)].slice(0, 100)) parameters.append('environment', environment);
-  if (path === '/compare' && view.metric) parameters.set('metric', view.metric);
-  if (path === '/compare' && view.startTurn !== undefined) parameters.set('start_turn', String(view.startTurn));
-  if (path === '/compare' && view.endTurn !== undefined) parameters.set('end_turn', String(view.endTurn));
+  if (path === '/comparisons' && view.metric) parameters.set('metric', view.metric);
+  if (path === '/comparisons' && view.startTurn !== undefined) parameters.set('start_turn', String(view.startTurn));
+  if (path === '/comparisons' && view.endTurn !== undefined) parameters.set('end_turn', String(view.endTurn));
   const query = parameters.toString();
   return path + (query ? `?${query}` : '');
 }
@@ -264,8 +289,8 @@ function routeFromLocation(): ViewerRoute | null {
   const path = location.pathname.replace(/\/$/, '') || '/';
   const parameters = new URLSearchParams(location.search);
   const environments = selectedEnvironments(parameters);
-  if (path === '/' || path === '/home') return {kind: 'home', environments};
-  if (path === '/compare') {
+  if (path === '/' || path === '/overview') return {kind: 'home', environments};
+  if (path === '/comparisons') {
     const metric = parameters.get('metric');
     const startTurn = positiveTurn(parameters.get('start_turn'));
     const endTurn = positiveTurn(parameters.get('end_turn'));
@@ -275,27 +300,27 @@ function routeFromLocation(): ViewerRoute | null {
       endTurn: endTurn !== undefined && (startTurn === undefined || endTurn >= startTurn) ? endTurn : undefined,
     }};
   }
-  const experimentScenario = path.match(/^\/experiment\/([^/]+)\/scenarios\/([^/]+)$/);
+  const experimentScenario = path.match(/^\/experiments\/([^/]+)\/scenarios\/([^/]+)$/);
   if (experimentScenario) {
     try {return {kind: 'experiment', id: decodeURIComponent(experimentScenario[1]), tab: 'scenarios', scenario: decodeURIComponent(experimentScenario[2])};}
     catch {return null;}
   }
-  const experimentSection = path.match(/^\/experiment\/([^/]+)\/(scenarios|sessions|training)$/);
+  const experimentSection = path.match(/^\/experiments\/([^/]+)\/(scenarios|sessions|training)$/);
   if (experimentSection) {
     try {return {kind: 'experiment', id: decodeURIComponent(experimentSection[1]), tab: experimentSection[2] as ExperimentTab};}
     catch {return null;}
   }
-  const experiment = path.match(/^\/experiment\/([^/]+)$/);
+  const experiment = path.match(/^\/experiments\/([^/]+)$/);
   if (experiment) {
     try {return {kind: 'experiment', id: decodeURIComponent(experiment[1]), tab: 'overview'};}
     catch {return null;}
   }
-  const trajectory = path.match(/^\/trajectory\/([^/]+)$/);
+  const trajectory = path.match(/^\/trajectories\/([^/]+)$/);
   if (trajectory) {
     try {return {kind: 'trajectory', id: decodeURIComponent(trajectory[1])};}
     catch {return null;}
   }
-  const match = path.match(/^\/session\/([^/]+)(?:\/(overview|turns|progression|reports))?$/);
+  const match = path.match(/^\/sessions\/([^/]+)(?:\/(overview|turns|progression|reports))?$/);
   if (!match) return null;
   try {
     return {kind: 'session', id: decodeURIComponent(match[1]), tab: (match[2] ?? 'overview') as SessionTab};
@@ -314,8 +339,8 @@ function restoreSelected(environments: string[]) {
 }
 function persistSelection() {
   const route = routeFromLocation();
-  if (route?.kind === 'home') setLocation(selectionPath('/home', [...selected]), true);
-  if (route?.kind === 'compare') setLocation(selectionPath('/compare', [...selected], route.view), true);
+  if (route?.kind === 'home') setLocation(selectionPath('/overview', [...selected]), true);
+  if (route?.kind === 'compare') setLocation(selectionPath('/comparisons', [...selected], route.view), true);
 }
 function markListSynced() {
   const now = new Date();
@@ -327,11 +352,13 @@ function markListSynced() {
 // API
 async function list() {
   const [listed, snapshot, trajectories] = await Promise.all([
-    client.list(), client.activitySnapshot(), client.trajectories().catch(() => []),
+    client.sessions(), client.activityHierarchy(), client.trajectories().catch(() => ({items: [], nextCursor: null, links: {self: '', next: null}})),
   ]);
-  catalog = listed.sort((a, b) => a.lineage.localeCompare(b.lineage) || Number(Boolean(a.parent)) - Number(Boolean(b.parent)) || a.id.localeCompare(b.id));
-  trajectoryIndex = trajectories;
-  activitySnapshot = snapshot; activityCursor = Math.max(activityCursor, snapshot.cursor);
+  catalog = listed.items
+    .map(sessionToEnvironment)
+    .sort((a, b) => a.lineage.localeCompare(b.lineage) || Number(Boolean(a.parent)) - Number(Boolean(b.parent)) || a.id.localeCompare(b.id));
+  trajectoryIndex = trajectories.items;
+  activityHierarchy = snapshot; activityCursor = Math.max(activityCursor, snapshot.cursor);
   renderList();
   renderImportedTrajectories();
   renderModeSummary();
@@ -364,14 +391,14 @@ async function refreshCurrentSession() {
   const generationTicket = generation;
   const syncTicket = ++sessionSync;
   const turnScroll = document.querySelector<HTMLElement>('.turn-detail')?.scrollTop ?? 0;
-  const item = await client.get(id);
+  const item = sessionToEnvironment(await client.session(id));
   if (generationTicket !== generation || syncTicket !== sessionSync || environment?.id !== id || routeFromLocation()?.kind !== 'session') return;
   environment = item;
   renderHeader(item, sessionTab);
   await loadEvents();
   if (generationTicket !== generation || syncTicket !== sessionSync || environment?.id !== id || routeFromLocation()?.kind !== 'session') return;
   try {
-    const loadedReports = await client.reports(id);
+    const loadedReports = (await client.scores(id)).items;
     if (generationTicket !== generation || syncTicket !== sessionSync || environment?.id !== id || routeFromLocation()?.kind !== 'session') return;
     reports = loadedReports;
     renderReports(reports);
@@ -402,7 +429,7 @@ async function activityTick() {
 async function attach(id: string, tab: SessionTab = 'overview', updateLocation = true) {
   const ticket = ++generation;
   sessionSync += 1;
-  const item = await client.get(id);
+  const item = sessionToEnvironment(await client.session(id));
   if (ticket !== generation) return;
   environment = item; cursor = 0; events = []; reports = [];
   const rangeEnd = el<HTMLInputElement>('compare-turn-end');
@@ -420,7 +447,7 @@ async function attach(id: string, tab: SessionTab = 'overview', updateLocation =
   renderList();
   await loadEvents();
   try {
-    const loadedReports = await client.reports(id);
+    const loadedReports = (await client.scores(id)).items;
     if (ticket === generation) {
       reports = loadedReports;
       renderReports(reports);
@@ -441,7 +468,7 @@ async function loadEvents() {
   const ticket = generation;
   let received = 0;
   while (true) {
-    const page = await client.events(environment.id, cursor);
+    const page = await client.evidence(environment.id, cursor);
     if (ticket !== generation) return;
     cursor = page.cursor; events = [...events, ...page.events]; received += page.events.length;
     if (page.events.length < 200) break;
@@ -479,8 +506,8 @@ async function runCompare(ids: string[], requestedView: ComparisonViewState = {}
   };
   renderComparison(result, sessions(projections), async (startTurn, endTurn) =>
     sessions(await loadSeries(startTurn, endTurn)), initialView, view =>
-      setLocation(selectionPath('/compare', ids, view), true));
-  if (hasRequestedWindow) setLocation(selectionPath('/compare', ids, initialView), true);
+      setLocation(selectionPath('/comparisons', ids, view), true));
+  if (hasRequestedWindow) setLocation(selectionPath('/comparisons', ids, initialView), true);
   el('comparison').textContent = json(result);
   el('compare-results').scrollIntoView({behavior: 'smooth', block: 'nearest'});
 }
@@ -515,11 +542,11 @@ function renderList() {
     holder.scrollTop = tableScroll.top; holder.scrollLeft = tableScroll.left;
   });
   holder.replaceChildren();
-  const snapshot = activitySnapshot && focusedExperiment ? {
-    ...activitySnapshot,
-    experiments: activitySnapshot.experiments.filter(item => item.id === focusedExperiment),
+  const snapshot = activityHierarchy && focusedExperiment ? {
+    ...activityHierarchy,
+    experiments: activityHierarchy.experiments.filter(item => item.id === focusedExperiment),
     standalone: [],
-  } : activitySnapshot;
+  } : activityHierarchy;
   const totalSessions = snapshot ? snapshot.standalone.length + snapshot.experiments.reduce((sum, item) => sum + item.sessions.length, 0) : catalog.length;
   el('experiment-count').textContent = String(snapshot?.experiments.length ?? 0);
   el('scenario-count').textContent = String(snapshot?.experiments.reduce((sum, item) => sum + item.scenarios.length, 0) ?? 0);
@@ -659,7 +686,7 @@ function standaloneActivityRow(session: ActivitySession) {
     text('span', formatCompactCount(session.current_turn), 'home-session-value'));
   return row;
 }
-function renderActivityRows(holder: HTMLElement, snapshot: ActivitySnapshot, query: string, status: string, sort: string) {
+function renderActivityRows(holder: HTMLElement, snapshot: ActivityHierarchy, query: string, status: string, sort: string) {
   const header = text('div', '', 'home-session-row home-session-columns');
   for (const label of ['', 'Name', 'Type', 'Status', 'Sessions', 'Turns']) header.append(text('span', label));
   holder.append(header);
@@ -700,7 +727,7 @@ function renderActivityRows(holder: HTMLElement, snapshot: ActivitySnapshot, que
     };
     const identity = text('span', '', 'home-session-cell experiment-identity');
     const name = text('a', item.name, 'experiment-name') as HTMLAnchorElement;
-    name.href = `/experiment/${encodeURIComponent(item.id)}`;
+    name.href = `/experiments/${encodeURIComponent(item.id)}`;
     name.onclick = event => {event.preventDefault(); event.stopPropagation(); showExperiment(item.id);};
     const forcedOpen = Boolean(hasFilter && matches.length);
     const open = expandedExperiments.has(item.id) || forcedOpen;
@@ -783,7 +810,7 @@ function renderBreadcrumbs(items: BreadcrumbItem[] = []) {
   });
 }
 function renderSessionBreadcrumbs(item: Environment) {
-  const parent = activitySnapshot?.experiments.find(experiment =>
+  const parent = activityHierarchy?.experiments.find(experiment =>
     experiment.sessions.some(session => session.id === item.id));
   renderBreadcrumbs(parent ? [
     {label: parent.name, href: experimentPath(parent.id, 'overview'), activate: () => showExperiment(parent.id)},
@@ -983,17 +1010,17 @@ function showHome(updateLocation = true) {
   el('home-list-content').hidden = false;
   renderImportedTrajectories();
   renderBreadcrumbs();
-  el('home-eyebrow').textContent = 'Home';
+  el('home-eyebrow').textContent = 'Overview';
   el('home-title').textContent = 'Environment Sessions';
   el('home-description').textContent = 'Find a run, investigate what changed, or select sessions to compare.';
   el('home-list-title').textContent = 'All Sessions';
   document.title = 'Environment Sessions · EnvironmentHarness';
-  if (updateLocation) setLocation(selectionPath('/home', [...selected]));
+  if (updateLocation) setLocation(selectionPath('/overview', [...selected]));
   renderList();
 }
 async function renderExperimentTraining(item: ActivityExperiment, active: boolean) {
   const sessionTrajectories = new Set(item.sessions.map(session => `trajectory-${session.id}`));
-  const datasets = (await client.trajectoryDatasets({limit: 100})).filter(dataset =>
+  const datasets = (await client.datasets({limit: 100})).items.filter(dataset =>
     dataset.spec.members.some(member => sessionTrajectories.has(member.trajectoryId)));
   if (focusedExperiment !== item.id) return;
   const tab = document.querySelector<HTMLButtonElement>('[data-experiment-tab="training"]');
@@ -1007,7 +1034,7 @@ async function renderExperimentTraining(item: ActivityExperiment, active: boolea
     holder.append(text('p', 'No training dataset has been frozen from this experiment.', 'muted training-zero'));
     return;
   }
-  const runs = (await client.trainingRuns({limit: 100})).filter(run =>
+  const runs = (await client.trainingRuns({limit: 100})).items.filter(run =>
     datasets.some(dataset => dataset.metadata.id === run.spec.datasetId));
   if (focusedExperiment !== item.id) return;
   for (const dataset of datasets) {
@@ -1045,7 +1072,7 @@ function renderTrainingRun(run: TrainingRun) {
   return row;
 }
 function showExperiment(id: string, tab: ExperimentTab = 'overview', scenario?: string, updateLocation = true) {
-  const item = activitySnapshot?.experiments.find(experiment => experiment.id === id);
+  const item = activityHierarchy?.experiments.find(experiment => experiment.id === id);
   focusedExperiment = id;
   focusedScenario = scenario ?? null;
   expandedExperiments.add(id);
@@ -1090,7 +1117,7 @@ async function showTrajectory(id: string, updateLocation = true) {
   sessionSync += 1;
   const [trajectory, page, snapshots] = await Promise.all([
     client.trajectory(id), client.trajectoryRecords(id, {limit: 200}),
-    client.trajectorySnapshots(id),
+    client.trajectorySnapshots(id).then(page => page.items),
   ]);
   if (ticket !== generation) return;
   focusedExperiment = null; focusedScenario = null;
@@ -1119,7 +1146,7 @@ async function showTrajectory(id: string, updateLocation = true) {
   const records = el('trajectory-records'); records.replaceChildren();
   for (const record of page.records) {
     const row = text('article', '', 'trajectory-record');
-    const nativeTime = record.time.native.map(clock => `${clock.clock}: ${displayValue(clock.value)}`).join(' · ');
+    const nativeTime = (record.time.native ?? []).map(clock => `${clock.clock}: ${displayValue(clock.value)}`).join(' · ');
     row.append(text('span', String(record.sequence), 'trajectory-record-sequence'),
       text('strong', record.type),
       text('span', record.participant ? participantName(record.participant) : 'Shared', 'muted'),
@@ -1130,7 +1157,7 @@ async function showTrajectory(id: string, updateLocation = true) {
   if (!page.records.length) records.append(text('p', 'No authorized records are available.', 'muted'));
   if (page.has_more) records.append(text('p', 'More records are available through the paged API.', 'muted'));
   document.title = `${runId} · EnvironmentHarness`;
-  if (updateLocation) setLocation(`/trajectory/${encodeURIComponent(id)}`);
+  if (updateLocation) setLocation(`/trajectories/${encodeURIComponent(id)}`);
 }
 function renderTrajectorySnapshots(snapshots: TrajectorySnapshot[]) {
   const holder = el('trajectory-snapshots'); holder.replaceChildren();
@@ -1192,7 +1219,7 @@ function showCompareSessions(updateLocation = true, showPicker = selected.size <
   document.body.classList.remove('viewer-home', 'viewer-session');
   document.body.classList.add('viewer-compare');
   document.title = 'Compare Sessions · EnvironmentHarness';
-  if (updateLocation) setLocation(selectionPath('/compare', [...selected]));
+  if (updateLocation) setLocation(selectionPath('/comparisons', [...selected]));
   renderCompareSessionList();
 }
 function renderHeader(item: Environment, tab: SessionTab = 'overview') {
@@ -2241,7 +2268,7 @@ function renderComparisonReports(holder: HTMLElement, result: Comparison) {
 // Connection
 async function connect(token: string) {
   client = new EnvironmentClient(location.origin, token, true);
-  await client.request('GET', '/v1/environment');
+  await client.capabilities();
   activeCredential = token;
   el<HTMLInputElement>('token').value = '';
   el('access').hidden = true; el('site-header').hidden = true;
@@ -2257,7 +2284,7 @@ async function restoreRoute() {
   const route = routeFromLocation();
   if (!route) {
     showHome(false);
-    setLocation('/home', true);
+    setLocation('/overview', true);
   } else if (route.kind === 'session') {
     await attach(route.id, route.tab, false);
     setLocation(sessionPath(route.id, route.tab), true);
@@ -2265,17 +2292,17 @@ async function restoreRoute() {
     restoreSelected(route.environments);
     showCompareSessions(false, selected.size < 2);
     if (selected.size >= 2) await runCompare([...selected], route.view);
-    else setLocation(selectionPath('/compare', [...selected], route.view), true);
+    else setLocation(selectionPath('/comparisons', [...selected], route.view), true);
   } else if (route.kind === 'experiment') {
     showExperiment(route.id, route.tab, route.scenario, false);
     setLocation(experimentPath(route.id, route.tab, route.scenario), true);
   } else if (route.kind === 'trajectory') {
     await showTrajectory(route.id, false);
-    setLocation(`/trajectory/${encodeURIComponent(route.id)}`, true);
+    setLocation(`/trajectories/${encodeURIComponent(route.id)}`, true);
   } else {
     restoreSelected(route.environments);
     showHome(false);
-    setLocation(selectionPath('/home', [...selected]), true);
+    setLocation(selectionPath('/overview', [...selected]), true);
   }
 }
 

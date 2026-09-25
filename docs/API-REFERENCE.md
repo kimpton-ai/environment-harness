@@ -55,6 +55,7 @@ The examples below use these placeholders:
 export SESSION_ID="env_example"
 export EXPERIMENT_ID="experiment_example"
 export ARTIFACT_KEY="artifact_example"
+export SNAPSHOT_ID="snapshot_example"
 ```
 
 ## Endpoint summary
@@ -62,30 +63,105 @@ export ARTIFACT_KEY="artifact_example"
 | Method and path | Credential policies | Purpose |
 | --- | --- | --- |
 | `GET /health` | Public | Check service and protocol health. |
-| `GET /v1/environment` | Any valid credential | Read the active environment contract. |
-| `POST /v1/environments` | Management | Create an environment session idempotently. |
-| `GET /v1/environments` | Management | List environment sessions. |
-| `GET /v1/environments/{environment}` | Any valid credential | Read one authorized environment session. |
-| `GET /v1/environments/{environment}/observation` | Any valid credential | Read a participant-specific observation. |
-| `POST /v1/environments/{environment}/actions` | Participant | Submit a participant action. |
-| `GET /v1/environments/{environment}/events` | Any valid credential | Read authorized evidence as JSON or SSE. |
-| `GET /v1/activity/events` | Management, viewer | Read tenant activity as JSON or SSE. |
-| `GET /v1/activity/snapshot` | Management, viewer | Read the current experiment, scenario, and environment-session hierarchy. |
-| `GET /v1/experiments/{experiment}/events` | Management, viewer | Read activity for one experiment. |
-| `GET /v1/environments/{environment}/activity` | Management, viewer | Read activity for one environment session. |
-| `GET /v1/environments/{environment}/agent-work` | Management, viewer, participant | Read agent-work records. |
-| `POST /v1/environments/{environment}/commands` | Management; command-specific | Execute a lifecycle command. |
-| `POST /v1/environments/{environment}/credentials` | Management | Issue a scoped participant credential. |
-| `POST /v1/environments/{environment}/operations` | Participant | Persist an authorized external-operation intent. |
-| `POST /v1/environments/{environment}/artifacts` | Any valid credential | Store an authorized artifact. |
-| `GET /v1/environments/{environment}/artifacts/{key}` | Any valid credential | Download an authorized artifact. |
-| `GET /v1/environments/{environment}/reports` | Management, viewer | List versioned score reports. |
-| `POST /v1/environments/{environment}/reports` | Management, viewer | Publish a versioned score report. |
-| `GET /v1/environments/{environment}/turn-series` | Management, viewer | Read bounded turn-level evidence series for analysis and visualization. |
-| `GET /v1/environments/{environment}/export` | Any valid credential | Stream evidence or entitled training rows as NDJSON. |
-| `POST /v1/compare` | Management, viewer | Compare 1 to 100 environment sessions. |
+| `GET /v1/capabilities` | Any valid credential | Discover which conditionally available capabilities are enabled. |
+| `GET /v1/scenario-sets` | Management, viewer | List frozen scenario sets. |
+| `GET /v1/scenario-sets/{scenario_set_id}` | Management, viewer | Get a frozen scenario set. |
+| `POST /v1/experiments` | Management | Create an experiment and queue its sessions. |
+| `GET /v1/experiments` | Management, viewer | List experiments. |
+| `GET /v1/experiments/{experiment_id}` | Management, viewer | Get an experiment. |
+| `GET /v1/experiments/{experiment_id}/sessions` | Management, viewer | List the sessions an experiment derived. |
+| `GET /v1/experiments/{experiment_id}/scores` | Management, viewer | List score reports across an experiment. |
+| `GET /v1/experiments/{experiment_id}/activity` | Management, viewer | Read activity for one experiment. |
+| `GET /v1/sessions` | Any valid credential | List environment sessions. |
+| `GET /v1/sessions/{session_id}` | Any valid credential | Get one authorized environment session. |
+| `GET /v1/sessions/{session_id}/participants/{participant_id}/observation` | Any valid credential | Read a participant-specific observation. |
+| `POST /v1/sessions/{session_id}/participants/{participant_id}/actions` | Participant | Submit a participant action. |
+| `POST /v1/sessions/{session_id}/participants/{participant_id}/credentials` | Management | Issue a scoped participant credential. |
+| `GET /v1/sessions/{session_id}/checkpoints` | Any valid credential | List immutable checkpoints. |
+| `POST /v1/sessions/{session_id}/checkpoints` | Management | Freeze an immutable checkpoint. |
+| `GET /v1/sessions/{session_id}/checkpoints/{checkpoint_id}` | Any valid credential | Get an immutable checkpoint. |
+| `POST /v1/sessions/{session_id}/branches` | Management | Create a child session from a checkpoint. |
+| `POST /v1/sessions/{session_id}/commands` | Management | Run a lifecycle command; returns `202` and a typed receipt. |
+| `GET /v1/sessions/{session_id}/invocations` | Any valid credential | List durable agent invocations. |
+| `POST /v1/sessions/{session_id}/operations` | Participant | Persist an authorized external-operation intent. |
+| `GET /v1/sessions/{session_id}/evidence` | Any valid credential | Read authorized evidence as JSON or SSE. |
+| `POST /v1/sessions/{session_id}/artifacts` | Management, participant | Store an authorized artifact. |
+| `GET /v1/sessions/{session_id}/artifacts/{artifact_id}` | Any valid credential | Download an authorized artifact. |
+| `GET /v1/sessions/{session_id}/scores` | Management, viewer | List versioned score reports. |
+| `POST /v1/sessions/{session_id}/scores` | Management | Publish a versioned score report. |
+| `GET /v1/sessions/{session_id}/turn-series` | Management, viewer | Read bounded turn-level evidence series. |
+| `GET /v1/sessions/{session_id}/activity` | Management, viewer | Read activity for one environment session. |
+| `GET /v1/policies` | Any valid credential | List derived policy resources. |
+| `GET /v1/policies/{policy_id}` | Any valid credential | Get a derived policy resource. |
+| `GET /v1/trajectories` | Management, viewer | List native and imported trajectories. |
+| `GET /v1/trajectories/{trajectory_id}` | Management, viewer | Get a portable trajectory. |
+| `GET /v1/trajectories/{trajectory_id}/records` | Management, viewer | Page through trajectory records. |
+| `GET /v1/trajectories/{trajectory_id}/scores` | Management, viewer | List score reports a trajectory references. |
+| `GET /v1/trajectories/{trajectory_id}/snapshots` | Management, viewer | List snapshots frozen for one trajectory. |
+| `POST /v1/trajectories/{trajectory_id}/snapshots` | Management, viewer | Freeze an authorized trajectory snapshot. |
+| `GET /v1/snapshots` | Management, viewer | List immutable trajectory snapshots. |
+| `GET /v1/snapshots/{snapshot_id}` | Management, viewer | Get an immutable trajectory snapshot. |
+| `GET /v1/snapshots/{snapshot_id}/records` | Management, viewer | Read snapshot records as a JSON page or streamed NDJSON. |
+| `POST /v1/datasets` | Management | Freeze a training-entitled trajectory dataset. |
+| `GET /v1/datasets` | Management, viewer | List immutable trajectory datasets. |
+| `GET /v1/datasets/{dataset_id}` | Management, viewer | Get an immutable trajectory dataset. |
+| `GET /v1/datasets/{dataset_id}/records` | Management, viewer | Read dataset records as a JSON page or streamed NDJSON. |
+| `GET /v1/training-runs` | Management, viewer | List recorded local training results. |
+| `GET /v1/training-runs/{training_run_id}` | Management, viewer | Get a recorded local training result. |
+| `POST /v1/sources` | Management | Register an external trajectory source. |
+| `GET /v1/sources` | Management, viewer | List registered external sources. |
+| `GET /v1/sources/{source_id}` | Management, viewer | Get a registered external source. |
+| `GET /v1/sources/{source_id}/status` | Management, viewer | Inspect source collection and execution status. |
+| `POST /v1/sources/{source_id}/status-reports` | Management | Declare source collection and execution status. |
+| `GET /v1/sources/{source_id}/records` | Management, viewer | Page through ingested source records. |
+| `POST /v1/sources/{source_id}/records` | Management | Ingest a bounded source batch. |
+| `POST /v1/comparisons` | Management, viewer | Compare 1 to 100 environment sessions. |
+| `GET /v1/activity` | Management, viewer | Read tenant activity as JSON or SSE. |
+| `GET /v1/activity/hierarchy` | Management, viewer | Read the current experiment, scenario, and session hierarchy. |
 
-`{environment}` is always an environment-session ID, despite the historical plural route name.
+Hyphenation is limited to `scenario-sets`, `training-runs`, `turn-series`, and `status-reports`.
+Snapshots, datasets, and sources are top-level because they are independently addressable; creating
+a snapshot stays nested under its owning trajectory.
+
+### Management collections versus durable feeds
+
+Management collection indexes share one typed envelope with an opaque cursor and RFC `Link` headers:
+
+```json
+{"items": [], "nextCursor": null, "links": {"self": "/v1/sessions", "next": null}}
+```
+
+Ordered evidence and activity feeds are a different contract. `TrajectoryRecordPage` keeps its
+durable integer `sequence` cursor, and `ActivityPage` keeps its durable event cursor for JSON and
+SSE resume. Those source positions are never made opaque just to reuse the management envelope.
+
+### Content negotiation
+
+`GET /v1/snapshots/{id}/records` and `GET /v1/datasets/{id}/records` return the typed JSON cursor
+page by default and stream NDJSON when the request sends `Accept: application/x-ndjson`. There is no
+`/export` verb path. OpenAPI documents both media types; generated clients decode the JSON page,
+while streaming uses the explicit hand-written iterator (`stream_snapshot_records` in Python,
+`streamSnapshotRecords` in TypeScript).
+
+### Deployment capabilities
+
+`GET /v1/capabilities` returns only non-secret capability names with `enabled` and an optional
+public reason. Every conditionally available operation declares its capability through
+`x-capability`. Calling a disabled capability returns `501 capability_unavailable` with the same
+name; a transient failure of an enabled capability returns `503 service_unavailable`.
+
+Historical ingestion is disabled by default and must be enabled explicitly with
+`create_app(harness, trajectory_ingestion=True)`.
+
+### Migrating from 0.2
+
+Every operation published by `0.2.4rc2` is classified exactly once in
+[`contracts/migrations/http-0.2-to-0.3.json`](../contracts/migrations/http-0.2-to-0.3.json). The
+generated human tables are in [HTTP migration](HTTP-MIGRATION.md). CI regenerates both from the
+frozen inventory and the internal authorization registry, so this documentation cannot drift from
+enforcement.
+
+
 
 ## Service and contract
 
@@ -103,7 +179,7 @@ curl --fail-with-body "$EH_URL/health"
 
 ```sh
 curl --fail-with-body -H "Authorization: Bearer $EH_TOKEN" \
-  "$EH_URL/v1/environment"
+  "$EH_URL/v1/capabilities"
 ```
 
 The response is an `EnvironmentSpec`. It declares the environment implementation, observation and action JSON Schemas, scheduling mode, modalities, capabilities, purposes, environment-supplied operation identities, and phase behavior. The versioned schema is [`EnvironmentSpec.schema.json`](../contracts/EnvironmentSpec.schema.json); reusable operation identity and JSON configuration use [`OperationSpec.schema.json`](../contracts/OperationSpec.schema.json).
@@ -120,7 +196,7 @@ curl --fail-with-body -X POST \
   -H "Content-Type: application/json" \
   -H "X-Operation-ID: 00000000000000000000000000000000" \
   --data @experiment.json \
-  "$EH_URL/v1/environments"
+  "$EH_URL/v1/experiments"
 ```
 
 The body is an [`ExperimentSpec`](../contracts/ExperimentSpec.schema.json). A successful response is the created environment-session record:
@@ -138,14 +214,14 @@ The body is an [`ExperimentSpec`](../contracts/ExperimentSpec.schema.json). A su
 
 ```sh
 curl --fail-with-body -H "Authorization: Bearer $EH_TOKEN" \
-  "$EH_URL/v1/environments?limit=100"
+  "$EH_URL/v1/sessions?limit=100"
 ```
 
 The response is an array of tenant-visible environment-session records in descending ID order. When another page exists, the response includes both `X-Next-Cursor` and a relative `Link` header with `rel="next"`:
 
 ```http
 X-Next-Cursor: 0123456789abcdef0123456789abcdef
-Link: </v1/environments?limit=100&cursor=0123456789abcdef0123456789abcdef>; rel="next"
+Link: </v1/sessions?limit=100&cursor=0123456789abcdef0123456789abcdef>; rel="next"
 ```
 
 Pass that cursor unchanged; clients must not construct or interpret it. The final page omits both headers. Page size is bounded to 1–1,000, and keyset pagination avoids increasingly expensive offsets.
@@ -154,7 +230,7 @@ Pass that cursor unchanged; clients must not construct or interpret it. The fina
 
 ```sh
 curl --fail-with-body -H "Authorization: Bearer $EH_TOKEN" \
-  "$EH_URL/v1/environments/$SESSION_ID"
+  "$EH_URL/v1/sessions/$SESSION_ID"
 ```
 
 The response includes the current status, revision, frozen manifest, participants, lineage, budget state, and timestamps visible to the caller.
@@ -165,7 +241,7 @@ A participant credential is already bound to its participant. A management or vi
 
 ```sh
 curl --fail-with-body -H "Authorization: Bearer $EH_TOKEN" \
-  "$EH_URL/v1/environments/$SESSION_ID/observation?participant=alice"
+  "$EH_URL/v1/sessions/$SESSION_ID/participants/alice/observation"
 ```
 
 ```json
@@ -197,7 +273,7 @@ curl --fail-with-body -X POST \
     "revision":2,
     "payload":{"value":1}
   }' \
-  "$EH_URL/v1/environments/$SESSION_ID/actions"
+  "$EH_URL/v1/sessions/$SESSION_ID/participants/alice/actions"
 ```
 
 The response is the accepted action receipt or the previously committed receipt for an identical retry.
@@ -206,7 +282,7 @@ The response is the accepted action receipt or the previously committed receipt 
 
 ```sh
 curl --fail-with-body -H "Authorization: Bearer $EH_TOKEN" \
-  "$EH_URL/v1/environments/$SESSION_ID/agent-work?limit=100"
+  "$EH_URL/v1/sessions/$SESSION_ID/invocations?limit=100"
 ```
 
 ```json
@@ -226,7 +302,7 @@ curl --fail-with-body -X POST \
   -H "Authorization: Bearer $EH_TOKEN" \
   -H "Content-Type: application/json" \
   --data '{"operation":"cancel","arguments":{}}' \
-  "$EH_URL/v1/environments/$SESSION_ID/commands"
+  "$EH_URL/v1/sessions/$SESSION_ID/commands"
 ```
 
 The command envelope is always:
@@ -264,7 +340,7 @@ curl --fail-with-body -X POST \
   -H "Authorization: Bearer $EH_TOKEN" \
   -H "Content-Type: application/json" \
   --data '{"participant":"alice","ttl":3600}' \
-  "$EH_URL/v1/environments/$SESSION_ID/credentials"
+  "$EH_URL/v1/sessions/$SESSION_ID/participants/alice/credentials"
 ```
 
 ```json
@@ -289,7 +365,7 @@ curl --fail-with-body -X POST \
     "maximum_cost_micros":1000,
     "write":false
   }' \
-  "$EH_URL/v1/environments/$SESSION_ID/operations"
+  "$EH_URL/v1/sessions/$SESSION_ID/operations"
 ```
 
 ```json
@@ -302,7 +378,7 @@ curl --fail-with-body -X POST \
 
 ```sh
 curl --fail-with-body -H "Authorization: Bearer $EH_TOKEN" \
-  "$EH_URL/v1/environments/$SESSION_ID/events?after=0&limit=200"
+  "$EH_URL/v1/sessions/$SESSION_ID/evidence?after=0&limit=200"
 ```
 
 ```json
@@ -318,7 +394,7 @@ curl --no-buffer \
   -H "Authorization: Bearer $EH_TOKEN" \
   -H "Accept: text/event-stream" \
   -H "Last-Event-ID: 42" \
-  "$EH_URL/v1/environments/$SESSION_ID/events"
+  "$EH_URL/v1/sessions/$SESSION_ID/evidence"
 ```
 
 ### Read activity
@@ -327,13 +403,13 @@ The global, experiment, and environment-session feeds share `after`, `limit`, `A
 
 ```sh
 curl --fail-with-body -H "Authorization: Bearer $EH_TOKEN" \
-  "$EH_URL/v1/activity/events?after=0&limit=200"
+  "$EH_URL/v1/activity?after=0&limit=200"
 
 curl --fail-with-body -H "Authorization: Bearer $EH_TOKEN" \
-  "$EH_URL/v1/experiments/$EXPERIMENT_ID/events?after=0&limit=200"
+  "$EH_URL/v1/experiments/$EXPERIMENT_ID/activity?after=0&limit=200"
 
 curl --fail-with-body -H "Authorization: Bearer $EH_TOKEN" \
-  "$EH_URL/v1/environments/$SESSION_ID/activity?after=0&limit=200"
+  "$EH_URL/v1/sessions/$SESSION_ID/activity?after=0&limit=200"
 ```
 
 ```json
@@ -363,7 +439,7 @@ JSON response and the alternate `text/event-stream` representation.
 
 ```sh
 curl --fail-with-body -H "Authorization: Bearer $EH_TOKEN" \
-  "$EH_URL/v1/activity/snapshot"
+  "$EH_URL/v1/activity/hierarchy"
 ```
 
 The response contains current experiment, scenario, and environment-session records plus the current global activity cursor. Experiment records include the frozen environment, participant, execution, policy, operation, and scoring configuration shared by their sessions. Scenario records preserve their immutable input, reference, and metadata snapshots. It is the recovery source for clients that miss activity events.
@@ -379,7 +455,7 @@ curl --fail-with-body -X POST \
   -H "Authorization: Bearer $EH_TOKEN" \
   -H "Content-Type: application/json" \
   --data-binary @result.json \
-  "$EH_URL/v1/environments/$SESSION_ID/artifacts"
+  "$EH_URL/v1/sessions/$SESSION_ID/artifacts"
 ```
 
 The response identifies the stored artifact:
@@ -398,7 +474,7 @@ Download authorized bytes with:
 ```sh
 curl --fail-with-body -H "Authorization: Bearer $EH_TOKEN" \
   --output result.json \
-  "$EH_URL/v1/environments/$SESSION_ID/artifacts/$ARTIFACT_KEY"
+  "$EH_URL/v1/sessions/$SESSION_ID/artifacts/$ARTIFACT_KEY"
 ```
 
 The download response uses `application/octet-stream` and a `Content-Disposition` filename. Authorization is checked against the environment session and artifact audience before any bytes are returned.
@@ -409,7 +485,7 @@ The download response uses `application/octet-stream` and a `Content-Disposition
 
 ```sh
 curl --fail-with-body -H "Authorization: Bearer $EH_TOKEN" \
-  "$EH_URL/v1/environments/$SESSION_ID/reports"
+  "$EH_URL/v1/sessions/$SESSION_ID/scores"
 ```
 
 The response is an array of versioned report envelopes ordered by report revision.
@@ -421,7 +497,7 @@ curl --fail-with-body -X POST \
   -H "Authorization: Bearer $EH_TOKEN" \
   -H "Content-Type: application/json" \
   --data @score-report.json \
-  "$EH_URL/v1/environments/$SESSION_ID/reports"
+  "$EH_URL/v1/sessions/$SESSION_ID/scores"
 ```
 
 The body follows [`ScoreReport.schema.json`](../contracts/ScoreReport.schema.json). It identifies the scorer and version, the evidence cursor, metrics and their definitions, findings, rewards, uncertainty, and provenance. The response is the stored report envelope with its revision.
@@ -430,7 +506,7 @@ The body follows [`ScoreReport.schema.json`](../contracts/ScoreReport.schema.jso
 
 ```sh
 curl --fail-with-body -H "Authorization: Bearer $EH_TOKEN" \
-  "$EH_URL/v1/environments/$SESSION_ID/turn-series?start_turn=1&end_turn=5000&max_points=300"
+  "$EH_URL/v1/sessions/$SESSION_ID/turn-series?start_turn=1&end_turn=5000&max_points=300"
 ```
 
 The response projects public numeric signals, cumulative reward, and cumulative executed actions onto environment-session turns. `start_turn` and `end_turn` select a window; `max_points` is bounded from 20 to 1000 per series. When a series exceeds that limit, the projection retains its endpoints and bucket extrema so long sessions remain readable without hiding spikes.
@@ -439,7 +515,7 @@ The response projects public numeric signals, cumulative reward, and cumulative 
 
 ```sh
 curl --fail-with-body -H "Authorization: Bearer $EH_TOKEN" \
-  "$EH_URL/v1/environments/$SESSION_ID/export?format=evidence" \
+  "$EH_URL/v1/snapshots/$SNAPSHOT_ID/records" \
   --output evidence.ndjson
 ```
 
@@ -452,7 +528,7 @@ curl --fail-with-body -X POST \
   -H "Authorization: Bearer $EH_TOKEN" \
   -H "Content-Type: application/json" \
   --data '{"environments":["env_original","env_branch"]}' \
-  "$EH_URL/v1/compare"
+  "$EH_URL/v1/comparisons"
 ```
 
 The request accepts 1 to 100 authorized environment-session IDs. The response contains session lineage, selected report revisions, metric groups, warnings, raw values, and aggregate summaries. Related turns and branches are not treated as independent experiments.
@@ -465,17 +541,17 @@ The request accepts 1 to 100 authorized environment-session IDs. The response co
 | `GET /v1/trajectories/{id}` | Always authenticated | Read one portable trajectory projection. |
 | `GET /v1/trajectories/{id}/records` | Always authenticated | Page records with `after` and bounded `limit`. |
 | `POST /v1/trajectories/{id}/snapshots` | Always authenticated | Freeze the caller's authorized trajectory projection. |
-| `GET /v1/trajectory-snapshots?trajectory={id}` | Always authenticated | List the trajectory's immutable snapshot boundaries for inspection. |
-| `GET /v1/trajectory-snapshots/{id}` | Always authenticated | Read immutable snapshot boundaries and digests. |
-| `GET /v1/trajectory-snapshots/{id}/export` | Always authenticated | Stream snapshot manifest and records as NDJSON. |
-| `GET /v1/trajectory-sources/{id}/status` | Always authenticated | Inspect acknowledgement and collection/execution/outcome health. |
-| `POST /v1/trajectory-sources` | Configured ingestion only | Register an immutable namespaced source/run identity. |
-| `POST /v1/trajectory-sources/{id}/records` | Configured ingestion only | Ingest 1–1000 hash-chained records. |
-| `PUT /v1/trajectory-sources/{id}/status` | Configured ingestion only | Record source health; it never executes the source. |
-| `POST /v1/trajectory-datasets` | Always authenticated | Freeze complete training-entitled trajectories. |
-| `GET /v1/trajectory-datasets` | Always authenticated | List immutable datasets. |
-| `GET /v1/trajectory-datasets/{id}` | Always authenticated | Read one dataset. |
-| `GET /v1/trajectory-datasets/{id}/export` | Always authenticated | Stream its snapshots and records as NDJSON. |
+| `GET /v1/trajectories/{id}/snapshots` | Always authenticated | List the trajectory's immutable snapshot boundaries for inspection. |
+| `GET /v1/snapshots/{id}` | Always authenticated | Read immutable snapshot boundaries and digests. |
+| `GET /v1/snapshots/{id}/records` | Always authenticated | Read snapshot records as a JSON page, or stream NDJSON with `Accept: application/x-ndjson`. |
+| `GET /v1/sources/{id}/status` | Always authenticated | Inspect acknowledgement and collection/execution/outcome health. |
+| `POST /v1/sources` | Configured ingestion only | Register an immutable namespaced source/run identity. |
+| `POST /v1/sources/{id}/records` | Configured ingestion only | Ingest 1–1000 hash-chained records. |
+| `PUT /v1/sources/{id}/status` | Configured ingestion only | Record source health; it never executes the source. |
+| `POST /v1/datasets` | Always authenticated | Freeze complete training-entitled trajectories. |
+| `GET /v1/datasets` | Always authenticated | List immutable datasets. |
+| `GET /v1/datasets/{id}` | Always authenticated | Read one dataset. |
+| `GET /v1/datasets/{id}/records` | Always authenticated | Stream its snapshots and records as NDJSON. |
 | `GET /v1/training-runs` | Always authenticated | List recorded local integration receipts. |
 | `GET /v1/training-runs/{id}` | Always authenticated | Read one recorded receipt. |
 

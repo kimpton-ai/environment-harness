@@ -968,6 +968,48 @@ class TrajectoryRepository:
             verified_outcome=VerifiedOutcome.model_validate_json(row["verified_outcome"]),
         )
 
+    def list_sources(self, access, *, limit: int = 100) -> tuple[SourceStatus, ...]:
+        """List every registered source's collection and execution status."""
+
+        access.require("trajectory.read")
+        if not 1 <= limit <= 1000:
+            raise ValueError("invalid source page size")
+        with self.store.transaction() as db:
+            rows = db.execute(
+                "SELECT id FROM trajectory_sources WHERE tenant=? ORDER BY created DESC,id LIMIT ?",
+                (access.tenant, limit),
+            ).fetchall()
+        return tuple(self.source_status(row["id"], access) for row in rows)
+
+    def snapshot_records_page(
+        self, snapshot: str, access, *, after: int = 0, limit: int = 200
+    ) -> TrajectoryRecordPage:
+        """Page through one frozen snapshot's ordered records."""
+
+        access.require("trajectory.read")
+        if after < 0 or not 1 <= limit <= 1000:
+            raise ValueError("invalid snapshot record page")
+        body = self._snapshot_body(snapshot, access)
+        if "records" in body:
+            # Read prerelease snapshots written before normalized record storage.
+            selected = [
+                record
+                for record in body["records"]
+                if isinstance(record.get("sequence"), int) and record["sequence"] > after
+            ][: limit + 1]
+            records = tuple(TrajectoryRecord.model_validate(item) for item in selected[:limit])
+            cursor = records[-1].sequence if records else after
+            return TrajectoryRecordPage(records=records, cursor=cursor, has_more=len(selected) > limit)
+        with self.store.transaction() as db:
+            rows = db.execute(
+                "SELECT sequence,body FROM trajectory_snapshot_records WHERE snapshot=? AND sequence>? "
+                "ORDER BY sequence LIMIT ?",
+                (snapshot, after, limit + 1),
+            ).fetchall()
+        records = tuple(TrajectoryRecord.model_validate_json(row["body"]) for row in rows[:limit])
+        cursor = records[-1].sequence if records else after
+        return TrajectoryRecordPage(records=records, cursor=cursor, has_more=len(rows) > limit)
+
     def get(self, environment: str, access) -> Trajectory:
         with self.store.transaction() as db:
             native = db.execute("SELECT 1 FROM environments WHERE id=?", (environment,)).fetchone()
@@ -1356,6 +1398,23 @@ class TrajectoryRepository:
                 (access.tenant, environment, limit),
             ).fetchall()
         return [TrajectorySnapshot.model_validate(json.loads(row["body"])["snapshot"]) for row in rows]
+
+    def list_all_snapshots(self, access, *, trajectory=None, limit: int = 100):
+        """List immutable snapshots across the authority, newest first."""
+
+        access.require("trajectory.read")
+        if not 1 <= limit <= 1000:
+            raise ValueError("invalid snapshot page size")
+        environment = trajectory
+        if environment is not None and environment.startswith("trajectory-"):
+            environment = environment[len("trajectory-") :]
+        with self.store.transaction() as db:
+            rows = db.execute(
+                "SELECT body FROM trajectory_snapshots WHERE tenant=? "
+                "AND (CAST(? AS TEXT) IS NULL OR environment=?) ORDER BY created DESC,id LIMIT ?",
+                (access.tenant, environment, environment, limit),
+            ).fetchall()
+        return tuple(TrajectorySnapshot.model_validate(json.loads(row["body"])["snapshot"]) for row in rows)
 
     def export_snapshot(self, snapshot: str, access):
         body = self._snapshot_body(snapshot, access)

@@ -2,6 +2,53 @@
 
 ## Unreleased
 
+### Breaking changes
+
+- **The public four-role authorization model is removed.** `Principal`,
+  `Principal.role`, and the `researcher`/`agent`/`scorer`/`worker` vocabulary are gone from the
+  SDK, HTTP API, OpenAPI (`x-roles`), generated artifacts, and examples. A remote caller sends only
+  an opaque bearer credential; the server resolves it to a `management`, `viewer`, or `participant`
+  policy it owns. Requests can never assert a policy, role, or permission.
+- **Every pre-`0.3.0rc1` credential is deleted.** Numbered migration `005_credential_policies`
+  drops all legacy principal rows transactionally. Old bearer tokens return `401`; reissue through
+  `environment-harness token`, the embedding API, or the participant-credential operation. See
+  [Authentication](docs/AUTHENTICATION.md).
+- **The `/v1/environments` surface is replaced** by the canonical short resource hierarchy
+  (`/v1/scenario-sets`, `/v1/experiments`, `/v1/sessions`, `/v1/policies`, `/v1/trajectories`,
+  `/v1/snapshots`, `/v1/datasets`, `/v1/sources`, `/v1/training-runs`, `/v1/comparisons`,
+  `/v1/capabilities`, `/v1/activity`). Old paths return `404`. `GET /v1/environment` is removed:
+  `EnvironmentSpec` is frozen inside each Experiment and inherited by its Sessions. Every 0.2
+  operation is classified exactly once in the enforced
+  [HTTP migration manifest](docs/HTTP-MIGRATION.md).
+- **`Trajectory.status.records` is removed.** Records are a cursor-paged stream read through
+  `GET /v1/trajectories/{id}/records`, `TrajectoryRepository.records_page`, or
+  `TrajectoryRepository.stream_records`.
+- **`ActivitySnapshot` is renamed `ActivityHierarchy`** and `GET /v1/activity/snapshot` becomes
+  `GET /v1/activity/hierarchy`, so "snapshot" names only the immutable `TrajectorySnapshot`.
+- **Management collections return one typed envelope** (`items`, `nextCursor`, `links`) with an
+  opaque cursor. Durable evidence and activity feeds keep their integer cursors.
+- **Snapshot and dataset export uses content negotiation** on `/records` instead of an `/export`
+  verb path.
+- Viewer routes are plural: `/overview`, `/experiments/{id}`, `/sessions/{id}`,
+  `/trajectories/{id}`, `/comparisons`.
+
+### Added
+
+- `EnvironmentHarness` is the only public local-execution facade, returning a typed
+  `EnvironmentSession` handle that neither inherits from nor exposes the private session runtime.
+  The handle adds `advance`, `checkpoint`, `branch`, `resource`, `records`, `snapshot`, `report`,
+  `artifact`, and `participant_credential`, and `harness.sources()` exposes the trusted local
+  trajectory, source, and dataset surface.
+- Restart-safe local scheduling: startup reconciliation, durable submission-failure recording, and
+  typed environment factories selected by object identity with only
+  `(id, version, spec_digest)` serialized. A missing or mismatched factory leaves a Session
+  durably `blocked`.
+- Portable `ScenarioSet`, `Experiment`, `Session`, and `Checkpoint` resources in
+  `environment_harness.resources`, with a strict `BranchRequest` that returns a child Session.
+- `GET /v1/capabilities`, `x-capability` annotations, and `501 capability_unavailable`.
+- One stable error taxonomy shared by Python, HTTP, OpenAPI, and TypeScript.
+- `docs/AUTHENTICATION.md`, `docs/DATA-MODELS.md`, and `docs/HTTP-MIGRATION.md`.
+
 EnvironmentHarness now projects native and imported traces into additive `v1alpha1` Policy,
 Trajectory, TrajectorySnapshot, TrajectoryDataset, and TrainingRun resources. Historical sources use
 immutable namespaced registrations, bounded hash-chained ingestion, idempotent retries, explicit

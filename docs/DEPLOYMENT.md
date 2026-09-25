@@ -50,7 +50,7 @@ environment-harness --store ./environment-sessions serve --open
 ```
 
 `serve` binds to `127.0.0.1` on port `8765`. It never listens on an external interface. Omit
-`--open` when you want to open `http://127.0.0.1:8765/home` yourself. The flag changes only browser
+`--open` when you want to open `http://127.0.0.1:8765/overview` yourself. The flag changes only browser
 launch behavior, not authentication.
 
 Use another port when needed:
@@ -79,7 +79,7 @@ Pass the value only in the `Authorization` header:
 ```sh
 curl \
   --header "Authorization: Bearer $ENVIRONMENT_HARNESS_TOKEN" \
-  http://127.0.0.1:8765/v1/environments
+  http://127.0.0.1:8765/v1/sessions
 ```
 
 Do not put credentials in URLs, committed configuration, shell history, browser bundles, or logs.
@@ -98,7 +98,7 @@ The response is:
 ```
 
 OpenAPI is available at `/openapi.json`, and the interactive API reference is available at
-`/docs`. The viewer routes are `/home`, `/compare`, `/session/{id}`, and the supported session
+`/docs`. The viewer routes are `/overview`, `/comparisons`, `/sessions/{id}`, and the supported session
 subroutes.
 
 ## Understand local persistence
@@ -246,17 +246,17 @@ See [Protocol](PROTOCOL.md), [Coordinated persistent sessions](coordinated-sessi
 
 ### A refreshed route returns 404
 
-Run the packaged EnvironmentHarness server. It serves the viewer shell for `/home`, `/compare`,
-`/experiment/{id}`, `/experiment/{id}/scenarios`, `/experiment/{id}/scenarios/{scenario}`,
-`/experiment/{id}/sessions`, and
-supported `/session/{id}/{section}` deep links. A generic static-file server does not know those routes.
+Run the packaged EnvironmentHarness server. It serves the viewer shell for `/overview`,
+`/comparisons`, `/experiments/{id}`, `/experiments/{id}/scenarios`,
+`/experiments/{id}/scenarios/{scenario}`, `/experiments/{id}/sessions`, and supported
+`/sessions/{id}/{section}` deep links. A generic static-file server does not know those routes.
 
-`/experiment/{id}` restores the frozen experiment overview. Its Scenarios tab appears only for
+`/experiments/{id}` restores the frozen experiment overview. Its Scenarios tab appears only for
 meaningful scenario snapshots, and its Sessions tab retains a flat, filterable list. Each child
-session links to its canonical `/session/{id}/{section}` inspection route.
+session links to its canonical `/sessions/{id}/{section}` inspection route.
 
-`/experiment/{id}/training` is refresh-safe even when its conditional tab is hidden, and
-`/trajectory/{id}` restores imported-trajectory inspection. Both remain authenticated read-only
+`/experiments/{id}/training` is refresh-safe even when its conditional tab is hidden, and
+`/trajectories/{id}` restores imported-trajectory inspection. Both remain authenticated read-only
 viewer routes.
 
 ### The local viewer shows “Local viewer unavailable”

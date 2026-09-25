@@ -13,6 +13,8 @@ models = (
     (contracts, "AgentSpec"),
     (contracts, "RunPolicy"),
     (contracts, "ExperimentSpec"),
+    (contracts, "EvidenceEvent"),
+    (contracts, "EvidencePage"),
     (contracts, "ActivityEvent"),
     (contracts, "ActivityPage"),
     (contracts, "ActivitySession"),

@@ -63,20 +63,51 @@ def _module_names(path: Path) -> set[str]:
 
 
 def is_new_api_collection_failure(output: str, base_root: Path, head_root: Path = ROOT) -> bool:
-    """Accept collection failure only when every error names an API added by the branch."""
+    """Accept collection failure only when every error names something the branch added.
+
+    A breaking change can remove a symbol, add a module, or add a shared test
+    helper, so a new test cannot even import on the base revision. That is still
+    proof the test did not pass there, but only when every collection error is
+    explained by something present on this branch and absent on the base.
+    """
+
     collection_errors = re.findall(r"^_+ ERROR collecting .+ _+$", output, re.MULTILINE)
-    missing = re.findall(
+    if not collection_errors:
+        return False
+    missing_names = re.findall(
         r"^(?:E\s+)?ImportError: cannot import name '([A-Za-z_]\w*)' from "
         r"'(environment_harness(?:\.[A-Za-z_]\w*)*)'",
         output,
         re.MULTILINE,
     )
-    if not collection_errors or len(missing) != len(collection_errors):
+    missing_modules = re.findall(
+        r"^(?:E\s+)?ModuleNotFoundError: No module named '(environment_harness\.[A-Za-z_.]\w*)'",
+        output,
+        re.MULTILINE,
+    )
+    missing_helpers = re.findall(
+        r"^(?:E\s+)?ModuleNotFoundError: No module named '([A-Za-z_]\w*)'$",
+        output,
+        re.MULTILINE,
+    )
+    explained = len(missing_names) + len(missing_modules) + len(missing_helpers)
+    if explained != len(collection_errors):
         return False
-    return all(
+    if not all(
         name in _module_names(_module_path(head_root, module))
         and name not in _module_names(_module_path(base_root, module))
-        for name, module in missing
+        for name, module in missing_names
+    ):
+        return False
+    if not all(
+        _module_path(head_root, module).exists() and not _module_path(base_root, module).exists()
+        for module in missing_modules
+    ):
+        return False
+    return all(
+        (head_root / "tests" / f"{helper}.py").exists()
+        and not (base_root / "tests" / f"{helper}.py").exists()
+        for helper in missing_helpers
     )
 
 

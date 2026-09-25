@@ -10,6 +10,7 @@ check:
 	uv run --no-sync pyright
 	uv run --no-sync python scripts/build_contracts.py --check
 	uv run --no-sync python scripts/build_openapi.py --check
+	uv run --no-sync python scripts/build_http_migration.py --check
 	uv run --no-sync python scripts/build_viewer.py --check
 	uv run --no-sync python scripts/check_browser_ui.py
 	npm run typecheck --prefix packages/typescript

@@ -24,8 +24,10 @@ SAFE_ENV = {
     "WINDIR",
 }
 MUTATIONS = {
-    "tenant boundary": ('or row["tenant"] != who.tenant', "or False"),
-    "agent generation boundary": ('or p["generation"] != who.generation', "or False"),
+    "tenant boundary": ('or row["tenant"] != access.tenant', "or False"),
+    "session scope boundary": ("or not access.scoped_to(environment)", "or False"),
+    "participant generation boundary": ('or p["generation"] != access.generation', "or False"),
+    "policy check": ("access.require(action)", "None"),
 }
 
 
@@ -49,6 +51,7 @@ def main() -> None:
                     "pytest",
                     "-q",
                     "tests/test_server_public_api.py::test_http_negative_credential_matrix",
+                    "tests/test_authorization.py",
                 ],
                 cwd=ROOT,
                 env=env,

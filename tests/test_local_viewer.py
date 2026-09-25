@@ -27,7 +27,7 @@ def test_local_viewer_reconnects_while_api_stays_authenticated(local_service):
     session, access, app = local_service
     client = TestClient(app, base_url=ORIGIN, client=("127.0.0.1", 50000))
     headers = {"Origin": ORIGIN}
-    assert client.get("/v1/environments").status_code == 401
+    assert client.get("/v1/sessions").status_code == 401
     html = client.get("/").text
     assert access.credential not in html
     first = client.post("/local/connect", headers=headers)
@@ -37,10 +37,8 @@ def test_local_viewer_reconnects_while_api_stays_authenticated(local_service):
     assert first.json() == second.json()
     credential = first.json()["token"]
     assert session.store.authenticate(credential).tenant == "local"
-    assert (
-        client.get("/v1/environments", headers={"Authorization": "Bearer " + credential}).status_code == 200
-    )
-    assert client.get("/v1/environments").status_code == 401
+    assert client.get("/v1/sessions", headers={"Authorization": "Bearer " + credential}).status_code == 200
+    assert client.get("/v1/sessions").status_code == 401
     assert client.get("/viewer/config").json() == {"authentication": "local"}
 
 
@@ -72,7 +70,7 @@ def test_supplier_service_has_no_local_connection_endpoint(local_service):
     client = TestClient(create_app(session), base_url=ORIGIN, client=("127.0.0.1", 50000))
     response = client.post("/local/connect", headers={"Origin": ORIGIN})
     assert response.status_code == 404
-    assert client.get("/v1/environments").status_code == 401
+    assert client.get("/v1/sessions").status_code == 401
     assert client.get("/viewer/config").json() == {"authentication": "credential"}
 
 

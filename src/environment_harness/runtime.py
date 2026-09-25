@@ -132,9 +132,55 @@ class _SessionRuntime:
                 "session.created",
                 {"experiment": manifest, "manifest_hash": digest(manifest)},
             )
+            self._register_session_row(db, environment, access, experiment, manifest)
             return self._public(
                 db.execute("SELECT * FROM environments WHERE id=?", (environment,)).fetchone()
             )
+
+    def _register_session_row(self, db, environment, access, experiment, manifest):
+        """Give every created session a durable Session row.
+
+        The local scheduler inserts its own row before execution; a session
+        created directly through the runtime or the implicit
+        experiment-of-one gets one here so every Session is addressable and
+        recoverable through the same projection.
+        """
+
+        if db.execute("SELECT 1 FROM session_runs WHERE environment=?", (environment,)).fetchone():
+            return
+        now = time.time()
+        scenario = {
+            "id": experiment.scenario,
+            "input": manifest["scenario_input"],
+            "reference": manifest["scenario_reference"],
+            "metadata": manifest["scenario_metadata"],
+        }
+        db.execute(
+            "INSERT INTO session_runs (environment,tenant,experiment,scenario,trial,seed,status,error,"
+            "turns,target_turns,latest_activity,scenario_body,created,updated,environment_id,"
+            "environment_version,spec_digest,blocked_reason) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                environment,
+                access.tenant,
+                None,
+                experiment.scenario,
+                0,
+                experiment.seed,
+                "running",
+                None,
+                0,
+                experiment.policy.max_turns,
+                "Started",
+                encode(scenario),
+                now,
+                now,
+                manifest["environment"]["id"],
+                manifest["environment"]["version"],
+                digest(manifest["environment"]),
+                None,
+            ),
+        )
 
     def _public(self, row):
         manifest = json.loads(row["manifest"])
@@ -571,8 +617,27 @@ class _SessionRuntime:
                 "UPDATE transitions SET status='committed' WHERE environment=? AND revision=? AND input_hash=?",
                 (environment, phase, input_hash),
             )
+            self._sync_session_row(db, environment, revision, status)
             self._fence(db.execute("SELECT * FROM environments WHERE id=?", (environment,)).fetchone(), lease)
             return {"revision": revision, "status": status, "event": outcome["seq"]}
+
+    def _sync_session_row(self, db, environment, revision, status):
+        """Keep the durable Session row's turn count and terminal state current.
+
+        The local scheduler owns its own status transitions, so only a session
+        this runtime drove to completion is marked terminal here.
+        """
+
+        db.execute(
+            "UPDATE session_runs SET turns=?,updated=? WHERE environment=?",
+            (revision, time.time(), environment),
+        )
+        if status == "completed":
+            db.execute(
+                "UPDATE session_runs SET status='succeeded',latest_activity='Completed',updated=? "
+                "WHERE environment=? AND status='running'",
+                (time.time(), environment),
+            )
 
     def close_phase(self, environment, access, lease, *, revision, reason="decisions_complete"):
         with self.store.transaction() as db:
@@ -867,7 +932,9 @@ class _SessionRuntime:
             with suppress(Conflict):
                 self.release(environment, access, lease)
 
-    def branch(self, environment, access, checkpoint, interventions=None, *, new_environment=None):
+    def branch(
+        self, environment, access, checkpoint, interventions=None, *, new_environment=None, turns=None
+    ):
         with self.store.transaction() as db:
             parent = self.store.environment(db, environment, access, "session.control")
             spec = self._compatible(parent)
@@ -975,7 +1042,69 @@ class _SessionRuntime:
                     "split": spec.split,
                 },
             )
+            self._register_child_session(db, environment, child, checkpoint, snapshot, turns)
             return self._public(db.execute("SELECT * FROM environments WHERE id=?", (child,)).fetchone())
+
+    def _register_child_session(self, db, parent, child, checkpoint, snapshot, turns):
+        """Give a branched child a durable Session row of its own.
+
+        The child starts ``interrupted`` so branching never repeats an
+        externally visible effect without explicit caller intent.
+        """
+
+        origin = db.execute("SELECT * FROM session_runs WHERE environment=?", (parent,)).fetchone()
+        if origin is None:
+            return
+        if db.execute("SELECT 1 FROM session_runs WHERE environment=?", (child,)).fetchone():
+            return
+        now = time.time()
+        db.execute(
+            "INSERT INTO session_runs (environment,tenant,experiment,scenario,trial,seed,status,error,"
+            "turns,target_turns,latest_activity,scenario_body,created,updated,environment_id,"
+            "environment_version,spec_digest,blocked_reason) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                child,
+                origin["tenant"],
+                origin["experiment"],
+                origin["scenario"],
+                origin["trial"],
+                origin["seed"],
+                "interrupted",
+                None,
+                snapshot["revision"],
+                turns or origin["target_turns"],
+                "Branched",
+                origin["scenario_body"],
+                now,
+                now,
+                origin["environment_id"],
+                origin["environment_version"],
+                origin["spec_digest"],
+                None,
+            ),
+        )
+        db.execute(
+            "INSERT INTO event_outbox (tenant,topic,experiment,environment,kind,body,created) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (
+                origin["tenant"],
+                "experiment" if origin["experiment"] else "environment_session",
+                origin["experiment"],
+                child,
+                "environment_session.branched",
+                encode(
+                    {
+                        "status": "interrupted",
+                        "scenario_id": origin["scenario"],
+                        "trial": origin["trial"],
+                        "parent": parent,
+                        "checkpoint": checkpoint,
+                    }
+                ),
+                now,
+            ),
+        )
 
     def finalize_outcomes(self, environment, access, lease, report_revision):
         with self.store.transaction() as db:

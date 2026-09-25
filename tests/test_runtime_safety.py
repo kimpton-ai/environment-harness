@@ -261,12 +261,12 @@ def test_cancel_active_command_stops_parent_and_child(tmp_path, transport):
                 token = bearer(session.store, who)
                 client = TestClient(create_app(session))
                 response = client.post(
-                    f"/v1/environments/{environment}/commands",
+                    f"/v1/sessions/{environment}/commands",
                     json={"operation": "cancel", "arguments": {}},
                     headers={"Authorization": "Bearer " + token},
                 )
-                assert response.status_code == 200
-                result = response.json()
+                assert response.status_code == 202
+                result = response.json()["result"]
             assert result["status"] == "cancelled"
             assert result["unresolved_agent_work"]
             with pytest.raises(Conflict):

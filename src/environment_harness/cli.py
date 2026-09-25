@@ -51,7 +51,7 @@ def main():
     source_ingest.add_argument("records")
     source_status = sub.add_parser("source-status")
     source_status.add_argument("source")
-    source_status.add_argument("status", nargs="?", help="Optional JSON status update; omit to inspect")
+    source_status.add_argument("status", nargs="?", help="Optional JSON status report; omit to inspect")
     train = sub.add_parser("train")
     train.add_argument("dataset")
     train.add_argument("integration")

@@ -17,23 +17,35 @@ The loopback CLI's `serve` command configures automatic local viewer access inde
 
 | Operation | Route |
 | --- | --- |
-| Inspect contract | `GET /v1/environment` |
-| Create/list environments | `POST/GET /v1/environments` |
-| Session state | `GET /v1/environments/{id}` |
-| Authorized observation | `GET /v1/environments/{id}/observation` |
-| Submit decision | `POST /v1/environments/{id}/actions` |
-| Events | `GET /v1/environments/{id}/events?after=CURSOR` |
-| Activity hierarchy | `GET /v1/activity/snapshot` |
-| Global activity | `GET /v1/activity/events?after=CURSOR` |
-| Experiment activity | `GET /v1/experiments/{id}/events?after=CURSOR` |
-| Environment-session activity | `GET /v1/environments/{id}/activity?after=CURSOR` |
-| Lifecycle | `POST /v1/environments/{id}/commands` |
-| Participant token | `POST /v1/environments/{id}/credentials` |
-| Journal external intent | `POST /v1/environments/{id}/operations` |
-| Upload/download artifact | `POST /v1/environments/{id}/artifacts`, `GET .../artifacts/{key}` |
-| Versioned scoring | `POST/GET /v1/environments/{id}/reports` |
-| Evidence/training export | `GET /v1/environments/{id}/export?format=evidence` or `training` |
-| Comparison | `POST /v1/compare` |
+| Deployment capabilities | `GET /v1/capabilities` |
+| Create an experiment and its sessions | `POST /v1/experiments` |
+| Experiments and their sessions | `GET /v1/experiments`, `GET /v1/experiments/{id}/sessions` |
+| Scenario sets | `GET /v1/scenario-sets`, `GET /v1/scenario-sets/{id}` |
+| Session state | `GET /v1/sessions`, `GET /v1/sessions/{id}` |
+| Authorized observation | `GET /v1/sessions/{id}/participants/{participant}/observation` |
+| Submit decision | `POST /v1/sessions/{id}/participants/{participant}/actions` |
+| Participant credential | `POST /v1/sessions/{id}/participants/{participant}/credentials` |
+| Evidence | `GET /v1/sessions/{id}/evidence?after=CURSOR` |
+| Activity hierarchy | `GET /v1/activity/hierarchy` |
+| Global activity | `GET /v1/activity?after=CURSOR` |
+| Experiment activity | `GET /v1/experiments/{id}/activity?after=CURSOR` |
+| Session activity | `GET /v1/sessions/{id}/activity?after=CURSOR` |
+| Lifecycle | `POST /v1/sessions/{id}/commands` |
+| Checkpoints | `GET/POST /v1/sessions/{id}/checkpoints` |
+| Branch to a child session | `POST /v1/sessions/{id}/branches` |
+| Durable agent invocations | `GET /v1/sessions/{id}/invocations` |
+| Journal external intent | `POST /v1/sessions/{id}/operations` |
+| Upload/download artifact | `POST /v1/sessions/{id}/artifacts`, `GET .../artifacts/{id}` |
+| Versioned scoring | `POST/GET /v1/sessions/{id}/scores` |
+| Trajectories and records | `GET /v1/trajectories`, `GET /v1/trajectories/{id}/records` |
+| Policies | `GET /v1/policies`, `GET /v1/policies/{id}` |
+| Snapshots and export | `GET /v1/snapshots/{id}/records` with `Accept: application/x-ndjson` |
+| Datasets and export | `GET /v1/datasets/{id}/records` with `Accept: application/x-ndjson` |
+| Training receipts | `GET /v1/training-runs`, `GET /v1/training-runs/{id}` |
+| Sources and ingestion | `GET/POST /v1/sources`, `POST /v1/sources/{id}/records`, `POST /v1/sources/{id}/status-reports` |
+| Comparison | `POST /v1/comparisons` |
+
+See [HTTP migration](HTTP-MIGRATION.md) for the exhaustive 0.2 → 0.3 classification.
 
 Every HTTP error uses one traceable envelope. `request_id` also appears in the `X-Request-ID` response header; operators may use it to correlate safe server-side logs without recording credentials or request bodies. Validation details identify fields but omit submitted values.
 

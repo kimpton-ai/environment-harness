@@ -282,6 +282,46 @@ class TrainingRepository:
             ).fetchall()
         return tuple(TrajectoryDataset.model_validate_json(row["body"]) for row in rows)
 
+    def dataset_records_page(self, dataset: str, access, *, after: int = 0, limit: int = 200):
+        """Page through a dataset's member snapshot records in member order.
+
+        The cursor is a durable position across the concatenated member
+        snapshots, so restarting never omits or duplicates a record.
+        """
+
+        from .trajectories import TrajectoryRecordPage
+
+        selected = self.get_dataset(dataset, access)
+        if after < 0 or not 1 <= limit <= 1000:
+            raise ValueError("invalid dataset record page")
+        collected = []
+        position = 0
+        exhausted = True
+        for member in selected.spec.members:
+            page_cursor = 0
+            while True:
+                page = self.trajectories.snapshot_records_page(
+                    member.snapshot_id, access, after=page_cursor, limit=limit
+                )
+                for record in page.records:
+                    position += 1
+                    if position <= after:
+                        continue
+                    if len(collected) == limit:
+                        exhausted = False
+                        break
+                    collected.append(record)
+                if not page.has_more or not exhausted:
+                    break
+                page_cursor = page.cursor
+            if not exhausted:
+                break
+        return TrajectoryRecordPage(
+            records=tuple(collected),
+            cursor=after + len(collected),
+            has_more=not exhausted,
+        )
+
     def export_dataset(self, dataset: str, access):
         selected = self.get_dataset(dataset, access)
         yield {"dataset": selected.model_dump(mode="json", by_alias=True)}

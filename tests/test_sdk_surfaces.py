@@ -73,47 +73,67 @@ def test_remote_client_validates_transport_and_builds_public_requests(monkeypatc
         environment=SyntheticEnvironment().spec,
         participants=(AgentSpec(id="a", implementation="test", policy_version="1"),),
     )
-    assert client.create(spec)[0:3] == ("POST", "/v1/environments", spec.model_dump(mode="json"))
-    assert client.list(limit=25, cursor="a" * 32)[1].endswith("/v1/environments?limit=25&cursor=" + "a" * 32)
-    assert client.get("a/b")[1].endswith("a%2Fb")
-    assert client.observe("env", "a/b")[1].endswith("?participant=a%2Fb")
-    assert client.submit("env", {"value": 1})[1].endswith("/actions")
+    assert client.create_experiment(spec)[0:3] == (
+        "POST",
+        "/v1/experiments",
+        spec.model_dump(mode="json"),
+    )
+    assert client.experiments(limit=25, cursor="a" * 32)[1] == "/v1/experiments?limit=25&cursor=" + "a" * 32
+    assert client.experiment("a/b")[1] == "/v1/experiments/a%2Fb"
+    assert client.experiment_sessions("a/b")[1].startswith("/v1/experiments/a%2Fb/sessions?")
+    assert client.scenario_sets()[1].startswith("/v1/scenario-sets?")
+    assert client.scenario_set("a/b")[1] == "/v1/scenario-sets/a%2Fb"
+    assert client.sessions(limit=25, cursor="a" * 32)[1] == "/v1/sessions?limit=25&cursor=" + "a" * 32
+    assert client.session("a/b")[1].endswith("a%2Fb")
+    assert client.observe("env", "a/b")[1].endswith("/participants/a%2Fb/observation")
+    assert client.submit("env", "alice", {"value": 1})[1].endswith("/participants/alice/actions")
     assert client.command("env", "cancel", reason="test")[2]["arguments"] == {"reason": "test"}
-    assert client.agent_work("env")[1].endswith("/agent-work")
+    assert client.invocations("env")[1].endswith("/invocations")
     assert client.cancel("env")[2]["operation"] == "cancel"
     assert client.advance("env")[2]["operation"] == "advance"
-    assert client.credentials("env", "a", ttl=30)[2] == {"participant": "a", "ttl": 30}
-    assert client.reports("env")[1].endswith("/reports")
-    assert client.events("env", 7)[1].endswith("events?after=7")
-    assert client.activity_hierarchy()[1] == "/v1/activity/snapshot"
-    assert client.activity(3)[1].endswith("activity/events?after=3")
-    assert client.experiment_activity("a/b", 4)[1].endswith("experiments/a%2Fb/events?after=4")
-    assert client.session_activity("a/b", 5)[1].endswith("environments/a%2Fb/activity?after=5")
-    assert client.trajectories(limit=25, cursor="source-a")[1].endswith(
+    assert client.credentials("env", "a", ttl=30)[2] == {"ttl": 30}
+    assert client.credentials("env", "a")[1].endswith("/participants/a/credentials")
+    assert client.scores("env")[1].endswith("/scores")
+    assert client.publish_score("env", {"scorer": "s"})[0] == "POST"
+    assert client.checkpoints("env")[1].startswith("/v1/sessions/env/checkpoints?")
+    assert client.create_checkpoint("env", exact_agents=True)[2] == {"exact_agents": True}
+    assert client.checkpoint("env", "cp")[1].endswith("/checkpoints/cp")
+    assert client.branch("env", {"checkpoint": "cp"})[1].endswith("/branches")
+    assert client.evidence("env", 7)[1].endswith("evidence?after=7")
+    assert client.activity_hierarchy()[1] == "/v1/activity/hierarchy"
+    assert client.activity(3)[1].endswith("/v1/activity?after=3")
+    assert client.experiment_activity("a/b", 4)[1].endswith("experiments/a%2Fb/activity?after=4")
+    assert client.session_activity("a/b", 5)[1].endswith("sessions/a%2Fb/activity?after=5")
+    assert client.capabilities()[1] == "/v1/capabilities"
+    assert client.policies()[1].startswith("/v1/policies?")
+    assert client.policy("a/b")[1] == "/v1/policies/a%2Fb"
+    assert client.trajectories(limit=25, cursor="source-a")[1] == (
         "/v1/trajectories?limit=25&cursor=source-a"
     )
     assert client.trajectory("a/b")[1].endswith("/v1/trajectories/a%2Fb")
-    assert client.trajectory_records("a/b", after=12, limit=50)[1].endswith(
+    assert client.trajectory_records("a/b", after=12, limit=50)[1] == (
         "/v1/trajectories/a%2Fb/records?after=12&limit=50"
     )
-    assert client.register_trajectory_source({"namespace": "example"})[1] == "/v1/trajectory-sources"
-    assert client.ingest_trajectory_source("a/b", {"records": []})[1].endswith(
-        "/v1/trajectory-sources/a%2Fb/records"
-    )
-    assert client.update_trajectory_source("a/b", {"collection_state": "current"})[0] == "PUT"
-    assert client.trajectory_source_status("a/b")[1].endswith("/v1/trajectory-sources/a%2Fb/status")
+    assert client.register_source({"namespace": "example"})[1] == "/v1/sources"
+    assert client.sources()[1].startswith("/v1/sources?")
+    assert client.source("a/b")[1] == "/v1/sources/a%2Fb"
+    assert client.ingest_source("a/b", {"records": []})[1].endswith("/v1/sources/a%2Fb/records")
+    assert client.source_records("a/b")[1].startswith("/v1/sources/a%2Fb/records?")
+    report = client.report_source_status("a/b", {"collection_state": "current"})
+    assert report[0] == "POST" and report[1].endswith("/v1/sources/a%2Fb/status-reports")
+    assert client.source_status("a/b")[1].endswith("/v1/sources/a%2Fb/status")
     assert client.freeze_trajectory("a/b")[1].endswith("/v1/trajectories/a%2Fb/snapshots")
-    assert client.trajectory_snapshots("a/b", limit=25)[1].endswith(
-        "/v1/trajectory-snapshots?trajectory=a%2Fb&limit=25"
-    )
-    assert client.trajectory_snapshot("a/b")[1].endswith("/v1/trajectory-snapshots/a%2Fb")
-    assert client.freeze_trajectory_dataset("training", ["a/b"])[1] == "/v1/trajectory-datasets"
-    assert client.trajectory_dataset("a/b")[1].endswith("/v1/trajectory-datasets/a%2Fb")
+    assert client.trajectory_snapshots("a/b", limit=25)[1].startswith("/v1/trajectories/a%2Fb/snapshots?")
+    assert client.snapshots(trajectory="a/b")[1].startswith("/v1/snapshots?trajectory=a%2Fb")
+    assert client.snapshot("a/b")[1].endswith("/v1/snapshots/a%2Fb")
+    assert client.snapshot_records("a/b")[1].startswith("/v1/snapshots/a%2Fb/records?")
+    assert client.freeze_dataset("training", ["a/b"])[1] == "/v1/datasets"
+    assert client.dataset("a/b")[1].endswith("/v1/datasets/a%2Fb")
+    assert client.dataset_records("a/b")[1].startswith("/v1/datasets/a%2Fb/records?")
     assert client.training_run("a/b")[1].endswith("/v1/training-runs/a%2Fb")
-    assert client.trajectory_datasets(limit=25)[1] == "/v1/trajectory-datasets?limit=25"
-    assert client.training_runs(dataset="a/b", limit=25)[1].endswith(
-        "/v1/training-runs?dataset=a%2Fb&limit=25"
-    )
+    assert client.datasets(limit=25)[1] == "/v1/datasets?limit=25"
+    assert client.training_runs(dataset="a/b", limit=25)[1] == ("/v1/training-runs?dataset=a%2Fb&limit=25")
+    assert client.compare(["a", "b"])[2] == {"sessions": ["a", "b"]}
 
 
 def test_remote_client_streams_snapshot_and_dataset_jsonl_without_materializing_response(monkeypatch):
@@ -127,10 +147,11 @@ def test_remote_client_streams_snapshot_and_dataset_jsonl_without_materializing_
 
     client.opener = Opener()
 
-    assert list(client.export_trajectory_snapshot("a/b")) == [{"row": 1}, {"row": 2}]
-    assert list(client.export_trajectory_dataset("c/d")) == [{"row": 1}, {"row": 2}]
-    assert seen[0][0].full_url.endswith("/v1/trajectory-snapshots/a%2Fb/export")
-    assert seen[1][0].full_url.endswith("/v1/trajectory-datasets/c%2Fd/export")
+    assert list(client.stream_snapshot_records("a/b")) == [{"row": 1}, {"row": 2}]
+    assert list(client.stream_dataset_records("c/d")) == [{"row": 1}, {"row": 2}]
+    assert seen[0][0].full_url.endswith("/v1/snapshots/a%2Fb/records")
+    assert seen[1][0].full_url.endswith("/v1/datasets/c%2Fd/records")
+    # NDJSON streaming is the same authenticated GET with an explicit Accept.
     assert seen[0][0].get_header("Accept") == "application/x-ndjson"
 
 
@@ -154,7 +175,7 @@ def test_remote_client_streaming_fails_closed(result, message):
 
     client.opener = Opener()
     with pytest.raises(HarnessError, match=message):
-        list(client.export_trajectory_snapshot("snapshot"))
+        list(client.stream_snapshot_records("snapshot"))
 
 
 def test_remote_client_streaming_translates_http_errors():
@@ -173,7 +194,7 @@ def test_remote_client_streaming_translates_http_errors():
 
     client.opener = Opener()
     with pytest.raises(HarnessError):
-        list(client.export_trajectory_snapshot("snapshot"))
+        list(client.stream_snapshot_records("snapshot"))
 
 
 def test_advanced_module_exposes_the_explicit_specification_workflow():
@@ -274,7 +295,7 @@ def test_client_replay_stops_at_empty_page(monkeypatch):
             {"events": [], "cursor": 2},
         ]
     )
-    monkeypatch.setattr(client, "events", lambda *_args: next(pages))
+    monkeypatch.setattr(client, "evidence", lambda *_args: next(pages))
     assert list(client.replay("env")) == [{"seq": 1}, {"seq": 2}]
 
 

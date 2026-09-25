@@ -36,7 +36,7 @@ def test_authenticated_api_lists_and_reads_portable_trajectories(tmp_path):
     fetched = client.get(f"/v1/trajectories/{environment_id}", headers=headers)
 
     assert listed.status_code == 200
-    assert {item["id"] for item in listed.json()} == {environment_id, second_id}
+    assert {item["id"] for item in listed.json()["items"]} == {environment_id, second_id}
     assert paged.headers["x-next-cursor"]
     assert 'rel="next"' in paged.headers["link"]
     assert fetched.status_code == 200
@@ -89,11 +89,13 @@ def test_trajectory_snapshot_boundaries_can_be_listed_for_the_viewer(tmp_path):
     client = TestClient(create_app(session), base_url="http://testserver")
     headers = {"Authorization": "Bearer " + bearer(store, researcher)}
 
-    response = client.get(f"/v1/trajectory-snapshots?trajectory={environment_id}", headers=headers)
+    nested = client.get(f"/v1/trajectories/{environment_id}/snapshots", headers=headers)
+    indexed = client.get(f"/v1/snapshots?trajectory={environment_id}", headers=headers)
 
-    assert response.status_code == 200
-    assert [item["metadata"]["id"] for item in response.json()] == [frozen.metadata.id]
-    assert client.get(f"/v1/trajectory-snapshots?trajectory={environment_id}").status_code == 401
+    assert nested.status_code == indexed.status_code == 200
+    assert [item["metadata"]["id"] for item in nested.json()["items"]] == [frozen.metadata.id]
+    assert [item["metadata"]["id"] for item in indexed.json()["items"]] == [frozen.metadata.id]
+    assert client.get(f"/v1/snapshots?trajectory={environment_id}").status_code == 401
 
 
 def test_source_registration_route_exists_only_in_explicit_ingestion_mode(tmp_path):
@@ -117,11 +119,27 @@ def test_source_registration_route_exists_only_in_explicit_ingestion_mode(tmp_pa
         base_url="http://testserver",
     )
 
-    assert read_only.post("/v1/trajectory-sources", headers=headers, json=registration).status_code == 404
-    assert enabled.post("/v1/trajectory-sources", json=registration).status_code == 401
-    response = enabled.post("/v1/trajectory-sources", headers=headers, json=registration)
-    assert response.status_code == 200
+    # A disabled capability is a declared 501, not a hidden route.
+    denied = read_only.post("/v1/sources", headers=headers, json=registration)
+    assert denied.status_code == 501
+    assert denied.json()["error"]["code"] == "capability_unavailable"
+    assert "historical ingestion is disabled" in denied.json()["error"]["message"]
+    document = read_only.get("/openapi.json").json()
+    assert document["paths"]["/v1/sources"]["post"]["x-capability"] == "historical-ingestion"
+    read_only_capabilities = read_only.get("/v1/capabilities", headers=headers).json()
+    assert {item["name"]: item["enabled"] for item in read_only_capabilities["capabilities"]}[
+        "historical-ingestion"
+    ] is False
+
+    assert enabled.post("/v1/sources", json=registration).status_code == 401
+    response = enabled.post("/v1/sources", headers=headers, json=registration)
+    assert response.status_code == 201
     assert response.json()["namespace"] == "com.example.simulator"
+    assert response.headers["location"].startswith("/v1/sources/")
+    enabled_capabilities = enabled.get("/v1/capabilities", headers=headers).json()
+    assert {item["name"]: item["enabled"] for item in enabled_capabilities["capabilities"]}[
+        "historical-ingestion"
+    ] is True
 
 
 def test_read_only_server_can_inspect_but_not_mutate_a_registered_source(tmp_path):
@@ -143,13 +161,11 @@ def test_read_only_server_can_inspect_but_not_mutate_a_registered_source(tmp_pat
     client = TestClient(create_app(session), base_url="http://testserver")
     headers = {"Authorization": "Bearer " + bearer(store, researcher)}
 
-    inspected = client.get(f"/v1/trajectory-sources/{receipt.id}/status", headers=headers)
+    inspected = client.get(f"/v1/sources/{receipt.id}/status", headers=headers)
 
     assert inspected.status_code == 200
     assert inspected.json()["collection_state"] == "registered"
-    assert (
-        client.put(f"/v1/trajectory-sources/{receipt.id}/status", headers=headers, json={}).status_code == 405
-    )
+    assert client.put(f"/v1/sources/{receipt.id}/status", headers=headers, json={}).status_code == 405
 
 
 def test_configured_ingestion_api_records_and_finalizes_an_imported_trajectory(tmp_path):
@@ -163,7 +179,7 @@ def test_configured_ingestion_api_records_and_finalizes_an_imported_trajectory(t
         base_url="http://testserver",
     )
     registered = client.post(
-        "/v1/trajectory-sources",
+        "/v1/sources",
         headers=headers,
         json={
             "namespace": "com.example.simulator",
@@ -191,12 +207,12 @@ def test_configured_ingestion_api_records_and_finalizes_an_imported_trajectory(t
     )
 
     ingested = client.post(
-        f"/v1/trajectory-sources/{registered['id']}/records",
+        f"/v1/sources/{registered['id']}/records",
         headers=headers,
         json={"records": [record.model_dump(mode="json", by_alias=True)]},
     )
-    finalized = client.put(
-        f"/v1/trajectory-sources/{registered['id']}/status",
+    finalized = client.post(
+        f"/v1/sources/{registered['id']}/status-reports",
         headers=headers,
         json={
             "collection_state": "complete",
@@ -214,7 +230,7 @@ def test_configured_ingestion_api_records_and_finalizes_an_imported_trajectory(t
 
     assert ingested.status_code == 200
     assert ingested.json()["hash"] == record.source_hash
-    assert finalized.status_code == 200
+    assert finalized.status_code == 201
     assert fetched.json()["status"]["verifiedOutcome"]["state"] == "success"
 
 
@@ -237,15 +253,24 @@ def test_evaluation_session_can_freeze_and_export_snapshot_without_training_enti
 
     frozen = client.post(f"/v1/trajectories/{environment_id}/snapshots", headers=headers)
     snapshot_id = frozen.json()["metadata"]["id"]
-    fetched = client.get(f"/v1/trajectory-snapshots/{snapshot_id}", headers=headers)
-    exported = client.get(f"/v1/trajectory-snapshots/{snapshot_id}/export", headers=headers)
+    fetched = client.get(f"/v1/snapshots/{snapshot_id}", headers=headers)
+    exported = client.get(
+        f"/v1/snapshots/{snapshot_id}/records",
+        headers=headers | {"Accept": "application/x-ndjson"},
+    )
 
-    assert frozen.status_code == 200
+    assert frozen.status_code == 201
     assert fetched.json() == frozen.json()
     assert exported.status_code == 200
     rows = [line for line in exported.text.splitlines() if line]
     assert len(rows) == frozen.json()["status"]["recordCount"] + 1
+    # Authorized evaluation export needs no training entitlement, while a
+    # dataset still requires complete training-entitled evidence.
     assert (
-        client.get(f"/v1/environments/{environment_id}/export?format=training", headers=headers).status_code
+        client.post(
+            "/v1/datasets",
+            headers=headers,
+            json={"name": "denied", "trajectories": [environment_id]},
+        ).status_code
         == 403
     )

@@ -1,0 +1,76 @@
+{
+  "$id": "urn:environment-harness:v1:EvidenceEvent",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One hash-chained row from a session's append-only evidence journal.",
+  "properties": {
+    "audience": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Audience",
+      "type": "array"
+    },
+    "environment": {
+      "title": "Environment",
+      "type": "string"
+    },
+    "event_time": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Event Time"
+    },
+    "hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Hash",
+      "type": "string"
+    },
+    "ingested": {
+      "title": "Ingested",
+      "type": "number"
+    },
+    "kind": {
+      "title": "Kind",
+      "type": "string"
+    },
+    "payload": {
+      "additionalProperties": true,
+      "title": "Payload",
+      "type": "object"
+    },
+    "previous": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Previous",
+      "type": "string"
+    },
+    "revision": {
+      "minimum": 0,
+      "title": "Revision",
+      "type": "integer"
+    },
+    "seq": {
+      "minimum": 1,
+      "title": "Seq",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "environment",
+    "seq",
+    "revision",
+    "kind",
+    "ingested",
+    "previous",
+    "hash"
+  ],
+  "title": "EvidenceEvent",
+  "type": "object"
+}

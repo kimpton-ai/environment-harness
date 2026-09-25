@@ -4,6 +4,44 @@ EnvironmentHarness 0.2.4rc2 focuses on local persistent sessions and recorded ev
 
 The package includes an authenticated supplier HTTP service, typed Python/TypeScript clients, generated JSON schemas and optional adapters. The [adapter table](ADAPTERS.md) records their boundaries. A packaged integration is not proof that its upstream service or cloud backend has been qualified.
 
+## Unreleased 0.3.0rc1 scope
+
+Commit `43346e7` is the landed implementation baseline for the trajectory program, not proof that
+the contract is qualified. The following corrections have landed on top of it and are tracked as
+implemented; the release candidate is not cut until the remaining items below are complete.
+
+Landed since the baseline:
+
+- **Authorization boundary.** `Principal` and the public four-role model are removed. A remote
+  caller sends only an opaque bearer credential and the server resolves it to one of three fixed
+  policies. A private `_SessionRuntime` requires an access context on every observation and
+  mutation, `EnvironmentHarness` is the only public local-execution facade, and numbered migration
+  `005_credential_policies` deletes every legacy credential row and forces reissue. See
+  [Authentication](AUTHENTICATION.md).
+- **Restart-safe local scheduling.** Persisted Experiment and Session rows are the durable queue.
+  Startup reconciliation reconstructs queued work, marks orphaned running work interrupted behind
+  explicit resume, and leaves terminal rows untouched. Typed environment factories are configured
+  once per harness; only `(id, version, spec_digest)` is serialized and a missing or mismatched
+  factory leaves a Session durably blocked.
+- **Portable experiment resources.** `ScenarioSet`, `Experiment`, `Session`, and `Checkpoint` join
+  the resource family with a shared experiment fixture and an enforced contract-compatibility
+  suite. See [Data models](DATA-MODELS.md).
+- **Paged trajectory records.** `Trajectory.status` no longer materializes records; both native and
+  imported projections stream. The bounded-allocation gate proves a 100,000-record export reads
+  through pages of at most 1,000 records within 32 MiB of tracemalloc-reported allocation.
+- **Corrected HTTP hierarchy.** The `/v1/environments` surface is replaced by the canonical short
+  hierarchy, with a typed management-list envelope, ETags, `Location` headers, deployment
+  capabilities, and one stable error taxonomy. Every 0.2 operation is classified exactly once in
+  the enforced [HTTP migration](HTTP-MIGRATION.md) manifest.
+
+Remaining before the candidate:
+
+- inference capture levels (`none`, `summary`, `training`) with a cumulative per-Session artifact
+  budget and representative storage estimates;
+- the accepted Overview / Experiments / Sessions / Trajectories viewer information architecture
+  with contextual left navigation, ancestry breadcrumbs, and reserved-height skeletons; and
+- the remaining guide rewrites named in the plan's documentation section.
+
 ## Unreleased trajectory scope
 
 The next candidate adds the `environmentharness.dev/v1alpha1` portable resource family. Native and
