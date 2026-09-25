@@ -96,6 +96,8 @@ jobs:
           version: "0.12.0"
           enable-cache: false
       - run: uv sync --frozen --extra server --extra postgres
+      # Deliberately serial: this job owns `diff-cover --fail-under=100`, and a few
+      # race-dependent branches are only reached when the machine is not saturated.
       - run: uv run --no-sync pytest --cov --cov-branch --cov-report=term-missing --cov-report=json --cov-report=xml
       - run: uv run --no-sync python scripts/check_coverage.py
       - run: uv run --no-sync diff-cover coverage.xml --compare-branch=origin/main --fail-under=100
@@ -139,7 +141,7 @@ jobs:
       - name: Run compatibility tests with branch coverage
         env:
           COVERAGE_FILE: coverage-${{ matrix.label }}
-        run: uv run --no-sync pytest -q --cov --cov-branch --cov-report=
+        run: uv run --no-sync pytest -q -n auto --cov --cov-branch --cov-report=
       - name: Upload compatibility coverage
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
