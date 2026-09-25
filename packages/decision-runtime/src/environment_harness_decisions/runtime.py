@@ -550,7 +550,9 @@ class DecisionOperation(EnvironmentOperation):
                 return None
             if row["receipt"]:
                 return json.loads(row["receipt"])
-            cost, reserved, charges_resolved = self.ledger.charges(db, operation_id)
+            # `charges_resolved` implies nothing is still reserved, which is why the
+            # receipt no longer carries a reservation field.
+            cost, _reserved, charges_resolved = self.ledger.charges(db, operation_id)
             effects = db.execute("SELECT * FROM effects WHERE invocation=?", (operation_id,)).fetchall()
             effects_resolved = all(
                 e["status"] in ("applied", "rejected", "cancelled")
@@ -578,7 +580,6 @@ class DecisionOperation(EnvironmentOperation):
                 status=status,
                 reason=reason,
                 cost_micros=cost,
-                reserved_micros=reserved,
                 charge_resolved=True,
                 effects_resolved=True,
                 execution_ids=tuple(e["id"] for e in effects),

@@ -108,8 +108,20 @@ class Ledger:
 
     @property
     def stop_epoch(self):
-        with self.db() as db:
+        """Read the stop epoch without taking the writer lock.
+
+        This is polled every 10 ms by the selection loop and every 25 ms by the
+        authority watcher. ``db()`` opens with ``BEGIN IMMEDIATE``, so routing
+        this read through it serialized every poll against the inference
+        thread's ledger writes to read a single integer. WAL already gives a
+        reader a consistent snapshot without blocking a writer.
+        """
+
+        db = sqlite3.connect(self.path, timeout=5)
+        try:
             return db.execute("SELECT stop_epoch FROM control WHERE id=1").fetchone()[0]
+        finally:
+            db.close()
 
     def charges(self, db, invocation):
         rows = db.execute("SELECT * FROM attempts WHERE invocation=?", (invocation,)).fetchall()

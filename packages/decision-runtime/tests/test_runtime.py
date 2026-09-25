@@ -29,6 +29,7 @@ from environment_harness_decisions import (
     Selection,
     Verification,
 )
+from environment_harness_decisions.ledger import Ledger
 
 
 class Browser:
@@ -390,3 +391,41 @@ def test_unexpected_defect_records_its_cause_instead_of_being_discarded(tmp_path
     assert "verifier exploded" in reason
     # The effect still happened exactly once and is never resubmitted.
     assert len(op.control.submissions) == 1
+
+
+def test_stop_epoch_polling_is_not_blocked_by_a_ledger_writer(tmp_path):
+    """Write contention must not read as expired authority.
+
+    `_active` polls the stop epoch every 10 ms in the selection loop and every
+    25 ms in the authority watcher. Routing that one-integer read through
+    `db()` took `BEGIN IMMEDIATE`, so while the inference thread held the
+    ledger the poll blocked for the full five-second timeout and then raised
+    `OperationalError`. The watcher catches `BaseException` and responds by
+    cancelling and calling `control.stop()`, so ordinary contention could
+    cancel a healthy in-flight operation and stop the native control.
+    """
+    ledger = Ledger(tmp_path / "ledger.sqlite")
+    held, release = threading.Event(), threading.Event()
+    failures = []
+
+    def writer():
+        try:
+            with ledger.db() as db:
+                db.execute("UPDATE control SET stop_epoch=stop_epoch WHERE id=1")
+                held.set()
+                release.wait(10)
+        except BaseException as error:  # pragma: no cover - only on regression
+            failures.append(error)
+
+    thread = threading.Thread(target=writer, daemon=True)
+    thread.start()
+    assert held.wait(5), "writer never acquired the ledger"
+    try:
+        started = time.monotonic()
+        assert ledger.stop_epoch == 0
+        # The regression blocks for the five-second SQLite timeout, then raises.
+        assert time.monotonic() - started < 2
+    finally:
+        release.set()
+        thread.join(10)
+    assert not failures

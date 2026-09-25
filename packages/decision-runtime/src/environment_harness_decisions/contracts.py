@@ -220,7 +220,6 @@ class DecisionReceipt(Record):
     status: Literal["completed", "handoff", "abstained", "rejected", "cancelled", "uncertain"]
     reason: str
     cost_micros: int = Field(ge=0, strict=True)
-    reserved_micros: int = Field(default=0, ge=0, strict=True)
     charge_resolved: bool
     effects_resolved: bool
     execution_ids: tuple[str, ...] = ()
