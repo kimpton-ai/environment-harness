@@ -640,7 +640,9 @@ class EvidenceStore:
                 generation=row["generation"],
             )
 
-    def artifact(self, environment, access, data: bytes, audience=(), media_type="application/octet-stream"):
+    def artifact(
+        self, environment, access, data: bytes, audience=(), media_type="application/octet-stream", *, operation_id=None
+    ):
         with self.transaction() as db:
             row = self.environment(db, environment, access, "artifact.write")
             if len(data) > json.loads(row["manifest"])["policy"]["max_artifact_bytes"]:

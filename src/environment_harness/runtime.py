@@ -207,7 +207,8 @@ class _SessionRuntime:
             raise ValueError("invalid environment-session cursor")
         with self.store.transaction() as db:
             rows = db.execute(
-                "SELECT * FROM environments WHERE tenant=? AND (CAST(? AS TEXT) IS NULL OR id=?) "
+                "SELECT * FROM environments WHERE tenant=? AND status<>'branch_copy_pending' "
+                "AND (CAST(? AS TEXT) IS NULL OR id=?) "
                 "AND (CAST(? AS TEXT) IS NULL OR id<?) ORDER BY id DESC LIMIT ?",
                 (access.tenant, access.session, access.session, cursor, cursor, limit + 1),
             ).fetchall()
@@ -933,6 +934,302 @@ class _SessionRuntime:
                 self.release(environment, access, lease)
 
     def branch(
+        self,
+        environment,
+        access,
+        checkpoint,
+        interventions=None,
+        *,
+        new_environment=None,
+        turns=None,
+        hosted_artifact_budget=None,
+        authorized_expires_at=None,
+        authorized_retention_deadline=None,
+        authorized_cleanup_deadline=None,
+    ):
+        """Create a child Session, installing and charging hosted-copy budgets first.
+
+        Host-only keyword arguments are supplied by a trusted deployment adapter;
+        they are never accepted by the public session branch endpoint.
+        """
+        if hosted_artifact_budget is not None or any(
+            value is not None
+            for value in (
+                authorized_expires_at,
+                authorized_retention_deadline,
+                authorized_cleanup_deadline,
+            )
+        ):
+            return self._branch_hosted(
+                environment,
+                access,
+                checkpoint,
+                interventions,
+                new_environment=new_environment,
+                turns=turns,
+                hosted_artifact_budget=hosted_artifact_budget,
+                authorized_expires_at=authorized_expires_at,
+                authorized_retention_deadline=authorized_retention_deadline,
+                authorized_cleanup_deadline=authorized_cleanup_deadline,
+            )
+        with self.store.transaction() as db:
+            parent = self.store.environment(db, environment, access, "session.control")
+            hosted_budget = getattr(self.store, "_hosted_artifact_budget", None)
+            if getattr(self.store, "require_hosted_artifact_budget", False) or (
+                callable(hosted_budget) and hosted_budget(db, parent) is not None
+            ):
+                raise Conflict("hosted branch requires an independently authorized child artifact budget")
+        return self._branch_legacy(
+            environment,
+            access,
+            checkpoint,
+            interventions,
+            new_environment=new_environment,
+            turns=turns,
+        )
+
+    def _branch_hosted(
+        self,
+        environment,
+        access,
+        checkpoint,
+        interventions=None,
+        *,
+        new_environment,
+        turns,
+        hosted_artifact_budget,
+        authorized_expires_at,
+        authorized_retention_deadline,
+        authorized_cleanup_deadline,
+    ):
+        """Create a private child and resume journaled source-to-child copies."""
+        install_budget = getattr(self.store, "install_hosted_artifact_budget", None)
+        read_artifact = getattr(self.store, "read_artifact", None)
+        write_branch_artifact = getattr(self.store, "branch_artifact", None)
+        if (
+            not callable(install_budget)
+            or not callable(read_artifact)
+            or not callable(write_branch_artifact)
+            or hosted_artifact_budget is None
+            or new_environment is None
+            or any(
+                type(deadline) is not int
+                for deadline in (
+                    authorized_expires_at,
+                    authorized_retention_deadline,
+                    authorized_cleanup_deadline,
+                )
+            )
+        ):
+            raise Conflict("hosted branch requires a frozen child artifact envelope and host deadlines")
+        if len(new_environment) != 32 or any(c not in "0123456789abcdef" for c in new_environment):
+            raise ValueError("invalid branch ID")
+        changes = interventions or {}
+        import hashlib
+
+        with self.store.transaction() as db:
+            parent = self.store.environment(db, environment, access, "session.control")
+            if self.store._hosted_artifact_budget(db, parent) is None:
+                raise Conflict("hosted child copies require a budgeted source session")
+            spec = self._compatible(parent)
+            if not spec.environment.capabilities.branch:
+                raise Unsupported("environment cannot implement counterfactual branches")
+            saved = db.execute(
+                "SELECT * FROM checkpoints WHERE environment=? AND id=?", (environment, checkpoint)
+            ).fetchone()
+            if not saved:
+                raise Forbidden("checkpoint unavailable")
+            snapshot = json.loads(saved["body"])
+            if digest(snapshot) != saved["hash"]:
+                raise Conflict("checkpoint integrity failure")
+            if snapshot["manifest"] != parent["manifest"]:
+                raise Conflict("checkpoint version mismatch")
+            if snapshot["operations"] or snapshot["actions"]:
+                raise Unsupported("branch requires a checkpoint without pending decisions or operations")
+            if spec.policy.external_writes:
+                raise Unsupported("live writes cannot be inherited by a counterfactual branch")
+            state = self.environment.intervene(json.loads(snapshot["state"]), changes)
+            manifest = json.loads(snapshot["manifest"])
+            manifest["interventions"] = changes
+            if len(encode(state)) > spec.policy.max_state_bytes:
+                raise Conflict("state limit exceeded")
+            manifest_json = encode(manifest)
+            manifest_sha256 = hashlib.sha256(manifest_json.encode()).hexdigest()
+            existing = self.store._environment_row(db, new_environment)
+            if existing is not None:
+                if (
+                    existing["tenant"] != access.tenant
+                    or existing["parent"] != environment
+                    or existing["checkpoint"] != checkpoint
+                    or existing["manifest"] != manifest_json
+                ):
+                    raise Conflict("branch ID reused")
+                if existing["status"] != "branch_copy_pending":
+                    return self._public(existing)
+                copy_intent = db.execute(
+                    "SELECT * FROM hosted_branch_copies WHERE environment=? FOR UPDATE",
+                    (new_environment,),
+                ).fetchone()
+                if (
+                    copy_intent is None
+                    or copy_intent["parent"] != environment
+                    or copy_intent["status"] != "pending"
+                    or copy_intent["checkpoint_sha256"] != saved["hash"]
+                    or copy_intent["turns"] != turns
+                ):
+                    raise Conflict("hosted branch recovery intent does not match this request")
+            else:
+                scheduler = json.loads(snapshot["scheduler"])
+                scheduler.pop("closed", None)
+                scheduler["deadline"] = time.time() + spec.environment.phase_seconds
+                db.execute(
+                    """INSERT INTO environments (id,tenant,manifest,state,revision,scheduler,rng,participants,cursors,status,lineage,parent,checkpoint)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        new_environment,
+                        parent["tenant"],
+                        manifest_json,
+                        encode(state),
+                        snapshot["revision"],
+                        encode(scheduler),
+                        snapshot["rng"],
+                        snapshot["participants"],
+                        snapshot["cursors"],
+                        "branch_copy_pending",
+                        parent["lineage"],
+                        environment,
+                        checkpoint,
+                    ),
+                )
+                now = time.time()
+                db.execute(
+                    "INSERT INTO hosted_branch_copies VALUES (?,?,?,?,'pending',?,?)",
+                    (new_environment, environment, saved["hash"], turns, now, now),
+                )
+
+        install_budget(
+            new_environment,
+            hosted_artifact_budget,
+            expected_manifest_sha256=manifest_sha256,
+            authorized_expires_at=authorized_expires_at,
+            authorized_retention_deadline=authorized_retention_deadline,
+            authorized_cleanup_deadline=authorized_cleanup_deadline,
+        )
+        artifacts = snapshot.get("artifacts", [])
+        aliases = {}
+        for source_artifact in artifacts:
+            source_id = source_artifact["id"]
+            operation_suffix = hashlib.sha256(source_id.encode()).hexdigest()
+            child_operation_id = f"branch-put:{environment}:{operation_suffix}"
+            with self.store.transaction() as db:
+                child_op = db.execute(
+                    "SELECT status FROM artifact_operations WHERE environment=? AND operation_id=?",
+                    (new_environment, child_operation_id),
+                ).fetchone()
+                if child_op is not None and child_op["status"] == "committed":
+                    target = self.store._operation_key(new_environment, child_operation_id)
+                    saved_child = db.execute(
+                        "SELECT * FROM artifacts WHERE environment=? AND id=?",
+                        (new_environment, target),
+                    ).fetchone()
+                    if (
+                        saved_child is None
+                        or saved_child["sha256"] != source_artifact["sha256"]
+                        or saved_child["size"] != source_artifact["size"]
+                        or saved_child["media_type"] != source_artifact["media_type"]
+                        or saved_child["audience"] != source_artifact["audience"]
+                    ):
+                        raise Conflict("hosted branch copy record does not match its source artifact")
+                    aliases[source_id] = target
+                    continue
+                if child_op is not None and child_op["status"] == "in_flight" and child_op["attempt_until"] > time.time():
+                    raise Conflict("hosted branch artifact copy is still in progress")
+            parent_operation_id = f"branch-get:{new_environment}:{operation_suffix}"
+            data, media_type = read_artifact(
+                environment,
+                access,
+                source_id,
+                operation_id=parent_operation_id,
+            )
+            if hashlib.sha256(data).hexdigest() != source_artifact["sha256"]:
+                raise Conflict("inherited artifact integrity failure")
+            copied = write_branch_artifact(
+                new_environment,
+                access,
+                data,
+                audience=json.loads(source_artifact["audience"]),
+                media_type=media_type,
+                operation_id=child_operation_id,
+            )
+            aliases[source_id] = copied["id"]
+        for alias in snapshot.get("artifact_aliases", []):
+            if alias["artifact"] not in aliases:
+                raise Conflict("hosted branch alias has no copied source artifact")
+            aliases[alias["alias"]] = aliases[alias["artifact"]]
+
+        with self.store.transaction() as db:
+            self.store.environment(db, environment, access, "session.control")
+            child_row = self.store._environment_row(db, new_environment)
+            intent = db.execute(
+                "SELECT * FROM hosted_branch_copies WHERE environment=? FOR UPDATE",
+                (new_environment,),
+            ).fetchone()
+            if (
+                child_row is None
+                or child_row["status"] != "branch_copy_pending"
+                or intent is None
+                or intent["status"] != "pending"
+                or child_row["manifest"] != manifest_json
+            ):
+                raise Conflict("hosted branch changed before copy completion")
+            expected_ids = {item["id"] for item in artifacts}
+            if set(aliases) < expected_ids:
+                raise Conflict("hosted branch artifact inventory is incomplete")
+            for alias, target in aliases.items():
+                existing_alias = db.execute(
+                    "SELECT artifact FROM artifact_aliases WHERE environment=? AND alias=?",
+                    (new_environment, alias),
+                ).fetchone()
+                if existing_alias and existing_alias["artifact"] != target:
+                    raise Conflict("hosted branch alias changed during recovery")
+                db.execute(
+                    "INSERT INTO artifact_aliases VALUES (?,?,?) ON CONFLICT DO NOTHING",
+                    (new_environment, alias, target),
+                )
+            if snapshot.get("evidence_cursor") is not None:
+                for event in db.execute(
+                    "SELECT * FROM events WHERE environment=? AND seq<=? ORDER BY seq",
+                    (environment, snapshot["evidence_cursor"]),
+                ).fetchall():
+                    inherit(self.store, db, new_environment, snapshot["revision"], event, spec.policy.max_event_bytes)
+            self.store.append(
+                db,
+                new_environment,
+                snapshot["revision"],
+                "session.branched",
+                {
+                    "parent": environment,
+                    "checkpoint": checkpoint,
+                    "checkpoint_hash": saved["hash"],
+                    "interventions": changes,
+                    "lineage": parent["lineage"],
+                    "split": spec.split,
+                },
+            )
+            self._register_child_session(db, environment, new_environment, checkpoint, snapshot, turns)
+            db.execute(
+                "UPDATE environments SET status=? WHERE id=?",
+                (snapshot["status"], new_environment),
+            )
+            db.execute(
+                "UPDATE hosted_branch_copies SET status='completed',updated=? WHERE environment=?",
+                (time.time(), new_environment),
+            )
+            return self._public(
+                db.execute("SELECT * FROM environments WHERE id=?", (new_environment,)).fetchone()
+            )
+
+    def _branch_legacy(
         self, environment, access, checkpoint, interventions=None, *, new_environment=None, turns=None
     ):
         with self.store.transaction() as db:
