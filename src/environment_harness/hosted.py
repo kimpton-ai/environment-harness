@@ -167,11 +167,15 @@ class PostgresEvidenceStore(EvidenceStore):
         migrations = files("environment_harness").joinpath("migrations")
         with self.connect() as connection:
             connection.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (self.schema,))
-            connection.execute(
-                postgres_sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(
-                    postgres_sql.Identifier(self.schema)
+            schema_exists = connection.execute(
+                "SELECT to_regnamespace(%s) IS NOT NULL AS present", (self.schema,)
+            ).fetchone()
+            if schema_exists is None or not schema_exists["present"]:
+                connection.execute(
+                    postgres_sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(
+                        postgres_sql.Identifier(self.schema)
+                    )
                 )
-            )
             connection.execute(
                 "CREATE TABLE IF NOT EXISTS schema_migrations "
                 "(version TEXT PRIMARY KEY, sha256 TEXT NOT NULL)"

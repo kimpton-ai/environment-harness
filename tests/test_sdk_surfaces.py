@@ -491,6 +491,7 @@ def test_postgres_connect_and_migrations_are_scoped_and_immutable(monkeypatch):
 
     class Database:
         applied = None
+        schema_exists = True
 
         def __enter__(self):
             return self
@@ -500,6 +501,8 @@ def test_postgres_connect_and_migrations_are_scoped_and_immutable(monkeypatch):
 
         def execute(self, sql, params=()):
             operations.append((sql, params))
+            if isinstance(sql, str) and sql.startswith("SELECT to_regnamespace"):
+                return types.SimpleNamespace(fetchone=lambda: {"present": self.schema_exists})
             if isinstance(sql, str) and sql.startswith("SELECT sha256"):
                 return types.SimpleNamespace(fetchone=lambda: self.applied)
             return types.SimpleNamespace(fetchone=lambda: None)
@@ -531,6 +534,10 @@ def test_postgres_connect_and_migrations_are_scoped_and_immutable(monkeypatch):
     )
     monkeypatch.setattr("importlib.resources.files", lambda _package: resources)
     store.initialize()
+    assert not any(
+        isinstance(sql, str) and sql.startswith("CREATE SCHEMA IF NOT EXISTS")
+        for sql, _params in operations
+    )
     assert any(sql == b"CREATE TABLE safe(id int)" for sql, _params in operations)
     assert any(
         isinstance(sql, str) and sql.startswith("INSERT INTO schema_migrations")
