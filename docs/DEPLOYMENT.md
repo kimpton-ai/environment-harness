@@ -240,9 +240,12 @@ operator must qualify at least:
 - live acceptance tests for the chosen infrastructure.
 
 Hosted artifact accounting is an explicit opt-in. A hosted composition must construct
-`PostgresEvidenceStore` with `require_hosted_artifact_budget=True` and install a frozen
-`HostedArtifactBudget` before exposing a session to execution. The host binds that budget to the
-stored manifest digest and the persisted session, retention, and cleanup deadlines. The budget
+`PostgresEvidenceStore` with `require_hosted_artifact_budget=True`, or durably call
+`require_hosted_artifact_budget_for(environment_id)` for each new host-selected session before
+initialization, and install a frozen `HostedArtifactBudget` before exposing that session to
+execution. The per-environment marker survives process restarts and makes missing-budget access
+fail closed, while preserving legacy behavior for existing unmarked sessions. The host binds that
+budget to the stored manifest digest and the persisted session, retention, and cleanup deadlines. The budget
 durably reserves provider attempts before I/O, including ambiguous retries, and uses stable
 operation IDs so a repeated write targets the same object key. It also charges bounded GET,
 inventory, delete, and control-response envelopes. Existing local and legacy hosted compositions

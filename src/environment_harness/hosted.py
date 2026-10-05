@@ -106,11 +106,48 @@ class PostgresEvidenceStore(EvidenceStore):
         budgeted = db.execute(
             "SELECT 1 FROM hosted_artifact_budgets WHERE environment=?", (environment,)
         ).fetchone()
+        host_create_retry = (
+            action == "session.create"
+            and row["revision"] == 0
+            and row["lease_owner"] is None
+        )
+        if budgeted is None and self._budget_required(db, environment) and not host_create_retry:
+            raise Conflict("hosted session is missing its immutable artifact budget")
         if budgeted and db.execute(
             "SELECT purge_started FROM artifact_budget_usage WHERE environment=?", (environment,)
         ).fetchone()["purge_started"]:
             raise Conflict("hosted session is fenced for erasure")
         return row
+
+    def _budget_required(self, db, environment):
+        if self.require_hosted_artifact_budget:
+            return True
+        return db.execute(
+            "SELECT 1 FROM hosted_artifact_requirements WHERE environment=?",
+            (environment,),
+        ).fetchone() is not None
+
+    def require_hosted_artifact_budget_for(self, environment):
+        """Durably mark one host-chosen ID strict before its native initialization.
+
+        This keeps old unmarked sessions on their historical behavior while a
+        new hosted admission cannot use the compatibility fallback if budget
+        installation is interrupted.
+        """
+        if not isinstance(environment, str) or not re.fullmatch(r"[a-f0-9]{32}", environment):
+            raise ValueError("valid stable hosted environment ID required")
+        with self.transaction() as db:
+            row = self._environment_row(db, environment)
+            if row is not None:
+                if self._hosted_artifact_budget(db, row) is not None:
+                    return
+                if row["lease_owner"] is not None or row["revision"] != 0:
+                    raise Conflict("hosted artifact requirement must precede session activity")
+            db.execute(
+                "INSERT INTO hosted_artifact_requirements(environment,created) VALUES (?,?) "
+                "ON CONFLICT(environment) DO NOTHING",
+                (environment, time.time()),
+            )
 
     def _event_page(self, db, environment, after, access, limit):
         return db.execute(
@@ -406,7 +443,7 @@ class PostgresEvidenceStore(EvidenceStore):
                 raise ValueError("unknown artifact audience")
             budget = self._hosted_artifact_budget(db, row)
             if budget is None:
-                if self.require_hosted_artifact_budget:
+                if self._budget_required(db, environment):
                     raise Conflict("hosted session is missing its immutable artifact budget")
                 key = uid()
                 self._check_artifact_budget(db, environment, len(data))
@@ -567,7 +604,7 @@ class PostgresEvidenceStore(EvidenceStore):
                 raise Conflict("artifact unavailable")
             budget = self._hosted_artifact_budget(db, row)
             if budget is None:
-                if self.require_hosted_artifact_budget:
+                if self._budget_required(db, environment):
                     raise Conflict("hosted session is missing its immutable artifact budget")
                 data = self._read_artifact(environment, artifact["id"])
             else:
@@ -958,7 +995,7 @@ class PostgresEvidenceStore(EvidenceStore):
                     identity,
                     provider_quiescence_sha256=provider_quiescence_sha256,
                 )
-            elif self.require_hosted_artifact_budget:
+            elif self._budget_required(db, identity):
                 raise Conflict("hosted session is missing its immutable artifact budget")
         with self.transaction() as db:
             rows = db.execute(

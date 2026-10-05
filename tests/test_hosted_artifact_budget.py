@@ -207,6 +207,43 @@ def test_hosted_budget_denial_happens_before_provider_request(hosted_store):
     assert objects.calls == []
 
 
+def test_host_required_marker_survives_restart_and_create_retry_fails_closed(hosted_store):
+    store, objects = hosted_store
+    environment = uuid4().hex
+    access = trusted_local("budget-test")
+    env = SyntheticEnvironment()
+    spec = ExperimentSpec(
+        environment=env.spec,
+        participants=(AgentSpec(id="alice", implementation="synthetic", policy_version="1"),),
+    )
+    store.require_hosted_artifact_budget_for(environment)
+    session = _SessionRuntime(store, env)
+    session.create(spec, access, environment_id=environment)
+
+    # The host can replay its stable create request after a crash and then
+    # finish installing the budget. No artifact call can use the legacy path.
+    session.create(spec, access, environment_id=environment)
+    restarted = PostgresEvidenceStore(store.dsn, objects, schema=store.schema)
+    with pytest.raises(Conflict, match="missing its immutable artifact budget"):
+        restarted.artifact(environment, access, b"payload", operation_id="unbudgeted")
+    assert objects.calls == []
+
+    with restarted.transaction() as db:
+        row = restarted._environment_row(db, environment)
+        manifest_sha = hashlib.sha256(row["manifest"].encode()).hexdigest()
+    restarted.install_hosted_artifact_budget(
+        environment,
+        _budget(),
+        expected_manifest_sha256=manifest_sha,
+        authorized_expires_at=int(time.time()) + 300,
+        authorized_retention_deadline=int(time.time()) + 600,
+        authorized_cleanup_deadline=int(time.time()) + 900,
+    )
+    saved = restarted.artifact(environment, access, b"payload", operation_id="budgeted")
+    assert saved["size"] == 7
+    assert [kind for kind, _ in objects.calls] == ["put"]
+
+
 def test_hosted_put_charges_fixed_provider_request_units_before_io(hosted_store):
     store, objects = hosted_store
     objects.put_request_units = 3

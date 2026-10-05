@@ -62,7 +62,7 @@ class _SessionRuntime:
         with self.store.transaction() as db:
             existing = db.execute("SELECT * FROM environments WHERE id=?", (environment,)).fetchone()
             if existing:
-                self.store.environment(db, environment, access, "session.read")
+                self.store.environment(db, environment, access, "session.create")
                 if existing["manifest"] != encode(manifest):
                     raise Conflict("session id reused with different experiment")
                 return self._public(existing)
@@ -72,7 +72,7 @@ class _SessionRuntime:
         with self.store.transaction() as db:
             existing = db.execute("SELECT * FROM environments WHERE id=?", (environment,)).fetchone()
             if existing:
-                self.store.environment(db, environment, access, "session.read")
+                self.store.environment(db, environment, access, "session.create")
                 if existing["manifest"] != encode(manifest):
                     raise Conflict("session id reused with different experiment")
                 return self._public(existing)
