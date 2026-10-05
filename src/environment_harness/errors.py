@@ -22,6 +22,12 @@ class Conflict(HarnessError):
     code = "conflict"
 
 
+class ProviderQuiescenceRequired(Conflict):
+    """Cleanup is fenced because an artifact gateway write may still finish."""
+
+    code = "provider_quiescence_required"
+
+
 class Unsupported(HarnessError):
     """An unknown required feature or an unsupported contract kind."""
 

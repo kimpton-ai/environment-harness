@@ -14,7 +14,7 @@ from environment_harness.contracts import (
     HostedArtifactBudget,
     RunPolicy,
 )
-from environment_harness.errors import Conflict
+from environment_harness.errors import Conflict, ProviderQuiescenceRequired
 from environment_harness.fixtures import SyntheticEnvironment
 from environment_harness.hosted import PostgresEvidenceStore
 from environment_harness.runner import inference_context
@@ -32,6 +32,13 @@ class MemoryArtifacts:
         self.values = {}
         self.calls = []
         self.fail_after_put_once = False
+        self.routes = []
+
+    def for_route(self, route_id):
+        self.routes.append(route_id)
+        if route_id not in {"capacity_short", "qualification_long"}:
+            raise ValueError("unsupported route")
+        return self
 
     def put(self, key, data):
         self.values[key] = data
@@ -100,6 +107,8 @@ def _budget(
     cleanup_deletes = max(1, (max_lifetime_objects + 999) // 1000)
     now = int(time.time())
     return HostedArtifactBudget(
+        artifact_route_id="qualification_long",
+        artifact_route_receipt_sha256="a" * 64,
         max_live_bytes=max_live_bytes,
         max_lifetime_uploaded_bytes=max_live_bytes,
         max_lifetime_objects=max_lifetime_objects,
@@ -331,6 +340,7 @@ def test_hosted_purge_uses_durable_exact_prefix_pages(hosted_store):
     assert not objects.values
     assert [kind for kind, _ in objects.calls].count("list") == 2
     assert [kind for kind, _ in objects.calls].count("delete") == 1
+    assert "qualification_long" in objects.routes
 
 
 def test_hosted_purge_fences_unknown_writes_until_provider_quiescence(hosted_store):
@@ -340,7 +350,7 @@ def test_hosted_purge_fences_unknown_writes_until_provider_quiescence(hosted_sto
     with pytest.raises(TimeoutError):
         store.artifact(environment, access, b"payload", operation_id="unknown-write")
 
-    with pytest.raises(Conflict, match="provider quiescence"):
+    with pytest.raises(ProviderQuiescenceRequired):
         store.purge_tenant("budget-test", confirm="permanently-delete:budget-test")
     provider_calls = list(objects.calls)
     with pytest.raises(Conflict, match="fenced"):
@@ -354,6 +364,67 @@ def test_hosted_purge_fences_unknown_writes_until_provider_quiescence(hosted_sto
     )
     assert result["objects_deleted"] == 1
     assert not objects.values
+
+
+def test_hosted_expiry_purges_one_prefix_and_retains_evidence(hosted_store, monkeypatch):
+    store, objects = hosted_store
+    environment, access = _new_session(store)
+    artifact = store.artifact(environment, access, b"retained", operation_id="expiry-artifact")
+    original_time = time.time
+    monkeypatch.setattr("environment_harness.hosted.time.time", lambda: original_time() + 500)
+    with pytest.raises(Conflict, match="retention has not expired"):
+        store.purge_environment_artifacts(
+            environment, confirm="expire-artifacts:" + environment
+        )
+
+    monkeypatch.setattr("environment_harness.hosted.time.time", lambda: original_time() + 700)
+    result = store.purge_environment_artifacts(
+        environment, confirm="expire-artifacts:" + environment
+    )
+    assert result == {
+        "schema_version": "hosted-artifact-expiry.v1",
+        "environment": environment,
+        "deleted_objects": 1,
+        "status": "purged",
+    }
+    assert not any(key.startswith(environment + "/") for key in objects.values)
+    with store.transaction() as db:
+        assert db.execute(
+            "SELECT 1 FROM artifacts WHERE environment=? AND id=?",
+            (environment, artifact["id"]),
+        ).fetchone()
+        assert db.execute(
+            "SELECT purge_complete FROM artifact_budget_usage WHERE environment=?",
+            (environment,),
+        ).fetchone()["purge_complete"]
+
+
+def test_hosted_expiry_keeps_unknown_gateway_put_pending(hosted_store, monkeypatch):
+    store, objects = hosted_store
+    environment, access = _new_session(store)
+    objects.fail_after_put_once = True
+    with pytest.raises(TimeoutError):
+        store.artifact(environment, access, b"unknown", operation_id="expiry-unknown-put")
+    original_time = time.time
+    monkeypatch.setattr("environment_harness.hosted.time.time", lambda: original_time() + 700)
+
+    with pytest.raises(Conflict, match="provider quiescence is required"):
+        store.purge_environment_artifacts(
+            environment, confirm="expire-artifacts:" + environment
+        )
+    assert any(key.startswith(environment + "/") for key in objects.values)
+    with store.transaction() as db:
+        usage = db.execute(
+            "SELECT purge_started,purge_complete FROM artifact_budget_usage WHERE environment=?",
+            (environment,),
+        ).fetchone()
+        operation = db.execute(
+            "SELECT status FROM artifact_operations WHERE environment=? AND operation_id=?",
+            (environment, "expiry-unknown-put"),
+        ).fetchone()
+    assert usage["purge_started"] is True
+    assert usage["purge_complete"] is False
+    assert operation["status"] == "unknown"
 
 
 def test_hosted_branch_installs_child_budget_and_recovers_stable_artifact_copy(hosted_store):
@@ -370,7 +441,9 @@ def test_hosted_branch_installs_child_budget_and_recovers_stable_artifact_copy(h
 
     child = uuid4().hex
     objects.fail_after_put_once = True
-    child_budget = _budget(max_lifetime_objects=2, max_put_attempts=2, max_get_attempts=1)
+    child_budget = _budget(max_lifetime_objects=2, max_put_attempts=2, max_get_attempts=1).model_copy(
+        update={"artifact_route_id": "capacity_short"}
+    )
     deadlines = {
         "authorized_expires_at": child_budget.expires_at,
         "authorized_retention_deadline": child_budget.retention_deadline,
@@ -400,6 +473,8 @@ def test_hosted_branch_installs_child_budget_and_recovers_stable_artifact_copy(h
     )
     assert result["id"] == child
     assert store.read_artifact(child, access, source["id"])[0] == b"branch-payload"
+    assert "qualification_long" in objects.routes
+    assert "capacity_short" in objects.routes
     with store.transaction() as db:
         intent = db.execute(
             "SELECT status FROM hosted_branch_copies WHERE environment=?", (child,)

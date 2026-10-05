@@ -113,6 +113,10 @@ class HostedArtifactBudget(Record):
     """Frozen, durable provider-I/O limits for an explicitly hosted session."""
 
     protocol: Literal["hosted-artifact-budget.v1"] = "hosted-artifact-budget.v1"
+    # Host-owned physical storage lifecycle. This is persisted with the exact
+    # environment budget and is never inferred from a mutable workspace map.
+    artifact_route_id: Literal["capacity_short", "qualification_long"]
+    artifact_route_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     max_live_bytes: int = Field(strict=True, ge=1)
     max_lifetime_uploaded_bytes: int = Field(strict=True, ge=1)
     max_lifetime_objects: int = Field(strict=True, ge=1)

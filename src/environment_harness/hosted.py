@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from typing import cast
 
 from .contracts import HostedArtifactBudget
-from .errors import Conflict
+from .errors import Conflict, ProviderQuiescenceRequired
 from .store import EvidenceStore, digest, encode, uid
 
 ARTIFACT_ATTEMPT_LEASE_SECONDS = 65
@@ -245,6 +245,17 @@ class PostgresEvidenceStore(EvidenceStore):
             raise Conflict("hosted artifact budget is bound to another immutable session")
         return HostedArtifactBudget.model_validate_json(stored["budget"])
 
+    def _artifact_store_for_budget(self, budget):
+        """Resolve the immutable host route for one environment budget."""
+        route_id = budget.artifact_route_id
+        resolver = getattr(self.object_store, "for_route", None)
+        if not callable(resolver):
+            raise Conflict("hosted artifact adapter cannot resolve immutable storage routes")
+        store = resolver(route_id)
+        if store is None:
+            raise Conflict("hosted artifact storage route is unavailable")
+        return store
+
     def install_hosted_artifact_budget(
         self,
         environment,
@@ -288,6 +299,9 @@ class PostgresEvidenceStore(EvidenceStore):
                 raise Conflict("hosted PUT allowance cannot cover one write per lifetime object")
             if self.max_retained_bytes is not None and budget.max_live_bytes > self.max_retained_bytes:
                 raise Conflict("hosted live allowance exceeds the deployment storage ceiling")
+            # Validate the route while installing the envelope, before exposing
+            # the session or allowing the first provider request.
+            self._artifact_store_for_budget(budget)
             if budget.max_egress_bytes < budget.max_get_attempts * (
                 budget.max_object_bytes + self._get_overread_bound()
             ):
@@ -458,8 +472,9 @@ class PostgresEvidenceStore(EvidenceStore):
                     {"id": key, "sha256": sha, "size": len(data)}, audience,
                 )
                 return {"id": key, "sha256": sha, "size": len(data), "media_type": media_type}
-            put_once = getattr(self.object_store, "put_once", None)
-            units = getattr(self.object_store, "put_request_units", None)
+            object_store = self._artifact_store_for_budget(budget)
+            put_once = getattr(object_store, "put_once", None)
+            units = getattr(object_store, "put_request_units", None)
             if not callable(put_once) or type(units) is not int or units < 1:
                 raise Conflict("hosted artifact adapter lacks bounded single-attempt writes")
             put_response_limit = self._control_response_limit("max_put_response_bytes")
@@ -609,9 +624,6 @@ class PostgresEvidenceStore(EvidenceStore):
                 data = self._read_artifact(environment, artifact["id"])
             else:
                 self._check_deadline(budget, retained_read=True)
-                bounded_get = getattr(self.object_store, "get_bounded", None)
-                if not callable(bounded_get):
-                    raise Conflict("hosted artifact adapter lacks bounded reads")
                 if artifact["size"] > budget.max_object_bytes:
                     raise Conflict("hosted artifact metadata exceeds the object allowance")
                 usage = self._ensure_artifact_usage(db, environment)
@@ -660,6 +672,10 @@ class PostgresEvidenceStore(EvidenceStore):
                 )
         if budget is not None:
             try:
+                object_store = self._artifact_store_for_budget(budget)
+                bounded_get = getattr(object_store, "get_bounded", None)
+                if not callable(bounded_get):
+                    raise Conflict("hosted artifact adapter lacks bounded reads")
                 data = bounded_get(
                     f"{environment}/{artifact['id']}", budget.max_object_bytes
                 )
@@ -683,8 +699,16 @@ class PostgresEvidenceStore(EvidenceStore):
         return data, artifact["media_type"]
 
     def _purge_budgeted_environment(self, environment, *, provider_quiescence_sha256):
-        list_page = getattr(self.object_store, "list_page", None)
-        delete_batch = getattr(self.object_store, "delete_batch", None)
+        with self.transaction() as db:
+            row = self._environment_row(db, environment)
+            if row is None:
+                raise Conflict("hosted cleanup target disappeared")
+            budget = self._hosted_artifact_budget(db, row)
+            if budget is None:
+                raise Conflict("hosted cleanup budget disappeared")
+        object_store = self._artifact_store_for_budget(budget)
+        list_page = getattr(object_store, "list_page", None)
+        delete_batch = getattr(object_store, "delete_batch", None)
         if not callable(list_page) or not callable(delete_batch):
             raise Conflict("hosted artifact adapter lacks bounded cleanup operations")
         list_response_limit = self._control_response_limit("max_list_response_bytes")
@@ -712,7 +736,9 @@ class PostgresEvidenceStore(EvidenceStore):
                 (environment,),
             ).fetchone()[0]
             if unresolved_puts and usage["provider_quiescence_sha256"] is None and provider_quiescence_sha256 is None:
-                raise Conflict("provider quiescence is required to erase unresolved artifact writes")
+                raise ProviderQuiescenceRequired(
+                    "provider quiescence is required to erase unresolved artifact writes"
+                )
             if provider_quiescence_sha256 is not None:
                 db.execute(
                     "UPDATE artifact_budget_usage SET provider_quiesced_at=?,provider_quiescence_sha256=? "
@@ -955,6 +981,40 @@ class PostgresEvidenceStore(EvidenceStore):
                 )
                 raise
 
+
+    def purge_environment_artifacts(self, environment, *, confirm):
+        """Erase one expired hosted environment's objects, retaining its evidence rows.
+
+        This internal host operation is narrower than tenant erasure. It fences future
+        artifact I/O and leaves the immutable session, events, artifact index and cleanup
+        journal available for audit. Ambiguous writes keep the operation pending unless
+        the gateway itself has positively reconciled them.
+        """
+        if not isinstance(environment, str) or not environment or confirm != "expire-artifacts:" + environment:
+            raise ValueError("exact hosted environment expiry confirmation required")
+        with self.transaction() as db:
+            row = self._environment_row(db, environment)
+            if row is None:
+                raise Conflict("hosted artifact expiry target disappeared")
+            budget = self._hosted_artifact_budget(db, row)
+            if budget is None:
+                if self._budget_required(db, environment):
+                    raise Conflict("hosted session is missing its immutable artifact budget")
+                raise Conflict("legacy hosted session has no finite artifact expiry")
+            if time.time() < budget.retention_deadline:
+                raise Conflict("hosted artifact retention has not expired")
+            if row["lease_until"] > time.time():
+                raise Conflict("active writer prevents hosted artifact expiry")
+        deleted = self._purge_budgeted_environment(
+            environment,
+            provider_quiescence_sha256=None,
+        )
+        return {
+            "schema_version": "hosted-artifact-expiry.v1",
+            "environment": environment,
+            "deleted_objects": deleted,
+            "status": "purged",
+        }
 
     def purge_tenant(self, tenant, *, confirm, provider_quiescence_sha256=None):
         """Trusted retention operation after the host proves every worker stopped.
