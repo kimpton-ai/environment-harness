@@ -56,6 +56,14 @@ Use a release candidate when the release needs real installation and integration
 the stable version. PyPI prereleases are immutable production-PyPI releases, but ordinary
 `pip install environment-harness` does not select them.
 
+### `0.4.0rc1` candidate
+
+The next release line adds opt-in hosted artifact operation budgets and PostgreSQL migrations
+`007` and `008`. Publish the reviewed `0.3.0` final release before tagging this candidate. Keep
+the `0.3.0` manifest below as the record of that stable release; the candidate's new behavior and
+remaining hosted qualification limits are in [Release scope](STATUS.md) and
+[Deployment](DEPLOYMENT.md).
+
 ### Frozen `0.3.0rc1` manifest
 
 The trajectory-contract program uses exactly one coordinated candidate, `0.3.0rc1`, followed by
@@ -215,6 +223,10 @@ make security
 `make check` runs Python tests, coverage gates, Ruff, Pyright, schema and OpenAPI drift checks,
 viewer drift, browser UI checks, TypeScript tests, and repository checks against those built artifacts.
 `make security` performs the full repository policy, dependency, and audit checks.
+
+The changed-line coverage floor is 80%. The separate aggregate and security-critical statement and
+branch floors remain enforced; cross-platform coverage combines the PostgreSQL-backed Python run
+with the compatibility shards so hosted paths are measured where their storage service is present.
 
 ### The fresh-environment walkthrough
 

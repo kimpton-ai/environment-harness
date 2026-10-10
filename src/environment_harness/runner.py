@@ -138,6 +138,9 @@ def _invoke(session, environment, access, observation, agent, work, lease, cance
             "participant": access.participant,
             "generation": access.generation,
             "revision": observation["revision"],
+            # Reset on replay of this durable agent-work operation, so each
+            # model call receives the same ordinal after a worker restart.
+            "_inference_call_sequence": [0],
         }
         with inference_context(correlation):
             payload = (

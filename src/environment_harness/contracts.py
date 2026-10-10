@@ -101,6 +101,63 @@ class AgentSpec(Record):
     checkpoint: bool = False
 
 
+class ArtifactCleanupReserve(Record):
+    """Provider operations held back for exact-prefix artifact erasure."""
+
+    list_attempts: int = Field(strict=True, ge=1)
+    delete_attempts: int = Field(strict=True, ge=0)
+    delete_objects: int = Field(strict=True, ge=0)
+
+
+class HostedArtifactBudget(Record):
+    """Frozen, durable provider-I/O limits for an explicitly hosted session."""
+
+    protocol: Literal["hosted-artifact-budget.v1"] = "hosted-artifact-budget.v1"
+    # Host-owned physical storage lifecycle. This is persisted with the exact
+    # environment budget and is never inferred from a mutable workspace map.
+    artifact_route_id: Literal["capacity_short", "qualification_long"]
+    artifact_route_receipt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    max_live_bytes: int = Field(strict=True, ge=1)
+    max_lifetime_uploaded_bytes: int = Field(strict=True, ge=1)
+    max_lifetime_objects: int = Field(strict=True, ge=1)
+    max_object_bytes: int = Field(strict=True, ge=1, le=16_777_216)
+    max_put_attempts: int = Field(strict=True, ge=0)
+    max_get_attempts: int = Field(strict=True, ge=0)
+    max_list_attempts: int = Field(strict=True, ge=1)
+    max_delete_attempts: int = Field(strict=True, ge=0)
+    max_delete_objects: int = Field(strict=True, ge=0)
+    max_egress_bytes: int = Field(strict=True, ge=0)
+    max_control_response_bytes: int = Field(strict=True, ge=0)
+    cleanup_reserve: ArtifactCleanupReserve
+    expires_at: int = Field(strict=True, ge=1)
+    retention_deadline: int = Field(strict=True, ge=1)
+    cleanup_deadline: int = Field(strict=True, ge=1)
+
+    @model_validator(mode="after")
+    def consistent_limits(self):
+        if self.max_lifetime_uploaded_bytes < self.max_live_bytes:
+            raise ValueError("lifetime upload allowance must cover live artifact allowance")
+        if self.cleanup_reserve.delete_attempts > self.max_delete_attempts:
+            raise ValueError("cleanup delete reserve exceeds delete attempt limit")
+        if self.cleanup_reserve.list_attempts > self.max_list_attempts:
+            raise ValueError("cleanup list reserve exceeds list attempt limit")
+        if self.cleanup_reserve.delete_objects > self.max_delete_objects:
+            raise ValueError("cleanup object reserve exceeds delete object limit")
+        minimum_batches = (self.max_lifetime_objects + 999) // 1000
+        minimum_lists = minimum_batches + 1  # one final empty page proves exact-prefix emptiness
+        if self.cleanup_reserve.list_attempts < minimum_lists:
+            raise ValueError("cleanup list reserve cannot inventory the maximum object count")
+        if self.cleanup_reserve.delete_attempts < minimum_batches:
+            raise ValueError("cleanup delete reserve cannot delete the maximum object count")
+        if self.cleanup_reserve.delete_objects < self.max_lifetime_objects:
+            raise ValueError("cleanup object reserve must cover every lifetime object")
+        if self.retention_deadline <= self.expires_at:
+            raise ValueError("retention deadline must follow session expiry")
+        if self.cleanup_deadline < self.retention_deadline:
+            raise ValueError("cleanup deadline must cover the retained-data window")
+        return self
+
+
 class RunPolicy(Record):
     max_turns: int = Field(default=10000, ge=1)
     max_cost_micros: int = Field(default=0, ge=0)

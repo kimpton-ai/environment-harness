@@ -169,6 +169,47 @@ class EnvironmentClient:
             action,
         )
 
+    def upload_artifact(self, session, data, *, idempotency_key, media_type="application/octet-stream"):
+        """Upload bytes with a stable key callers can reuse to reconcile a lost reply."""
+
+        if not isinstance(data, bytes) or len(data) > 16_777_216:
+            raise ValueError("artifact data must be bytes within the 16 MiB object limit")
+        if (
+            not isinstance(idempotency_key, str)
+            or not 1 <= len(idempotency_key) <= 128
+            or not idempotency_key.isascii()
+            or any(not (character.isalnum() or character in "._:-") for character in idempotency_key)
+        ):
+            raise ValueError("an idempotency key of 1 to 128 characters is required")
+        if not isinstance(media_type, str) or not media_type or any(ch in media_type for ch in "\r\n"):
+            raise ValueError("a valid artifact media type is required")
+        request = urllib.request.Request(
+            self.endpoint + f"/v1/sessions/{self._key(session)}/artifacts",
+            data=data,
+            headers={
+                "Authorization": "Bearer " + self.token,
+                "Accept": "application/json",
+                "Content-Type": media_type,
+                "Idempotency-Key": idempotency_key,
+            },
+            method="POST",
+        )
+        try:
+            with self.opener.open(request, timeout=self.timeout) as response:
+                raw = response.read(4097)
+                if len(raw) > 4096:
+                    raise HarnessError("response size limit exceeded")
+                result = json.loads(raw)
+                if not isinstance(result, dict):
+                    raise HarnessError("service returned malformed artifact receipt")
+                return result
+        except urllib.error.HTTPError as error:
+            raise _service_error(error) from None
+        except urllib.error.URLError:
+            raise HarnessError(
+                "environment service unavailable; reconcile the artifact key before retrying"
+            ) from None
+
     def credentials(self, session, participant, *, ttl=3600):
         return self.request(
             "POST",

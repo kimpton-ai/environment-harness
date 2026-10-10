@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+
+- Hosted artifact budgets can be required per environment session in the PostgreSQL store. A
+  frozen budget reserves provider operations and bytes before I/O, uses stable object keys across
+  retries, and journals exact-prefix cleanup and branch-copy work. Existing sessions keep their
+  legacy behavior unless the host opts in. See [Deployment](docs/DEPLOYMENT.md) for the required
+  host setup and limits.
+
 ## 0.3.0 - 2026-10-10
 
 ### Breaking changes

@@ -915,7 +915,12 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
         tags=["Evidence"],
         summary="Store an artifact",
     )
-    async def artifact(session_id: str, request: Request, who=Depends(actor)):
+    async def artifact(
+        session_id: str,
+        request: Request,
+        idempotency_key: str | None = Header(None, alias="Idempotency-Key", min_length=1, max_length=128),
+        who=Depends(actor),
+    ):
         # The request-body middleware already rejects anything over 16 MiB with
         # `payload_too_large`, so this route does not repeat the bound.
         chunks = [chunk async for chunk in request.stream()]
@@ -924,6 +929,7 @@ def create_app(session, *, local_access=None, trajectory_ingestion=False):
             who,
             b"".join(chunks),
             media_type=request.headers.get("content-type", "application/octet-stream"),
+            operation_id=idempotency_key,
         )
 
     @app.get(

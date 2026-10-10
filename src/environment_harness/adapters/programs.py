@@ -1,5 +1,6 @@
 """Bounded command, HTTP, instrumented model and MCP boundaries."""
 
+import hashlib
 import json
 import math
 import os
@@ -207,8 +208,27 @@ class InstrumentedModel:
             request_digest = digest(request)
         except (TypeError, ValueError):
             raise Conflict("invalid inference evidence request") from None
-        call_id = uid()
         correlation = current_inference_context()
+        call_sequence = correlation.pop("_inference_call_sequence", None) if correlation is not None else None
+        if isinstance(call_sequence, list) and len(call_sequence) == 1 and type(call_sequence[0]) is int:
+            ordinal = call_sequence[0]
+            call_sequence[0] = ordinal + 1
+            call_id = hashlib.sha256(
+                encode(
+                    {
+                        "correlation": correlation,
+                        "request_digest": request_digest,
+                        "ordinal": ordinal,
+                    }
+                ).encode()
+            ).hexdigest()[:32]
+        elif correlation is None:
+            call_id = uid()
+        else:
+            # Preserve compatibility for callers outside the durable scheduler.
+            call_id = hashlib.sha256(
+                encode({"correlation": correlation, "request_digest": request_digest}).encode()
+            ).hexdigest()[:32]
         identity = {
             "call_id": call_id,
             "correlation": correlation,
@@ -299,6 +319,7 @@ class InstrumentedModel:
             body,
             audience=(self.access.participant,),
             media_type="application/json",
+            operation_id=f"inference:{payload['call_id']}:{purpose}",
         )
         summary = payload | {field: None for field in fields}
         summary["detail_artifact"] = artifact | {"purpose": purpose}

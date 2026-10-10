@@ -404,13 +404,21 @@ class EnvironmentSession:
     def report(self, report) -> dict[str, Any]:
         return self._harness.store.report(self._session_id, self._harness._access, report)
 
-    def artifact(self, data: bytes, *, audience=(), media_type="application/octet-stream"):
+    def artifact(
+        self,
+        data: bytes,
+        *,
+        audience=(),
+        media_type="application/octet-stream",
+        operation_id=None,
+    ):
         return self._harness.store.artifact(
             self._session_id,
             self._harness._access,
             data,
             audience=audience,
             media_type=media_type,
+            operation_id=operation_id,
         )
 
     def read_artifact(self, key: str):

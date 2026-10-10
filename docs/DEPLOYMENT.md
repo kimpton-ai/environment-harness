@@ -239,6 +239,30 @@ operator must qualify at least:
 - worker shutdown before tenant erasure; and
 - live acceptance tests for the chosen infrastructure.
 
+Hosted artifact accounting is an explicit opt-in. A hosted composition must construct
+`PostgresEvidenceStore` with `require_hosted_artifact_budget=True`, or durably call
+`require_hosted_artifact_budget_for(environment_id)` for each new host-selected session before
+initialization, and install a frozen `HostedArtifactBudget` before exposing that session to
+execution. The per-environment marker survives process restarts and makes missing-budget access
+fail closed, while preserving legacy behavior for existing unmarked sessions. The host binds that
+budget to the stored manifest digest and the persisted session, retention, and cleanup deadlines. The budget
+durably reserves provider attempts before I/O, including ambiguous retries, and uses stable
+operation IDs so a repeated write targets the same object key. It also charges bounded GET,
+inventory, delete, and control-response envelopes. Existing local and legacy hosted compositions
+retain their prior behavior unless they enable this requirement.
+
+Budgeted erasure fences new artifact I/O and deletes only keys under the exact session prefix.
+Unknown writes keep erasure pending until the host supplies a digest of genuine artifact-gateway
+quiescence evidence. Stopping the supplier process alone is not sufficient because an artifact
+gateway request may still be active. A finite request and byte budget does not bound storage rent
+for an orphaned object if the provider retains it beyond cleanup, so do not treat this mechanism as
+an all-in cost guarantee or mark cleanup complete without a confirmed empty inventory.
+
+Hosted branching requires an independently frozen child artifact budget. The child remains hidden
+while checkpoint artifacts are copied; source reads and child writes are separately accounted, and
+recovery resumes the same journaled copy operations. A branch without a trusted child envelope is
+refused in required-budget mode.
+
 See [Protocol](PROTOCOL.md), [Coordinated persistent sessions](coordinated-sessions.md), and
 [Adapters](ADAPTERS.md) for the existing contracts.
 

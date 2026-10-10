@@ -1,8 +1,18 @@
 # Release scope
 
-EnvironmentHarness 0.3.0 focuses on local persistent sessions and recorded evidence. The SDK also supports typed scenario snapshots, bounded local experiment concurrency, deterministic scenario/trial seeds, durable experiment status and resumable authenticated activity feeds. The synthetic examples exercise shared state, participant-specific observations, changing rewards, versioned score history, an attributed malformed-action finding, artifacts, explicit checkpoints, isolated branches, agent execution and JSONL export. The command line lists, shows and renders turn-grouped timelines of recorded environments; the read-only viewer presents the same evidence in a browser. Both run locally without a model account.
+EnvironmentHarness 0.4.0rc1 focuses on hosted artifact operation budgets while retaining the local persistent sessions and recorded evidence in 0.3.0. The SDK also supports typed scenario snapshots, bounded local experiment concurrency, deterministic scenario/trial seeds, durable experiment status and resumable authenticated activity feeds. The synthetic examples exercise shared state, participant-specific observations, changing rewards, versioned score history, an attributed malformed-action finding, artifacts, explicit checkpoints, isolated branches, agent execution and JSONL export. The command line lists, shows and renders turn-grouped timelines of recorded environments; the read-only viewer presents the same evidence in a browser. Both run locally without a model account.
 
 The package includes an authenticated supplier HTTP service, typed Python/TypeScript clients, generated JSON schemas and optional adapters. The [adapter table](ADAPTERS.md) records their boundaries. A packaged integration is not proof that its upstream service or cloud backend has been qualified.
+
+## 0.4.0rc1 scope
+
+This candidate adds opt-in, durable hosted artifact operation budgets for PostgreSQL-backed
+environment sessions. A host can require an immutable budget before session execution; provider
+attempts, transfer bytes, branch copies, and exact-prefix cleanup are journaled against it.
+Migrations `007` and `008` add the required storage. Legacy sessions retain their existing artifact
+behavior unless the host marks them as budget-required. See [Deployment](DEPLOYMENT.md) for the
+host integration contract and cleanup limits. This candidate does not qualify a production hosted
+service.
 
 ## 0.3.0 scope
 
