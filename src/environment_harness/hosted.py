@@ -1054,12 +1054,13 @@ class PostgresEvidenceStore(EvidenceStore):
                 if row is None:
                     raise Conflict("tenant erasure target changed")
                 budget = self._hosted_artifact_budget(db, row)
+                budget_required = budget is None and self._budget_required(db, identity)
             if budget is not None:
                 budget_deleted += self._purge_budgeted_environment(
                     identity,
                     provider_quiescence_sha256=provider_quiescence_sha256,
                 )
-            elif self._budget_required(db, identity):
+            elif budget_required:
                 raise Conflict("hosted session is missing its immutable artifact budget")
         with self.transaction() as db:
             rows = db.execute(
