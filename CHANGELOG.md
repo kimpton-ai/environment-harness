@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.0 - 2026-10-10
+
 ### Breaking changes
 
 - **The public four-role authorization model is removed.** `Principal`,
@@ -91,6 +93,8 @@
 
 ### Fixed
 
+- The release lockfile now selects PettingZoo 1.27.0 for Python 3.13 compatibility and patched
+  `fsspec`, `multidict`, `PyJWT`, and `urllib3` versions for the all-extras security audit.
 - Three unreachable guards are removed rather than left to read as protection they cannot provide:
   a `Checkpoint` continuation-state check that its own required field already enforced, a duplicate
   16 MiB artifact bound the request middleware applies first, and a third copy of
