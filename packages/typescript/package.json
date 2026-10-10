@@ -22,7 +22,7 @@
     "test": "npm run build && node --experimental-test-coverage --test --test-coverage-lines=90 --test-coverage-branches=80 tests/*.test.mjs"
   },
   "devDependencies": {
-    "typescript": "5.9.3"
+    "typescript": "7.0.2"
   },
   "license": "MIT",
   "engines": {
