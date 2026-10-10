@@ -56,6 +56,14 @@ Use a release candidate when the release needs real installation and integration
 the stable version. PyPI prereleases are immutable production-PyPI releases, but ordinary
 `pip install environment-harness` does not select them.
 
+### `0.4.0rc1` candidate
+
+The next release line adds opt-in hosted artifact operation budgets and PostgreSQL migrations
+`007` and `008`. Publish the reviewed `0.3.0` final release before tagging this candidate. Keep
+the `0.3.0` manifest below as the record of that stable release; the candidate's new behavior and
+remaining hosted qualification limits are in [Release scope](STATUS.md) and
+[Deployment](DEPLOYMENT.md).
+
 ### Frozen `0.3.0rc1` manifest
 
 The trajectory-contract program uses exactly one coordinated candidate, `0.3.0rc1`, followed by
@@ -206,16 +214,15 @@ python scripts/release_version.py validate --release-tag vX.Y.ZrcN
 ```sh
 make setup
 make viewer
-make check
-npm run typecheck --prefix packages/typescript
 make build
+make check
 make security
 ```
 
+`make build` creates and validates the wheel, source distribution, and TypeScript tarball.
 `make check` runs Python tests, coverage gates, Ruff, Pyright, schema and OpenAPI drift checks,
-viewer drift, browser UI checks, and TypeScript tests. `make build` creates and validates the wheel,
-source distribution, and TypeScript tarball. `make security` performs the full repository policy,
-dependency, and audit checks.
+viewer drift, browser UI checks, TypeScript tests, and repository checks against those built artifacts.
+`make security` performs the full repository policy, dependency, and audit checks.
 
 ### The fresh-environment walkthrough
 
@@ -348,9 +355,10 @@ python scripts/release_version.py prepare --final
 ```
 
 This removes the prerelease suffix and moves the accumulated notes to a dated final-version
-heading. Validate, check, review, merge, tag, approve, and verify the final release through the same
-process. A direct stable release remains available with `prepare --bump ...` when staging is not
-needed.
+heading. A final version is selected by ordinary `pip install`; it does not extend the supported
+deployment boundaries in [Release scope](STATUS.md). Validate, check, review, merge, tag, approve,
+and verify the final release through the same process. A direct stable release remains available
+with `prepare --bump ...` when staging is not needed.
 
 ## Failure handling
 

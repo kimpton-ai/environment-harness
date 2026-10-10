@@ -1,16 +1,25 @@
 # Release scope
 
-EnvironmentHarness 0.4.0rc1 focuses on local persistent sessions and recorded evidence. The SDK also supports typed scenario snapshots, bounded local experiment concurrency, deterministic scenario/trial seeds, durable experiment status and resumable authenticated activity feeds. The synthetic examples exercise shared state, participant-specific observations, changing rewards, versioned score history, an attributed malformed-action finding, artifacts, explicit checkpoints, isolated branches, agent execution and JSONL export. The command line lists, shows and renders turn-grouped timelines of recorded environments; the read-only viewer presents the same evidence in a browser. Both run locally without a model account.
+EnvironmentHarness 0.4.0rc1 builds on the local persistent sessions and recorded evidence in 0.3.0. The SDK also supports typed scenario snapshots, bounded local experiment concurrency, deterministic scenario/trial seeds, durable experiment status and resumable authenticated activity feeds. The synthetic examples exercise shared state, participant-specific observations, changing rewards, versioned score history, an attributed malformed-action finding, artifacts, explicit checkpoints, isolated branches, agent execution and JSONL export. The command line lists, shows and renders turn-grouped timelines of recorded environments; the read-only viewer presents the same evidence in a browser. Both run locally without a model account.
 
 The package includes an authenticated supplier HTTP service, typed Python/TypeScript clients, generated JSON schemas and optional adapters. The [adapter table](ADAPTERS.md) records their boundaries. A packaged integration is not proof that its upstream service or cloud backend has been qualified.
 
-## Unreleased 0.3.0rc1 scope
+## 0.4.0rc1 scope
 
-Commit `43346e7` is the landed implementation baseline for the trajectory program, not proof that
-the contract is qualified. The following corrections have landed on top of it and are tracked as
-implemented; the release candidate is not cut until the remaining items below are complete.
+This candidate adds opt-in, durable hosted artifact operation budgets for PostgreSQL-backed
+environment sessions. A host can require an immutable budget before session execution; provider
+attempts, transfer bytes, branch copies, and exact-prefix cleanup are journaled against it.
+Migrations `007` and `008` add the required storage. Legacy sessions retain their existing artifact
+behavior unless the host marks them as budget-required. See [Deployment](DEPLOYMENT.md) for the
+host integration contract and cleanup limits. This candidate does not qualify a production hosted
+service.
 
-Landed since the baseline:
+## 0.3.0 scope
+
+`0.3.0` finalizes the published `0.3.0rc1` contract. The package set and public feature surface are
+unchanged. The release checks include an installed-wheel walkthrough of the public journey.
+
+The release includes:
 
 - **Authorization boundary.** `Principal` and the public four-role model are removed. A remote
   caller sends only an opaque bearer credential and the server resolves it to one of three fixed
@@ -55,40 +64,10 @@ Landed since the baseline:
   entitlement. It is a required check, not a manual procedure. See
   [Release process](RELEASING.md#the-fresh-environment-walkthrough).
 
-Remaining before the candidate:
-
-- The `0.3.0rc1` version bump, through the *Prepare release pull request* workflow on its own
-  `release/` branch merged last.
-
-The candidate manifest is frozen: see
-[Frozen `0.3.0rc1` manifest](RELEASING.md#frozen-030rc1-manifest) for the exact package set,
-runtime, public surface, wire contracts, generated artifacts, migrations, and exclusions that will
-be published, and the [downstream-impact appendix](RELEASING.md#downstream-impact-appendix) for
-every breaking change and its migration.
-
-Explicitly outside the candidate manifest: Parquet export, RLlib conversion and external-environment
-support, TRL integration, live OpenEnv training, remote training workers, and the separately owned
-**Pluggable Decision-Selection Seam**. The trajectory foundation has no dependency on any of them.
-
-## Unreleased trajectory scope
-
-The next candidate adds the `environmentharness.dev/v1alpha1` portable resource family. Native and
-namespaced historical journals share one trajectory listing, segmented causal record view,
-immutable snapshot/export path, and read-only viewer. Historical ingestion is explicitly configured
-and source health keeps acknowledgement, backlog, gaps, and capture failures distinct from
-execution, termination, and verified outcome.
-
-Training-entitled terminal trajectories can be frozen into immutable datasets. Reward
-supersession chains are validated, inference detail spills to restricted artifacts when necessary,
-and explicitly injected local training integrations record immutable receipts. The HTTP service
-never executes trainer code. The bounded Verifiers legacy bridge is qualified separately against
-`>=0.3.1,<0.4` and consumes canonical trajectories.
-
-The candidate manifest does not include RLlib, TRL, live OpenEnv training, Parquet, managed jobs,
-remote training workers, or the independently owned **Pluggable Decision-Selection Seam** unless
-those complete before manifest freeze. The trajectory foundation has no dependency on those
-packages. See [Trajectories](TRAJECTORIES.md), [Training](TRAINING.md), and
-[Compatibility](COMPATIBILITY.md).
+The [frozen candidate manifest](RELEASING.md#frozen-030rc1-manifest) defines the coordinated
+artifacts, contracts, and exclusions. The [downstream-impact appendix](RELEASING.md#downstream-impact-appendix)
+lists every breaking change and its migration. See [Trajectories](TRAJECTORIES.md),
+[Training](TRAINING.md), and [Compatibility](COMPATIBILITY.md) for the supported boundaries.
 
 ## Verified release workflow
 
