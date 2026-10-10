@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "environment-harness"
-version = "0.3.0rc1"
+version = "0.3.0"
 description = "Durable sessions and evidence for independently implemented AI environments"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -12,7 +12,6 @@ license = "MIT"
 license-files = ["LICENSE"]
 keywords = ["ai-agents", "environments", "evaluation", "experiments"]
 classifiers = [
-  "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3 :: Only",

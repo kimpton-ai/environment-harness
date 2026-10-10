@@ -206,16 +206,15 @@ python scripts/release_version.py validate --release-tag vX.Y.ZrcN
 ```sh
 make setup
 make viewer
-make check
-npm run typecheck --prefix packages/typescript
 make build
+make check
 make security
 ```
 
+`make build` creates and validates the wheel, source distribution, and TypeScript tarball.
 `make check` runs Python tests, coverage gates, Ruff, Pyright, schema and OpenAPI drift checks,
-viewer drift, browser UI checks, and TypeScript tests. `make build` creates and validates the wheel,
-source distribution, and TypeScript tarball. `make security` performs the full repository policy,
-dependency, and audit checks.
+viewer drift, browser UI checks, TypeScript tests, and repository checks against those built artifacts.
+`make security` performs the full repository policy, dependency, and audit checks.
 
 ### The fresh-environment walkthrough
 
@@ -348,9 +347,10 @@ python scripts/release_version.py prepare --final
 ```
 
 This removes the prerelease suffix and moves the accumulated notes to a dated final-version
-heading. Validate, check, review, merge, tag, approve, and verify the final release through the same
-process. A direct stable release remains available with `prepare --bump ...` when staging is not
-needed.
+heading. A final version is selected by ordinary `pip install`; it does not extend the supported
+deployment boundaries in [Release scope](STATUS.md). Validate, check, review, merge, tag, approve,
+and verify the final release through the same process. A direct stable release remains available
+with `prepare --bump ...` when staging is not needed.
 
 ## Failure handling
 
