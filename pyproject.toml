@@ -64,7 +64,7 @@ packages = ["src/environment_harness"]
 
 [tool.hatch.build.targets.sdist]
 include = ["src", "contracts", "docs", "examples", "README.md", "CONTRIBUTING.md", "SECURITY.md", "SUPPORT.md", "CODE_OF_CONDUCT.md", "CHANGELOG.md", "LICENSE", "pyproject.toml", "uv.toml"]
-exclude = ["**/.gitignore", ".context/**", "packages/typescript"]
+exclude = ["**/.gitignore", ".context/**", "packages/typescript", "packages/decision-runtime"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

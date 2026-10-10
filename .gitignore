@@ -6,6 +6,7 @@ __pycache__/
 .coverage
 coverage.json
 coverage.xml
+coverage-*
 *.egg-info/
 dist/
 node_modules/

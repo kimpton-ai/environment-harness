@@ -105,7 +105,8 @@ trajectory foundation. The bounded Verifiers legacy bridge is included and pinne
 
 A separately installable decision runtime keeps its own version and release gate. If it is ever
 added to a manifest it ships in the same candidate/final release event rather than on its own
-timeline. See [Decision runtime](DECISION-RUNTIME.md).
+timeline. See [Decision runtime](DECISION-RUNTIME.md) and
+[Independently versioned decision companion](#independently-versioned-decision-companion).
 
 ### Downstream-impact appendix
 
@@ -387,3 +388,18 @@ Every release pull request must check whether it needs updates to:
 
 Update this guide whenever version rules, artifacts, required checks, approvals, workflow names, or
 publisher configuration change.
+
+## Independently versioned decision companion
+
+`packages/decision-runtime` produces `environment-harness-decisions` with its own version and an
+optional `typesafe` extra. It is outside the coordinated core and TypeScript release and is not
+in the [frozen `0.3.0rc1` manifest](#frozen-030rc1-manifest). Do not publish it through the core
+release workflow; publication requires a separate release request.
+
+- The core source distribution excludes `packages/decision-runtime`, which
+  `scripts/check_decision_distribution.py` asserts against the built archive.
+- That script also installs the core wheel into a clean interpreter, runs a session through
+  `EnvironmentHarness`, and asserts that neither the companion nor `httpx` is importable, then
+  repeats the import check after installing the companion wheel.
+- The `Decision companion` CI job runs the package's own tests, lint, format, and build.
+- Consumers pin a tested immutable repository revision, including the companion subdirectory.
