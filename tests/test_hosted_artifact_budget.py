@@ -243,6 +243,28 @@ def test_hosted_put_charges_before_io_and_recovers_same_key_after_lost_reply(hos
         )
 
 
+def test_unmarked_legacy_session_keeps_artifact_read_write_and_erasure(hosted_store):
+    store, objects = hosted_store
+    access = trusted_local("budget-test")
+    environment = SyntheticEnvironment()
+    runtime = _SessionRuntime(store, environment)
+    session = runtime.create(
+        ExperimentSpec(
+            environment=environment.spec,
+            participants=(AgentSpec(id="alice", implementation="synthetic", policy_version="1"),),
+        ),
+        access,
+    )["id"]
+
+    saved = store.artifact(session, access, b"legacy-artifact")
+    assert store.read_artifact(session, access, saved["id"])[0] == b"legacy-artifact"
+    assert f"{session}/{saved['id']}" in objects.values
+
+    result = store.purge_tenant("budget-test", confirm="permanently-delete:budget-test")
+    assert result["status"] == "purged"
+    assert not objects.values
+
+
 def test_hosted_budget_denial_happens_before_provider_request(hosted_store):
     store, objects = hosted_store
     environment, access = _new_session(store)
