@@ -206,7 +206,9 @@ class EnvironmentClient:
         except urllib.error.HTTPError as error:
             raise _service_error(error) from None
         except urllib.error.URLError:
-            raise HarnessError("environment service unavailable; reconcile the artifact key before retrying") from None
+            raise HarnessError(
+                "environment service unavailable; reconcile the artifact key before retrying"
+            ) from None
 
     def credentials(self, session, participant, *, ttl=3600):
         return self.request(

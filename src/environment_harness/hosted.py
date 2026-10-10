@@ -9,7 +9,7 @@ import json
 import re
 import time
 from contextlib import contextmanager
-from typing import cast
+from typing import Callable, cast
 
 from .contracts import HostedArtifactBudget
 from .errors import Conflict, ProviderQuiescenceRequired
@@ -106,26 +106,28 @@ class PostgresEvidenceStore(EvidenceStore):
         budgeted = db.execute(
             "SELECT 1 FROM hosted_artifact_budgets WHERE environment=?", (environment,)
         ).fetchone()
-        host_create_retry = (
-            action == "session.create"
-            and row["revision"] == 0
-            and row["lease_owner"] is None
-        )
+        host_create_retry = action == "session.create" and row["revision"] == 0 and row["lease_owner"] is None
         if budgeted is None and self._budget_required(db, environment) and not host_create_retry:
             raise Conflict("hosted session is missing its immutable artifact budget")
-        if budgeted and db.execute(
-            "SELECT purge_started FROM artifact_budget_usage WHERE environment=?", (environment,)
-        ).fetchone()["purge_started"]:
+        if (
+            budgeted
+            and db.execute(
+                "SELECT purge_started FROM artifact_budget_usage WHERE environment=?", (environment,)
+            ).fetchone()["purge_started"]
+        ):
             raise Conflict("hosted session is fenced for erasure")
         return row
 
     def _budget_required(self, db, environment):
         if self.require_hosted_artifact_budget:
             return True
-        return db.execute(
-            "SELECT 1 FROM hosted_artifact_requirements WHERE environment=?",
-            (environment,),
-        ).fetchone() is not None
+        return (
+            db.execute(
+                "SELECT 1 FROM hosted_artifact_requirements WHERE environment=?",
+                (environment,),
+            ).fetchone()
+            is not None
+        )
 
     def require_hosted_artifact_budget_for(self, environment):
         """Durably mark one host-chosen ID strict before its native initialization.
@@ -281,7 +283,11 @@ class PostgresEvidenceStore(EvidenceStore):
             raise ValueError("exact manifest digest required")
         if any(
             type(deadline) is not int
-            for deadline in (authorized_expires_at, authorized_retention_deadline, authorized_cleanup_deadline)
+            for deadline in (
+                authorized_expires_at,
+                authorized_retention_deadline,
+                authorized_cleanup_deadline,
+            )
         ):
             raise ValueError("authoritative integer deadlines required")
         with self.transaction() as db:
@@ -347,11 +353,14 @@ class PostgresEvidenceStore(EvidenceStore):
                 (environment, environment),
             ).fetchone():
                 raise Conflict("hosted artifact budget must precede session activity")
-            if db.execute(
-                "SELECT 1 FROM artifact_operations WHERE environment=? LIMIT 1", (environment,)
-            ).fetchone() or db.execute(
-                "SELECT 1 FROM artifact_budget_usage WHERE environment=? LIMIT 1", (environment,)
-            ).fetchone():
+            if (
+                db.execute(
+                    "SELECT 1 FROM artifact_operations WHERE environment=? LIMIT 1", (environment,)
+                ).fetchone()
+                or db.execute(
+                    "SELECT 1 FROM artifact_budget_usage WHERE environment=? LIMIT 1", (environment,)
+                ).fetchone()
+            ):
                 raise Conflict("hosted artifact ledger exists without its immutable budget")
             db.execute(
                 "INSERT INTO hosted_artifact_budgets VALUES (?,?,?,?)",
@@ -472,8 +481,12 @@ class PostgresEvidenceStore(EvidenceStore):
                     (key, environment, encode(audience), sha, len(data), media_type),
                 )
                 self.append(
-                    db, environment, row["revision"], "artifact",
-                    {"id": key, "sha256": sha, "size": len(data)}, audience,
+                    db,
+                    environment,
+                    row["revision"],
+                    "artifact",
+                    {"id": key, "sha256": sha, "size": len(data)},
+                    audience,
                 )
                 return {"id": key, "sha256": sha, "size": len(data), "media_type": media_type}
             object_store = self._artifact_store_for_budget(budget)
@@ -499,9 +512,14 @@ class PostgresEvidenceStore(EvidenceStore):
                 (environment, operation_id),
             ).fetchone()
             if prior:
-                if (prior["kind"], prior["object_key"], prior["sha256"], prior["size"], prior["audience"], prior["media_type"]) != (
-                    "put", key, sha, len(data), audience_json, media_type
-                ):
+                if (
+                    prior["kind"],
+                    prior["object_key"],
+                    prior["sha256"],
+                    prior["size"],
+                    prior["audience"],
+                    prior["media_type"],
+                ) != ("put", key, sha, len(data), audience_json, media_type):
                     raise Conflict("hosted artifact idempotency key was reused with different content")
                 if prior["status"] == "committed":
                     return {"id": key, "sha256": sha, "size": len(data), "media_type": media_type}
@@ -540,8 +558,19 @@ class PostgresEvidenceStore(EvidenceStore):
                     "INSERT INTO artifact_operations "
                     "(environment,operation_id,kind,object_key,sha256,size,audience,media_type,status,attempts,attempt_until,created,updated) "
                     "VALUES (?,?,?,?,?,?,?,?,'in_flight',1,?,?,?)",
-                    (environment, operation_id, "put", key, sha, len(data), audience_json, media_type,
-                     now + ARTIFACT_ATTEMPT_LEASE_SECONDS, now, now),
+                    (
+                        environment,
+                        operation_id,
+                        "put",
+                        key,
+                        sha,
+                        len(data),
+                        audience_json,
+                        media_type,
+                        now + ARTIFACT_ATTEMPT_LEASE_SECONDS,
+                        now,
+                        now,
+                    ),
                 )
                 db.execute(
                     "UPDATE artifact_budget_usage SET live_bytes=live_bytes+?,"
@@ -565,6 +594,8 @@ class PostgresEvidenceStore(EvidenceStore):
             raise
         with self.transaction() as db:
             row = self._environment_row(db, environment)
+            if row is None:
+                raise Conflict("hosted artifact target disappeared")
             settled = db.execute(
                 "UPDATE artifact_operations SET status='committed',response_bytes=?,attempt_until=0,updated=? "
                 "WHERE environment=? AND operation_id=? AND attempts=? AND status='in_flight'",
@@ -601,6 +632,8 @@ class PostgresEvidenceStore(EvidenceStore):
         )
 
     def read_artifact(self, environment, access, key, *, operation_id=None, _allow_branch_pending=False):
+        data = b""
+        attempt_number = 0
         with self.transaction() as db:
             row = (
                 super().environment(db, environment, access, "artifact.read")
@@ -661,7 +694,14 @@ class PostgresEvidenceStore(EvidenceStore):
                         "INSERT INTO artifact_operations "
                         "(environment,operation_id,kind,object_key,size,status,attempts,attempt_until,created,updated) "
                         "VALUES (?,?, 'get', ?,0,'in_flight',1,?,?,?)",
-                        (environment, operation_id, artifact["id"], now + ARTIFACT_ATTEMPT_LEASE_SECONDS, now, now),
+                        (
+                            environment,
+                            operation_id,
+                            artifact["id"],
+                            now + ARTIFACT_ATTEMPT_LEASE_SECONDS,
+                            now,
+                            now,
+                        ),
                     )
                 else:
                     db.execute(
@@ -675,14 +715,17 @@ class PostgresEvidenceStore(EvidenceStore):
                     (reserve, environment),
                 )
         if budget is not None:
+            if attempt_number == 0:
+                raise Conflict("hosted artifact read was not reserved")
             try:
                 object_store = self._artifact_store_for_budget(budget)
                 bounded_get = getattr(object_store, "get_bounded", None)
                 if not callable(bounded_get):
                     raise Conflict("hosted artifact adapter lacks bounded reads")
-                data = bounded_get(
-                    f"{environment}/{artifact['id']}", budget.max_object_bytes
-                )
+                response = bounded_get(f"{environment}/{artifact['id']}", budget.max_object_bytes)
+                if not isinstance(response, bytes):
+                    raise Conflict("hosted artifact response must contain bytes")
+                data = response
                 if len(data) > budget.max_object_bytes:
                     raise Conflict("hosted artifact response exceeded its object allowance")
                 if hashlib.sha256(data).hexdigest() != artifact["sha256"]:
@@ -715,6 +758,8 @@ class PostgresEvidenceStore(EvidenceStore):
         delete_batch = getattr(object_store, "delete_batch", None)
         if not callable(list_page) or not callable(delete_batch):
             raise Conflict("hosted artifact adapter lacks bounded cleanup operations")
+        list_page = cast("Callable[..., tuple[dict, int]]", list_page)
+        delete_batch = cast("Callable[..., tuple[dict, int]]", delete_batch)
         list_response_limit = self._control_response_limit("max_list_response_bytes")
         delete_response_limit = self._control_response_limit("max_delete_response_bytes")
         prefix = environment + "/"
@@ -734,12 +779,19 @@ class PostgresEvidenceStore(EvidenceStore):
         with self.transaction() as db:
             self._environment_row(db, environment)
             usage = self._ensure_artifact_usage(db, environment)
-            unresolved_puts = db.execute(
+            unresolved_row = db.execute(
                 "SELECT count(*) FROM artifact_operations WHERE environment=? AND kind='put' "
                 "AND status IN ('in_flight','unknown')",
                 (environment,),
-            ).fetchone()[0]
-            if unresolved_puts and usage["provider_quiescence_sha256"] is None and provider_quiescence_sha256 is None:
+            ).fetchone()
+            if unresolved_row is None:
+                raise Conflict("hosted cleanup operation count is unavailable")
+            unresolved_puts = unresolved_row[0]
+            if (
+                unresolved_puts
+                and usage["provider_quiescence_sha256"] is None
+                and provider_quiescence_sha256 is None
+            ):
                 raise ProviderQuiescenceRequired(
                     "provider quiescence is required to erase unresolved artifact writes"
                 )
@@ -750,6 +802,11 @@ class PostgresEvidenceStore(EvidenceStore):
                     (time.time(), provider_quiescence_sha256, environment),
                 )
         while True:
+            list_attempt_number = 0
+            delete_attempt_number = 0
+            delete_id = ""
+            delete_keys: list[str] = []
+            truncated = False
             with self.transaction() as db:
                 row = self._environment_row(db, environment)
                 if row is None:
@@ -785,8 +842,14 @@ class PostgresEvidenceStore(EvidenceStore):
                             "INSERT INTO artifact_operations "
                             "(environment,operation_id,kind,status,attempts,attempt_until,cursor,created,updated) "
                             "VALUES (?,?, 'purge_list','in_flight',1,?,?,?,?)",
-                            (environment, list_id, now + ARTIFACT_ATTEMPT_LEASE_SECONDS,
-                             usage["purge_cursor"], now, now),
+                            (
+                                environment,
+                                list_id,
+                                now + ARTIFACT_ATTEMPT_LEASE_SECONDS,
+                                usage["purge_cursor"],
+                                now,
+                                now,
+                            ),
                         )
                     else:
                         list_attempt_number = list_op["attempts"] + 1
@@ -814,11 +877,14 @@ class PostgresEvidenceStore(EvidenceStore):
                                 (page["cursor"], environment),
                             )
                             continue
-                        unresolved = db.execute(
+                        unresolved_row = db.execute(
                             "SELECT count(*) FROM artifact_operations WHERE environment=? AND kind='put' "
                             "AND status IN ('in_flight','unknown')",
                             (environment,),
-                        ).fetchone()[0]
+                        ).fetchone()
+                        if unresolved_row is None:
+                            raise Conflict("hosted cleanup operation count is unavailable")
+                        unresolved = unresolved_row[0]
                         usage = self._ensure_artifact_usage(db, environment)
                         if unresolved and usage["provider_quiescence_sha256"] is None:
                             raise Conflict("unresolved artifact writes prevent cleanup completion")
@@ -843,6 +909,8 @@ class PostgresEvidenceStore(EvidenceStore):
                             "SELECT * FROM artifact_operations WHERE environment=? AND operation_id=? FOR UPDATE",
                             (environment, delete_id),
                         ).fetchone()
+                    if delete_op is None:
+                        raise Conflict("hosted cleanup deletion reservation disappeared")
                     if delete_op["status"] == "committed":
                         raise Conflict("hosted cleanup page state is inconsistent")
                     now = time.time()
@@ -855,9 +923,8 @@ class PostgresEvidenceStore(EvidenceStore):
                     if saved_objects != objects:
                         raise Conflict("hosted cleanup page changed before deletion")
                     delete_keys = [item["key"] for item in saved_objects]
-                    if (
-                        len(delete_keys) > PURGE_PAGE_OBJECTS
-                        or any(not isinstance(key, str) or not key.startswith(prefix) for key in delete_keys)
+                    if len(delete_keys) > PURGE_PAGE_OBJECTS or any(
+                        not isinstance(key, str) or not key.startswith(prefix) for key in delete_keys
                     ):
                         raise Conflict("hosted cleanup inventory escaped its exact prefix")
                     self._budget_attempt(
@@ -868,7 +935,10 @@ class PostgresEvidenceStore(EvidenceStore):
                     )
                     if usage["delete_objects"] + len(delete_keys) > budget.max_delete_objects:
                         raise Conflict("hosted cleanup object allowance exhausted")
-                    if usage["cleanup_delete_objects"] + len(delete_keys) > budget.cleanup_reserve.delete_objects:
+                    if (
+                        usage["cleanup_delete_objects"] + len(delete_keys)
+                        > budget.cleanup_reserve.delete_objects
+                    ):
                         raise Conflict("hosted cleanup object reserve exhausted")
                     db.execute(
                         "UPDATE artifact_operations SET status='in_flight',attempts=attempts+1,"
@@ -887,6 +957,8 @@ class PostgresEvidenceStore(EvidenceStore):
                     truncated = page["truncated"]
             try:
                 if action == "list":
+                    if list_attempt_number == 0:
+                        raise Conflict("hosted cleanup listing was not reserved")
                     page, response_bytes = list_page(prefix, cursor=cursor, limit=PURGE_PAGE_OBJECTS)
                     objects = page.get("objects")
                     if (
@@ -896,8 +968,7 @@ class PostgresEvidenceStore(EvidenceStore):
                         or (
                             page.get("cursor") is not None
                             and (
-                                not isinstance(page.get("cursor"), str)
-                                or len(page["cursor"].encode()) > 4096
+                                not isinstance(page.get("cursor"), str) or len(page["cursor"].encode()) > 4096
                             )
                         )
                         or (page["truncated"] and not page.get("cursor"))
@@ -915,32 +986,54 @@ class PostgresEvidenceStore(EvidenceStore):
                             or not 0 <= item["size"] <= budget.max_object_bytes
                             for item in objects
                         )
-                        or len({item["key"] for item in objects if isinstance(item, dict) and isinstance(item.get("key"), str)}) != len(objects)
+                        or len(
+                            {
+                                item["key"]
+                                for item in objects
+                                if isinstance(item, dict) and isinstance(item.get("key"), str)
+                            }
+                        )
+                        != len(objects)
                         or type(response_bytes) is not int
                         or not 0 <= response_bytes <= list_response_limit
                     ):
                         raise Conflict("hosted cleanup inventory response is invalid")
-                    result = {"objects": objects, "cursor": page.get("cursor"), "truncated": page["truncated"]}
+                    result = {
+                        "objects": objects,
+                        "cursor": page.get("cursor"),
+                        "truncated": page["truncated"],
+                    }
                     with self.transaction() as db:
                         self._environment_row(db, environment)
                         usage = self._ensure_artifact_usage(db, environment)
                         inventory_bytes = sum(item["size"] for item in objects)
                         if (
                             usage["purge_inventory_objects"] + len(objects) > budget.max_lifetime_objects
-                            or usage["purge_inventory_bytes"] + inventory_bytes > budget.max_lifetime_uploaded_bytes
+                            or usage["purge_inventory_bytes"] + inventory_bytes
+                            > budget.max_lifetime_uploaded_bytes
                         ):
                             raise Conflict("hosted cleanup inventory exceeds its frozen upload budget")
                         db.execute(
                             "UPDATE artifact_operations SET status='committed',page_result=?,response_bytes=?,"
                             "attempt_until=0,updated=? WHERE environment=? AND operation_id=? "
                             "AND attempts=? AND status='in_flight'",
-                            (encode(result), response_bytes, time.time(), environment, list_id, list_attempt_number),
+                            (
+                                encode(result),
+                                response_bytes,
+                                time.time(),
+                                environment,
+                                list_id,
+                                list_attempt_number,
+                            ),
                         )
-                        if db.execute(
-                            "SELECT 1 FROM artifact_operations WHERE environment=? AND operation_id=? "
-                            "AND attempts=? AND status='committed'",
-                            (environment, list_id, list_attempt_number),
-                        ).fetchone() is None:
+                        if (
+                            db.execute(
+                                "SELECT 1 FROM artifact_operations WHERE environment=? AND operation_id=? "
+                                "AND attempts=? AND status='committed'",
+                                (environment, list_id, list_attempt_number),
+                            ).fetchone()
+                            is None
+                        ):
                             raise Conflict("hosted inventory response belongs to a stale attempt")
                         db.execute(
                             "UPDATE artifact_budget_usage SET purge_inventory_objects=purge_inventory_objects+?,"
@@ -948,6 +1041,8 @@ class PostgresEvidenceStore(EvidenceStore):
                             (len(objects), inventory_bytes, environment),
                         )
                 else:
+                    if delete_attempt_number == 0:
+                        raise Conflict("hosted cleanup deletion was not reserved")
                     ack, response_bytes = delete_batch(prefix, delete_keys)
                     if (
                         not isinstance(ack, dict)
@@ -964,11 +1059,14 @@ class PostgresEvidenceStore(EvidenceStore):
                             "AND attempts=? AND status='in_flight'",
                             (response_bytes, time.time(), environment, delete_id, delete_attempt_number),
                         )
-                        if db.execute(
-                            "SELECT 1 FROM artifact_operations WHERE environment=? AND operation_id=? "
-                            "AND attempts=? AND status='committed'",
-                            (environment, delete_id, delete_attempt_number),
-                        ).fetchone() is None:
+                        if (
+                            db.execute(
+                                "SELECT 1 FROM artifact_operations WHERE environment=? AND operation_id=? "
+                                "AND attempts=? AND status='committed'",
+                                (environment, delete_id, delete_attempt_number),
+                            ).fetchone()
+                            is None
+                        ):
                             raise Conflict("hosted deletion response belongs to a stale attempt")
                         db.execute(
                             "UPDATE artifact_budget_usage SET purge_cursor=?,purge_truncated=?,"
@@ -985,7 +1083,6 @@ class PostgresEvidenceStore(EvidenceStore):
                 )
                 raise
 
-
     def purge_environment_artifacts(self, environment, *, confirm):
         """Erase one expired hosted environment's objects, retaining its evidence rows.
 
@@ -994,7 +1091,11 @@ class PostgresEvidenceStore(EvidenceStore):
         journal available for audit. Ambiguous writes keep the operation pending unless
         the gateway itself has positively reconciled them.
         """
-        if not isinstance(environment, str) or not environment or confirm != "expire-artifacts:" + environment:
+        if (
+            not isinstance(environment, str)
+            or not environment
+            or confirm != "expire-artifacts:" + environment
+        ):
             raise ValueError("exact hosted environment expiry confirmation required")
         with self.transaction() as db:
             row = self._environment_row(db, environment)
@@ -1040,10 +1141,13 @@ class PostgresEvidenceStore(EvidenceStore):
             if any(row["lease_until"] > time.time() for row in rows):
                 raise Conflict("active writer prevents tenant erasure")
             identities = [row["id"] for row in rows]
-            if identities and db.execute(
-                "SELECT 1 FROM hosted_branch_copies WHERE parent=ANY(?) AND status='pending' LIMIT 1",
-                (identities,),
-            ).fetchone():
+            if (
+                identities
+                and db.execute(
+                    "SELECT 1 FROM hosted_branch_copies WHERE parent=ANY(?) AND status='pending' LIMIT 1",
+                    (identities,),
+                ).fetchone()
+            ):
                 raise Conflict("pending hosted branch copy prevents source erasure")
         # Budgeted prefixes are drained one durably journaled provider operation
         # at a time. An exhausted or ambiguous cleanup leaves all metadata intact.
@@ -1218,7 +1322,10 @@ class S3Artifacts:
             not re.fullmatch(r"[a-f0-9]{32}/", prefix)
             or type(limit) is not int
             or not 1 <= limit <= PURGE_PAGE_OBJECTS
-            or (cursor is not None and (not isinstance(cursor, str) or not cursor or len(cursor.encode()) > 4096))
+            or (
+                cursor is not None
+                and (not isinstance(cursor, str) or not cursor or len(cursor.encode()) > 4096)
+            )
         ):
             raise ValueError("bounded exact environment prefix required")
         client = self._single_attempt_client()
@@ -1230,7 +1337,7 @@ class S3Artifacts:
         objects = page.get("Contents", [])
         if not isinstance(objects, list) or len(objects) > limit:
             raise ValueError("invalid storage inventory response")
-        values = [{"key": item["Key"][len(f"{self.prefix}/"):], "size": item["Size"]} for item in objects]
+        values = [{"key": item["Key"][len(f"{self.prefix}/") :], "size": item["Size"]} for item in objects]
         if any(
             not re.fullmatch(re.escape(prefix) + r"[A-Za-z0-9._:-]+(?:/[A-Za-z0-9._:-]+)*", value["key"])
             or len(value["key"].encode()) > 700
@@ -1243,7 +1350,10 @@ class S3Artifacts:
         next_cursor = page.get("NextContinuationToken")
         if (
             type(truncated) is not bool
-            or (truncated and (not isinstance(next_cursor, str) or not next_cursor or len(next_cursor.encode()) > 4096))
+            or (
+                truncated
+                and (not isinstance(next_cursor, str) or not next_cursor or len(next_cursor.encode()) > 4096)
+            )
             or (not truncated and next_cursor is not None)
         ):
             raise ValueError("invalid storage inventory cursor")

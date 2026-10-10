@@ -12,6 +12,7 @@ from jsonschema import Draft202012Validator
 from .contracts import Action, ExperimentSpec, Transition
 from .errors import Conflict, Forbidden, Unsupported
 from .history import inherit
+from .hosted import PostgresEvidenceStore
 from .operations import environment_operations
 from .store import EvidenceStore, digest, encode, uid
 
@@ -1003,13 +1004,9 @@ class _SessionRuntime:
         authorized_cleanup_deadline,
     ):
         """Create a private child and resume journaled source-to-child copies."""
-        install_budget = getattr(self.store, "install_hosted_artifact_budget", None)
-        read_artifact = getattr(self.store, "read_artifact", None)
-        write_branch_artifact = getattr(self.store, "branch_artifact", None)
+        store = self.store
         if (
-            not callable(install_budget)
-            or not callable(read_artifact)
-            or not callable(write_branch_artifact)
+            not isinstance(store, PostgresEvidenceStore)
             or hosted_artifact_budget is None
             or new_environment is None
             or any(
@@ -1029,7 +1026,7 @@ class _SessionRuntime:
 
         with self.store.transaction() as db:
             parent = self.store.environment(db, environment, access, "session.control")
-            if self.store._hosted_artifact_budget(db, parent) is None:
+            if store._hosted_artifact_budget(db, parent) is None:
                 raise Conflict("hosted child copies require a budgeted source session")
             spec = self._compatible(parent)
             if not spec.environment.capabilities.branch:
@@ -1107,7 +1104,7 @@ class _SessionRuntime:
                     (new_environment, environment, saved["hash"], turns, now, now),
                 )
 
-        install_budget(
+        store.install_hosted_artifact_budget(
             new_environment,
             hosted_artifact_budget,
             expected_manifest_sha256=manifest_sha256,
@@ -1127,7 +1124,7 @@ class _SessionRuntime:
                     (new_environment, child_operation_id),
                 ).fetchone()
                 if child_op is not None and child_op["status"] == "committed":
-                    target = self.store._operation_key(new_environment, child_operation_id)
+                    target = store._operation_key(new_environment, child_operation_id)
                     saved_child = db.execute(
                         "SELECT * FROM artifacts WHERE environment=? AND id=?",
                         (new_environment, target),
@@ -1142,10 +1139,14 @@ class _SessionRuntime:
                         raise Conflict("hosted branch copy record does not match its source artifact")
                     aliases[source_id] = target
                     continue
-                if child_op is not None and child_op["status"] == "in_flight" and child_op["attempt_until"] > time.time():
+                if (
+                    child_op is not None
+                    and child_op["status"] == "in_flight"
+                    and child_op["attempt_until"] > time.time()
+                ):
                     raise Conflict("hosted branch artifact copy is still in progress")
             parent_operation_id = f"branch-get:{new_environment}:{operation_suffix}"
-            data, media_type = read_artifact(
+            data, media_type = store.read_artifact(
                 environment,
                 access,
                 source_id,
@@ -1153,7 +1154,7 @@ class _SessionRuntime:
             )
             if hashlib.sha256(data).hexdigest() != source_artifact["sha256"]:
                 raise Conflict("inherited artifact integrity failure")
-            copied = write_branch_artifact(
+            copied = store.branch_artifact(
                 new_environment,
                 access,
                 data,
@@ -1201,7 +1202,14 @@ class _SessionRuntime:
                     "SELECT * FROM events WHERE environment=? AND seq<=? ORDER BY seq",
                     (environment, snapshot["evidence_cursor"]),
                 ).fetchall():
-                    inherit(self.store, db, new_environment, snapshot["revision"], event, spec.policy.max_event_bytes)
+                    inherit(
+                        self.store,
+                        db,
+                        new_environment,
+                        snapshot["revision"],
+                        event,
+                        spec.policy.max_event_bytes,
+                    )
             self.store.append(
                 db,
                 new_environment,

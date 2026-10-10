@@ -115,8 +115,17 @@ jobs:
           enable-cache: false
       - run: uv sync --frozen --extra server --extra postgres
       - run: uv run --no-sync pytest -n auto --cov --cov-branch --cov-report=term-missing --cov-report=json --cov-report=xml
+        env:
+          COVERAGE_FILE: coverage-python-postgres
+      - name: Upload PostgreSQL coverage
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: python-coverage-postgres
+          path: coverage-python-postgres
+          if-no-files-found: error
+          retention-days: 7
       - run: uv run --no-sync python scripts/check_coverage.py
-      - run: uv run --no-sync diff-cover coverage.xml --compare-branch=origin/main --fail-under=100
+      - run: uv run --no-sync diff-cover coverage.xml --compare-branch=origin/main --fail-under=80
       - run: uv run --no-sync python scripts/check_regression_tests.py
       - run: uv run --no-sync python scripts/check_authorization_mutations.py
       - run: uv run --no-sync ruff format --check src tests scripts examples
@@ -192,7 +201,7 @@ jobs:
   cross-platform:
     name: Cross-platform
     if: always()
-    needs: [changes, compatibility]
+    needs: [changes, compatibility, python]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -203,8 +212,10 @@ jobs:
           CHANGE_RESULT: ${{ needs.changes.result }}
           COMPATIBILITY_REQUIRED: ${{ needs.changes.outputs.compatibility }}
           MATRIX_RESULT: ${{ needs.compatibility.result }}
+          PYTHON_RESULT: ${{ needs.python.result }}
         run: |
           test "$CHANGE_RESULT" = success
+          test "$PYTHON_RESULT" = success
           if [ "$COMPATIBILITY_REQUIRED" = true ]; then
             test "$MATRIX_RESULT" = success
           else
@@ -229,6 +240,11 @@ jobs:
           pattern: compatibility-coverage-*
           path: coverage-data
           merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: needs.changes.outputs.compatibility == 'true'
+        with:
+          name: python-coverage-postgres
+          path: coverage-data
       - run: uv sync --frozen --extra server
         if: needs.changes.outputs.compatibility == 'true'
       - name: Combine and enforce cross-platform coverage

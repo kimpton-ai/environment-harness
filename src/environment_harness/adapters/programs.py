@@ -214,11 +214,13 @@ class InstrumentedModel:
             ordinal = call_sequence[0]
             call_sequence[0] = ordinal + 1
             call_id = hashlib.sha256(
-                encode({
-                    "correlation": correlation,
-                    "request_digest": request_digest,
-                    "ordinal": ordinal,
-                }).encode()
+                encode(
+                    {
+                        "correlation": correlation,
+                        "request_digest": request_digest,
+                        "ordinal": ordinal,
+                    }
+                ).encode()
             ).hexdigest()[:32]
         elif correlation is None:
             call_id = uid()

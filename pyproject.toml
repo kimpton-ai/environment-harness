@@ -12,7 +12,6 @@ license = "MIT"
 license-files = ["LICENSE"]
 keywords = ["ai-agents", "environments", "evaluation", "experiments"]
 classifiers = [
-  "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3 :: Only",

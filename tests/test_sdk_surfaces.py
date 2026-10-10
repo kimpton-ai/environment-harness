@@ -535,8 +535,7 @@ def test_postgres_connect_and_migrations_are_scoped_and_immutable(monkeypatch):
     monkeypatch.setattr("importlib.resources.files", lambda _package: resources)
     store.initialize()
     assert not any(
-        isinstance(sql, str) and sql.startswith("CREATE SCHEMA IF NOT EXISTS")
-        for sql, _params in operations
+        isinstance(sql, str) and sql.startswith("CREATE SCHEMA IF NOT EXISTS") for sql, _params in operations
     )
     assert any(sql == b"CREATE TABLE safe(id int)" for sql, _params in operations)
     assert any(

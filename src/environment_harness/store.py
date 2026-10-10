@@ -641,7 +641,14 @@ class EvidenceStore:
             )
 
     def artifact(
-        self, environment, access, data: bytes, audience=(), media_type="application/octet-stream", *, operation_id=None
+        self,
+        environment,
+        access,
+        data: bytes,
+        audience=(),
+        media_type="application/octet-stream",
+        *,
+        operation_id=None,
     ):
         with self.transaction() as db:
             row = self.environment(db, environment, access, "artifact.write")

@@ -4,6 +4,7 @@ import time
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from environment_harness.access import _AccessContext, trusted_local
 from environment_harness.adapters.programs import InstrumentedModel
@@ -119,7 +120,8 @@ def _budget(
         max_delete_attempts=cleanup_deletes,
         max_delete_objects=max_lifetime_objects,
         max_egress_bytes=max_get_attempts * (max_object_bytes + MemoryArtifacts.max_get_overread_bytes),
-        max_control_response_bytes=(max_put_attempts // put_units + cleanup_lists + cleanup_deletes) * 1_052_672,
+        max_control_response_bytes=(max_put_attempts // put_units + cleanup_lists + cleanup_deletes)
+        * 1_052_672,
         cleanup_reserve=ArtifactCleanupReserve(
             list_attempts=cleanup_lists,
             delete_attempts=cleanup_deletes,
@@ -129,6 +131,34 @@ def _budget(
         retention_deadline=now + 600,
         cleanup_deadline=now + 900,
     )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("max_lifetime_uploaded_bytes", 63, "lifetime upload allowance"),
+        ("cleanup_reserve.delete_attempts", 2, "cleanup delete reserve exceeds"),
+        ("cleanup_reserve.list_attempts", 3, "cleanup list reserve exceeds"),
+        ("cleanup_reserve.delete_objects", 3, "cleanup object reserve exceeds"),
+        ("cleanup_reserve.list_attempts", 1, "cannot inventory"),
+        ("cleanup_reserve.delete_attempts", 0, "cannot delete"),
+        ("cleanup_reserve.delete_objects", 1, "every lifetime object"),
+        ("retention_deadline", "expiry", "must follow session expiry"),
+        ("cleanup_deadline", "retention-1", "must cover the retained-data window"),
+    ],
+)
+def test_hosted_budget_rejects_inconsistent_limits(field, value, message):
+    body = _budget().model_dump(mode="json")
+    if value == "expiry":
+        value = body["expires_at"]
+    elif value == "retention-1":
+        value = body["retention_deadline"] - 1
+    if field.startswith("cleanup_reserve."):
+        body["cleanup_reserve"][field.split(".", 1)[1]] = value
+    else:
+        body[field] = value
+    with pytest.raises(ValidationError, match=message):
+        HostedArtifactBudget.model_validate(body)
 
 
 def _new_session(store, budget=None, *, policy=None):
@@ -193,7 +223,9 @@ def test_hosted_put_charges_before_io_and_recovers_same_key_after_lost_reply(hos
     assert replay == saved
     assert [kind for kind, _ in objects.calls] == ["put", "put"]
     with store.transaction() as db:
-        usage = db.execute("SELECT * FROM artifact_budget_usage WHERE environment=?", (environment,)).fetchone()
+        usage = db.execute(
+            "SELECT * FROM artifact_budget_usage WHERE environment=?", (environment,)
+        ).fetchone()
         operation = db.execute(
             "SELECT status,attempts FROM artifact_operations WHERE environment=? AND operation_id=?",
             (environment, "artifact-one"),
@@ -202,10 +234,13 @@ def test_hosted_put_charges_before_io_and_recovers_same_key_after_lost_reply(hos
     assert (operation["status"], operation["attempts"]) == ("committed", 2)
     assert not store._finish_operation(environment, "artifact-one", 1, "unknown")
     with store.transaction() as db:
-        assert db.execute(
-            "SELECT status FROM artifact_operations WHERE environment=? AND operation_id=?",
-            (environment, "artifact-one"),
-        ).fetchone()["status"] == "committed"
+        assert (
+            db.execute(
+                "SELECT status FROM artifact_operations WHERE environment=? AND operation_id=?",
+                (environment, "artifact-one"),
+            ).fetchone()["status"]
+            == "committed"
+        )
 
 
 def test_hosted_budget_denial_happens_before_provider_request(hosted_store):
@@ -261,7 +296,9 @@ def test_hosted_put_charges_fixed_provider_request_units_before_io(hosted_store)
     store.artifact(environment, access, b"payload", operation_id="three-request-put")
 
     with store.transaction() as db:
-        usage = db.execute("SELECT put_attempts FROM artifact_budget_usage WHERE environment=?", (environment,)).fetchone()
+        usage = db.execute(
+            "SELECT put_attempts FROM artifact_budget_usage WHERE environment=?", (environment,)
+        ).fetchone()
     assert usage["put_attempts"] == 3
 
 
@@ -299,14 +336,16 @@ def test_hosted_inference_spills_use_stable_budgeted_artifact_operations(hosted_
 
     model = InstrumentedModel(store, environment, principal, generate, capture_content=True)
     for _ in range(2):
-        with inference_context({
-            "agent_operation_id": "durable-agent-work-1",
-            "observation_id": "observation-1",
-            "participant": "alice",
-            "generation": 0,
-            "revision": 0,
-            "_inference_call_sequence": [0],
-        }):
+        with inference_context(
+            {
+                "agent_operation_id": "durable-agent-work-1",
+                "observation_id": "observation-1",
+                "participant": "alice",
+                "generation": 0,
+                "revision": 0,
+                "_inference_call_sequence": [0],
+            }
+        ):
             model.call({"prompt": "request " * 1500})
     with store.transaction() as db:
         operations = db.execute(
@@ -373,14 +412,10 @@ def test_hosted_expiry_purges_one_prefix_and_retains_evidence(hosted_store, monk
     original_time = time.time
     monkeypatch.setattr("environment_harness.hosted.time.time", lambda: original_time() + 500)
     with pytest.raises(Conflict, match="retention has not expired"):
-        store.purge_environment_artifacts(
-            environment, confirm="expire-artifacts:" + environment
-        )
+        store.purge_environment_artifacts(environment, confirm="expire-artifacts:" + environment)
 
     monkeypatch.setattr("environment_harness.hosted.time.time", lambda: original_time() + 700)
-    result = store.purge_environment_artifacts(
-        environment, confirm="expire-artifacts:" + environment
-    )
+    result = store.purge_environment_artifacts(environment, confirm="expire-artifacts:" + environment)
     assert result == {
         "schema_version": "hosted-artifact-expiry.v1",
         "environment": environment,
@@ -409,9 +444,7 @@ def test_hosted_expiry_keeps_unknown_gateway_put_pending(hosted_store, monkeypat
     monkeypatch.setattr("environment_harness.hosted.time.time", lambda: original_time() + 700)
 
     with pytest.raises(Conflict, match="provider quiescence is required"):
-        store.purge_environment_artifacts(
-            environment, confirm="expire-artifacts:" + environment
-        )
+        store.purge_environment_artifacts(environment, confirm="expire-artifacts:" + environment)
     assert any(key.startswith(environment + "/") for key in objects.values)
     with store.transaction() as db:
         usage = db.execute(
@@ -497,17 +530,19 @@ def test_hosted_branch_installs_child_budget_and_recovers_stable_artifact_copy(h
             (child,),
         ).fetchone()
         parent_get = db.execute(
-            "SELECT attempts,status FROM artifact_operations "
-            "WHERE environment=? AND kind='get'",
+            "SELECT attempts,status FROM artifact_operations WHERE environment=? AND kind='get'",
             (environment,),
         ).fetchone()
         child_put = db.execute(
-            "SELECT attempts,status,sha256,size FROM artifact_operations "
-            "WHERE environment=? AND kind='put'",
+            "SELECT attempts,status,sha256,size FROM artifact_operations WHERE environment=? AND kind='put'",
             (child,),
         ).fetchone()
     assert intent["status"] == "completed"
-    assert (child_usage["put_attempts"], child_usage["lifetime_uploaded_bytes"], child_usage["lifetime_objects"]) == (
+    assert (
+        child_usage["put_attempts"],
+        child_usage["lifetime_uploaded_bytes"],
+        child_usage["lifetime_objects"],
+    ) == (
         2,
         len(b"branch-payload"),
         1,
@@ -524,6 +559,100 @@ def test_hosted_branch_installs_child_budget_and_recovers_stable_artifact_copy(h
     )
     assert (child_put["sha256"], child_put["size"]) == (source_row["sha256"], source_row["size"])
     assert child_usage["control_response_bytes"] == 2 * MemoryArtifacts.max_put_response_bytes
+
+
+def test_hosted_branch_reuses_committed_copy_after_finalization_failure(hosted_store, monkeypatch):
+    store, objects = hosted_store
+    environment, access = _new_session(
+        store, _budget(max_lifetime_objects=3, max_put_attempts=3, max_get_attempts=2)
+    )
+    source = store.artifact(environment, access, b"branch-payload", operation_id="source-artifact")
+    runtime = _SessionRuntime(store, SyntheticEnvironment())
+    lease = runtime.lease(environment, access, "checkpoint", ttl=30)
+    checkpoint = runtime.checkpoint(environment, access, lease)["id"]
+    runtime.release(environment, access, lease)
+    child = uuid4().hex
+    child_budget = _budget(max_lifetime_objects=2, max_put_attempts=2, max_get_attempts=1)
+    request = {
+        "new_environment": child,
+        "hosted_artifact_budget": child_budget,
+        "authorized_expires_at": child_budget.expires_at,
+        "authorized_retention_deadline": child_budget.retention_deadline,
+        "authorized_cleanup_deadline": child_budget.cleanup_deadline,
+    }
+
+    import environment_harness.runtime as runtime_module
+
+    original_inherit = runtime_module.inherit
+
+    def fail_finalization(*_args, **_kwargs):
+        raise RuntimeError("simulated branch finalization failure")
+
+    monkeypatch.setattr(runtime_module, "inherit", fail_finalization)
+    with pytest.raises(RuntimeError, match="finalization failure"):
+        runtime.branch(environment, access, checkpoint, {}, **request)
+    with pytest.raises(Conflict, match="not yet exposed"):
+        runtime.get(child, access)
+    provider_calls = list(objects.calls)
+
+    monkeypatch.setattr(runtime_module, "inherit", original_inherit)
+    assert runtime.branch(environment, access, checkpoint, {}, **request)["id"] == child
+    assert objects.calls == provider_calls
+    assert store.read_artifact(child, access, source["id"])[0] == b"branch-payload"
+
+
+def test_hosted_branch_requires_authorized_child_envelope(hosted_store):
+    store, _ = hosted_store
+    environment, access = _new_session(store)
+    runtime = _SessionRuntime(store, SyntheticEnvironment())
+    budget = _budget()
+    deadlines = {
+        "authorized_expires_at": budget.expires_at,
+        "authorized_retention_deadline": budget.retention_deadline,
+        "authorized_cleanup_deadline": budget.cleanup_deadline,
+    }
+
+    with pytest.raises(Conflict, match="independently authorized child artifact budget"):
+        runtime.branch(environment, access, "checkpoint", {})
+    with pytest.raises(Conflict, match="frozen child artifact envelope"):
+        runtime.branch(
+            environment,
+            access,
+            "checkpoint",
+            {},
+            new_environment=uuid4().hex,
+            hosted_artifact_budget=budget,
+            authorized_cleanup_deadline=None,
+            authorized_expires_at=budget.expires_at,
+            authorized_retention_deadline=budget.retention_deadline,
+        )
+    with pytest.raises(ValueError, match="invalid branch ID"):
+        runtime.branch(
+            environment,
+            access,
+            "checkpoint",
+            {},
+            new_environment="invalid",
+            hosted_artifact_budget=budget,
+            **deadlines,
+        )
+    unbudgeted = runtime.create(
+        ExperimentSpec(
+            environment=SyntheticEnvironment().spec,
+            participants=(AgentSpec(id="alice", implementation="synthetic", policy_version="1"),),
+        ),
+        access,
+    )["id"]
+    with pytest.raises(Conflict, match="budgeted source session"):
+        runtime.branch(
+            unbudgeted,
+            access,
+            "checkpoint",
+            {},
+            new_environment=uuid4().hex,
+            hosted_artifact_budget=budget,
+            **deadlines,
+        )
 
 
 def test_hosted_branch_quota_denial_happens_before_parent_read(hosted_store):

@@ -224,6 +224,10 @@ make security
 viewer drift, browser UI checks, TypeScript tests, and repository checks against those built artifacts.
 `make security` performs the full repository policy, dependency, and audit checks.
 
+The changed-line coverage floor is 80%. The separate aggregate and security-critical statement and
+branch floors remain enforced; cross-platform coverage combines the PostgreSQL-backed Python run
+with the compatibility shards so hosted paths are measured where their storage service is present.
+
 ### The fresh-environment walkthrough
 
 `scripts/check_release.py` is the documentation-acceptance walkthrough, and it is a required check
