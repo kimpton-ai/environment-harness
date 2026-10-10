@@ -227,6 +227,7 @@ viewer drift, browser UI checks, TypeScript tests, and repository checks against
 The changed-line coverage floor is 80%. The separate aggregate and security-critical statement and
 branch floors remain enforced; cross-platform coverage combines the PostgreSQL-backed Python run
 with the compatibility shards so hosted paths are measured where their storage service is present.
+Post-merge coverage publication also runs against PostgreSQL before enforcing the aggregate floors.
 
 ### The fresh-environment walkthrough
 
